@@ -1,0 +1,12 @@
+streamlit
+opencv-python-headless
+torch
+torchvision
+google-cloud-vision
+google-cloud-translate
+gTTS
+pygame
+numpy
+pandas
+matplotlib
+Pillow
