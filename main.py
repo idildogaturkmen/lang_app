@@ -516,17 +516,35 @@ def get_audio_html(audio_bytes):
 @st.cache_resource
 def load_model():
     try:
-        # Import ultralytics directly
-        from ultralytics import YOLO
-        
-        # Load a pretrained YOLOv8 model
-        model = YOLO('yolov8n.pt')
+        # Use torch hub directly with the original yolov5 repository
+        model = torch.hub.load('ultralytics/yolov5', 'yolov5s', source='github', force_reload=True)
+        model.eval()
         return model
     except Exception as e:
         st.error(f"Error loading object detection model: {e}")
-        # Return a dummy model
-        # [rest of your dummy model code]
+        # Return a dummy model that won't cause NoneType errors
+        class DummyModel:
+            def __init__(self):
+                self.names = {0: 'unknown'}
+                
+            def __call__(self, image):
+                # Return a result object with the expected structure
+                class DummyResults:
+                    def __init__(self):
+                        self.xyxy = [[]]
+                        self.names = {0: 'unknown'}
+                    
+                    def render(self):
+                        # Return a copy of the input image as a numpy array
+                        if isinstance(image, np.ndarray):
+                            return [image.copy()]
+                        else:
+                            return [np.array(image)]
+                
+                return DummyResults()
         
+        return DummyModel()
+
 # Object detection function
 def detect_objects(image, confidence_threshold=0.5):
     try:
