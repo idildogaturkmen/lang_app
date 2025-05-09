@@ -516,21 +516,17 @@ def get_audio_html(audio_bytes):
 @st.cache_resource
 def load_model():
     try:
-        model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
-        model.eval()
+        # Import ultralytics directly
+        from ultralytics import YOLO
+        
+        # Load a pretrained YOLOv8 model
+        model = YOLO('yolov8n.pt')
         return model
     except Exception as e:
         st.error(f"Error loading object detection model: {e}")
         # Return a dummy model
-        class DummyModel:
-            def __call__(self, image):
-                return type('obj', (object,), {
-                    'xyxy': [[]],
-                    'render': lambda: [np.zeros((300, 300, 3), dtype=np.uint8)],
-                    'names': {0: 'unknown'}
-                })
-        return DummyModel()
-
+        # [rest of your dummy model code]
+        
 # Object detection function
 def detect_objects(image, confidence_threshold=0.5):
     try:
@@ -850,7 +846,7 @@ def check_answer(selected_index):
     return is_correct
 
 # Main sidebar for navigation
-st.sidebar.title("🌍 Language Learning App")
+st.sidebar.title("🌍 Vocam")
 app_mode = st.sidebar.selectbox(
     "Choose a mode",
     ["Camera Mode", "My Vocabulary", "Quiz Mode", "Statistics"]
@@ -912,13 +908,21 @@ if app_mode == "Camera Mode":
         if picture is not None:
             image = Image.open(picture)
     
+    confidence_threshold = st.slider(
+    "Detection Confidence Threshold", 
+    min_value=0.2, 
+    max_value=0.9, 
+    value=0.4,  # Lower default threshold to detect more objects
+    step=0.05
+    )
+    
     # Process image if available
     if image is not None:
         st.image(image, caption="Uploaded Image", use_column_width=True)
         
         with st.spinner("Detecting objects..."):
             # Perform object detection
-            detections, result_image = detect_objects(image)
+            detections, result_image = detect_objects(image, confidence_threshold=confidence_threshold)
             
             # Display results
             if detections:
