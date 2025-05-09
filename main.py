@@ -1,186 +1,23 @@
 import streamlit as st
 import os
+import cv2
+import pygame
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import torch
+from PIL import Image
+from io import BytesIO
+from google.cloud import translate_v2 as translate
+from gtts import gTTS
 import base64
 import time
 import sqlite3
 import datetime
-import sys
-import json
-import tempfile
-from PIL import Image
-from io import BytesIO
+from database import LanguageLearningDB
 
-# First, display Python version for debugging
-st.set_page_config(
-    page_title="AI Language Learning App",
-    page_icon="🌍",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-st.sidebar.markdown(f"**Python Version:** {sys.version}")
-
-# Try importing OpenCV with robust fallback mechanism
-try:
-    import cv2
-    st.sidebar.success("OpenCV imported successfully!")
-except ImportError as e:
-    st.sidebar.error(f"Failed to import OpenCV: {e}")
-    # Create dummy CV2 class to prevent crashes
-    class DummyCV2:
-        def __init__(self):
-            pass
-            
-        def __getattr__(self, name):
-            def dummy_method(*args, **kwargs):
-                return None
-            return dummy_method
-            
-        def cvtColor(self, *args, **kwargs):
-            return args[0]  # Return the input image unchanged
-            
-        @staticmethod
-        def imread(path):
-            try:
-                from PIL import Image
-                import numpy as np
-                img = Image.open(path)
-                return np.array(img)
-            except Exception:
-                return None
-                
-        @staticmethod
-        def imwrite(path, img):
-            try:
-                from PIL import Image
-                import numpy as np
-                Image.fromarray(img).save(path)
-                return True
-            except Exception:
-                return False
-    
-    # Replace cv2 with our dummy implementation
-    cv2 = DummyCV2()
-    st.sidebar.warning("Using fallback implementation for OpenCV. Some features may be limited.")
-
-# Import other dependencies with careful error handling
-try:
-    import torch
-    st.sidebar.success("PyTorch imported successfully!")
-except ImportError as e:
-    st.sidebar.warning(f"PyTorch import failed: {e}. Object detection will be disabled.")
-    # Dummy torch for fallback
-    class DummyTorch:
-        def __init__(self):
-            self.hub = type('obj', (object,), {
-                'load': lambda *args, **kwargs: DummyModel()
-            })
-            
-    class DummyModel:
-        def __call__(self, *args, **kwargs):
-            return type('obj', (object,), {
-                'xyxy': [[]], 
-                'render': lambda: [[np.zeros((300, 300, 3), dtype=np.uint8)]],
-                'names': {0: 'unknown'}
-            })
-            
-        def eval(self):
-            return self
-            
-    torch = DummyTorch()
-
-# Try importing Google Cloud libraries
-try:
-    from google.cloud import translate_v2 as translate
-    st.sidebar.success("Google Cloud Translation imported successfully!")
-except ImportError as e:
-    st.sidebar.warning(f"Google Cloud Translation import failed: {e}. Translation features will be limited.")
-    # Dummy translate for fallback
-    class DummyTranslate:
-        class Client:
-            def __init__(self):
-                pass
-                
-            def translate(self, text, target_language=None):
-                return {"translatedText": f"[Translation to {target_language} would appear here]"}
-    
-    translate = DummyTranslate()
-
-# Try importing gTTS
-try:
-    from gtts import gTTS
-    st.sidebar.success("gTTS imported successfully!")
-except ImportError as e:
-    st.sidebar.warning(f"gTTS import failed: {e}. Text-to-speech features will be limited.")
-    # Create a dummy gTTS class
-    class DummyGTTS:
-        def __init__(self, text="", lang="en", slow=False):
-            self.text = text
-            self.lang = lang
-            
-        def write_to_fp(self, fp):
-            fp.write(b'dummy audio data')
-    
-    gTTS = DummyGTTS
-
-# Import database module with error handling
-try:
-    from database import LanguageLearningDB
-    st.sidebar.success("Database module imported successfully!")
-except ImportError as e:
-    st.sidebar.error(f"Database module import failed: {e}")
-    # Define a basic LanguageLearningDB class for fallback
-    class LanguageLearningDB:
-        def __init__(self, db_path):
-            self.db_path = db_path
-            
-        def start_session(self):
-            return None
-            
-        def end_session(self, session_id, words_studied, words_learned):
-            return True
-
-# Helper function to convert AttrDict to a regular dict recursively
-def convert_to_dict(obj):
-    if isinstance(obj, dict):
-        return {key: convert_to_dict(value) for key, value in obj.items()}
-    elif isinstance(obj, list):
-        return [convert_to_dict(item) for item in obj]
-    else:
-        return obj
-
-# Handle Google Cloud credentials with proper type handling
-try:
-    if 'gcp_service_account' in st.secrets:
-        # Create a temporary file to store credentials
-        credentials_temp = tempfile.NamedTemporaryFile(delete=False, suffix='.json')
-        credentials_path = credentials_temp.name
-        
-        # Get a copy of all secret key-value pairs
-        credentials_dict = {}
-        for key in st.secrets["gcp_service_account"]:
-            credentials_dict[key] = st.secrets["gcp_service_account"][key]
-        
-        # Write the credentials to the temporary file
-        with open(credentials_path, 'w') as f:
-            json.dump(credentials_dict, f)
-        
-        # Set environment variable to point to this file
-        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_path
-        st.sidebar.success("Google Cloud credentials loaded from secrets!")
-    else:
-        # Local development fallback
-        credentials_path = r'C:\Users\HP\Desktop\Senior Proj\credentials.json'
-        if os.path.exists(credentials_path):
-            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_path
-            st.sidebar.success("Google Cloud credentials loaded from local file!")
-        else:
-            st.sidebar.warning("Google Cloud credentials not found. Translation features will be limited.")
-except Exception as e:
-    st.sidebar.error(f"Error setting up Google Cloud credentials: {e}")
+# Add this function AFTER all imports but BEFORE st.set_page_config()
+# Make sure sqlite3 is imported at the top of your file
 
 def create_session_direct():
     """Create a session directly using SQLite."""
@@ -447,7 +284,21 @@ def debug_database():
         except Exception as e:
             st.sidebar.error(f"Database error: {e}")
 
+
+
+
+# Set page configuration
+st.set_page_config(
+    page_title="Vocam",
+    page_icon="🌍",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
 debug_database()
+
+# Setup environment variables for Google Cloud
+os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = r'C:\Users\HP\Desktop\Senior Proj\credentials.json'
 
 # Initialize database
 @st.cache_resource
@@ -508,48 +359,31 @@ def get_audio_html(audio_bytes):
 # Function to load YOLOv5 model
 @st.cache_resource
 def load_model():
-    try:
-        model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
-        model.eval()
-        return model
-    except Exception as e:
-        st.error(f"Error loading object detection model: {e}")
-        # Return a dummy model
-        class DummyModel:
-            def __call__(self, image):
-                return type('obj', (object,), {
-                    'xyxy': [[]],
-                    'render': lambda: [np.zeros((300, 300, 3), dtype=np.uint8)],
-                    'names': {0: 'unknown'}
-                })
-        return DummyModel()
+    model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
+    model.eval()
+    return model
 
 # Object detection function
 def detect_objects(image, confidence_threshold=0.5):
-    try:
-        model = load_model()
-        results = model(image)
-        
-        # Filter by confidence
-        detections = []
-        for detection in results.xyxy[0]:
-            xmin, ymin, xmax, ymax, confidence, class_idx = detection
-            if confidence > confidence_threshold:
-                label = results.names[int(class_idx)]
-                detections.append({
-                    'label': label,
-                    'confidence': float(confidence),
-                    'bbox': [float(xmin), float(ymin), float(xmax), float(ymax)]
-                })
-        
-        return detections, results.render()[0]  # Return detections and rendered image
-    except Exception as e:
-        st.error(f"Object detection error: {e}")
-        # Create a dummy result
-        dummy_image = np.array(image)
-        return [], dummy_image
+    model = load_model()
+    results = model(image)
+    
+    # Filter by confidence
+    detections = []
+    for detection in results.xyxy[0]:
+        xmin, ymin, xmax, ymax, confidence, class_idx = detection
+        if confidence > confidence_threshold:
+            label = results.names[int(class_idx)]
+            detections.append({
+                'label': label,
+                'confidence': float(confidence),
+                'bbox': [float(xmin), float(ymin), float(xmax), float(ymax)]
+            })
+    
+    return detections, results.render()[0]  # Return detections and rendered image
 
 # Start or end learning session
+# Find this function in your app.py and replace it with this improved version
 def manage_session(action):
     """Start or end learning session with improved error handling."""
     if action == "start":
@@ -599,7 +433,7 @@ def manage_session(action):
     
     return False
 
-# Helper function to check if the database is properly set up
+# 3. Add this helper function to check if the database is properly set up
 def check_database_setup():
     """Check if the database is properly set up and try to fix if needed."""
     try:
@@ -955,6 +789,7 @@ if app_mode == "Camera Mode":
                         st.markdown("---")  # Add separator
                 
                 # Add a save button
+                # Add a save button
                 if st.button("Save Selected Objects to Vocabulary", type="primary"):
                     # Auto-start session if needed
                     if st.session_state.session_id is None:
@@ -1163,6 +998,7 @@ elif app_mode == "My Vocabulary":
     else:
         st.info("No vocabulary words found with current filter. Go to Camera Mode to start learning new words!")
 
+
 elif app_mode == "Quiz Mode":
     st.title("🎮 Quiz Mode")
     st.markdown("Test your vocabulary knowledge with interactive quizzes.")
@@ -1187,9 +1023,10 @@ elif app_mode == "Quiz Mode":
     filtered_vocab = [word for word in vocabulary if word['language_translated'] == quiz_lang_code]
     
     # Start quiz button
+    # Start quiz button
     if st.button("Start New Quiz"):
         if start_new_quiz(filtered_vocab, num_questions):
-            st.rerun()
+            st.rerun()  # Changed from st.experimental_rerun()
     
     # Display current quiz question if available
     if st.session_state.current_quiz_word and st.session_state.quiz_options:
@@ -1242,7 +1079,8 @@ elif app_mode == "Quiz Mode":
                     else:
                         # Setup next question
                         setup_new_question(filtered_vocab)
-                    st.rerun()
+                    st.rerun()  # Changed from st.experimental_rerun()
+
             else:
                 # Finish quiz button:
                 if st.button("Finish Quiz"):
@@ -1251,7 +1089,7 @@ elif app_mode == "Quiz Mode":
                     # End session
                     if st.session_state.session_id:
                         manage_session("end")
-                    st.rerun()
+                    st.rerun()  # Changed from st.experimental_rerun()
         
         # Display current score
         st.sidebar.markdown(f"### Current Score: {st.session_state.quiz_score}/{st.session_state.quiz_total}")
@@ -1283,7 +1121,7 @@ elif app_mode == "Quiz Mode":
             st.session_state.quiz_options = []
             st.session_state.quiz_score = 0
             st.session_state.quiz_total = 0
-            st.rerun()
+            st.rerun()  # Changed from st.experimental_rerun()
             
     # If not enough vocabulary, show message
     elif not filtered_vocab or len(filtered_vocab) < 4:
