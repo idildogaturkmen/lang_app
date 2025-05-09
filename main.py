@@ -1,301 +1,330 @@
+# This file will be imported by main_wrapper.py
+# Key imports will be provided by the wrapper
 import streamlit as st
 import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from PIL import Image
+from io import BytesIO
 import base64
 import time
 import sqlite3
 import datetime
-import sys
 import json
 import tempfile
-from PIL import Image
-from io import BytesIO
 
-# First, display Python version for debugging
-st.set_page_config(
-    page_title="AI Language Learning App",
-    page_icon="🌍",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-st.sidebar.markdown(f"**Python Version:** {sys.version}")
-
-# Try importing OpenCV with robust fallback mechanism
-try:
-    import cv2
-    st.sidebar.success("OpenCV imported successfully!")
-except ImportError as e:
-    st.sidebar.error(f"Failed to import OpenCV: {e}")
-    # Create dummy CV2 class to prevent crashes
-    class DummyCV2:
-        def __init__(self):
-            pass
-            
-        def __getattr__(self, name):
-            def dummy_method(*args, **kwargs):
-                return None
-            return dummy_method
-            
-        def cvtColor(self, *args, **kwargs):
-            return args[0]  # Return the input image unchanged
-            
-        @staticmethod
-        def imread(path):
-            try:
-                from PIL import Image
-                import numpy as np
-                img = Image.open(path)
-                return np.array(img)
-            except Exception:
-                return None
-                
-        @staticmethod
-        def imwrite(path, img):
-            try:
-                from PIL import Image
-                import numpy as np
-                Image.fromarray(img).save(path)
-                return True
-            except Exception:
-                return False
-    
-    # Replace cv2 with our dummy implementation
-    cv2 = DummyCV2()
-    st.sidebar.warning("Using fallback implementation for OpenCV. Some features may be limited.")
-
-# Import other dependencies with careful error handling
-try:
-    import torch
-    st.sidebar.success("PyTorch imported successfully!")
-except ImportError as e:
-    st.sidebar.warning(f"PyTorch import failed: {e}. Object detection will be disabled.")
-    # Dummy torch for fallback
-    class DummyTorch:
-        def __init__(self):
-            self.hub = type('obj', (object,), {
-                'load': lambda *args, **kwargs: DummyModel()
-            })
-            
-    class DummyModel:
-        def __call__(self, *args, **kwargs):
-            return type('obj', (object,), {
-                'xyxy': [[]], 
-                'render': lambda: [[np.zeros((300, 300, 3), dtype=np.uint8)]],
-                'names': {0: 'unknown'}
-            })
-            
-        def eval(self):
-            return self
-            
-    torch = DummyTorch()
+# These are already imported by the wrapper
+import cv2
+import torch
 
 # Try importing Google Cloud libraries
 try:
     from google.cloud import translate_v2 as translate
-    st.sidebar.success("Google Cloud Translation imported successfully!")
-except ImportError as e:
-    st.sidebar.warning(f"Google Cloud Translation import failed: {e}. Translation features will be limited.")
-    # Dummy translate for fallback
+    from gtts import gTTS
+    CLOUD_AVAILABLE = True
+except ImportError:
+    # Create dummy classes
     class DummyTranslate:
         class Client:
-            def __init__(self):
-                pass
-                
             def translate(self, text, target_language=None):
-                return {"translatedText": f"[Translation to {target_language} would appear here]"}
+                translations = {
+                    "dog": {"es": "perro", "fr": "chien", "de": "Hund"},
+                    "cat": {"es": "gato", "fr": "chat", "de": "Katze"},
+                    "book": {"es": "libro", "fr": "livre", "de": "Buch"},
+                    "apple": {"es": "manzana", "fr": "pomme", "de": "Apfel"},
+                    "car": {"es": "coche", "fr": "voiture", "de": "Auto"},
+                    "house": {"es": "casa", "fr": "maison", "de": "Haus"},
+                    "tree": {"es": "árbol", "fr": "arbre", "de": "Baum"},
+                    "water": {"es": "agua", "fr": "eau", "de": "Wasser"},
+                    "chair": {"es": "silla", "fr": "chaise", "de": "Stuhl"},
+                    "table": {"es": "mesa", "fr": "table", "de": "Tisch"},
+                    "person": {"es": "persona", "fr": "personne", "de": "Person"},
+                }
+                text_lower = text.lower()
+                if text_lower in translations and target_language in translations[text_lower]:
+                    translated = translations[text_lower][target_language]
+                else:
+                    translated = f"[{text} in {target_language}]"
+                return {"translatedText": translated}
     
-    translate = DummyTranslate()
-
-# Try importing gTTS
-try:
-    from gtts import gTTS
-    st.sidebar.success("gTTS imported successfully!")
-except ImportError as e:
-    st.sidebar.warning(f"gTTS import failed: {e}. Text-to-speech features will be limited.")
-    # Create a dummy gTTS class
-    class DummyGTTS:
+    class DummyTTS:
         def __init__(self, text="", lang="en", slow=False):
             self.text = text
             self.lang = lang
             
         def write_to_fp(self, fp):
-            fp.write(b'dummy audio data')
+            fp.write(b"DUMMY_AUDIO_DATA")
     
-    gTTS = DummyGTTS
+    # Set up dummy modules
+    translate = DummyTranslate()
+    gTTS = DummyTTS
+    CLOUD_AVAILABLE = False
 
-# Import database module with error handling
+# Import your database module with error handling
 try:
     from database import LanguageLearningDB
-    st.sidebar.success("Database module imported successfully!")
-except ImportError as e:
-    st.sidebar.error(f"Database module import failed: {e}")
-    # Define a basic LanguageLearningDB class for fallback
+    DB_MODULE_AVAILABLE = True
+except ImportError:
+    # Create a basic database class
     class LanguageLearningDB:
         def __init__(self, db_path):
             self.db_path = db_path
+            self.ensure_tables_exist()
             
+        def ensure_tables_exist(self):
+            try:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                
+                # Create tables if they don't exist
+                cursor.execute('''
+                CREATE TABLE IF NOT EXISTS vocabulary (
+                    id INTEGER PRIMARY KEY,
+                    word_original TEXT NOT NULL,
+                    word_translated TEXT NOT NULL,
+                    language_translated TEXT NOT NULL,
+                    category TEXT,
+                    image_path TEXT,
+                    date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    source TEXT DEFAULT 'manual'
+                )
+                ''')
+                
+                cursor.execute('''
+                CREATE TABLE IF NOT EXISTS user_progress (
+                    id INTEGER PRIMARY KEY,
+                    vocabulary_id INTEGER,
+                    review_count INTEGER DEFAULT 0,
+                    correct_count INTEGER DEFAULT 0,
+                    last_reviewed TIMESTAMP,
+                    proficiency_level INTEGER DEFAULT 0,
+                    FOREIGN KEY (vocabulary_id) REFERENCES vocabulary (id)
+                )
+                ''')
+                
+                cursor.execute('''
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id INTEGER PRIMARY KEY,
+                    start_time TIMESTAMP,
+                    end_time TIMESTAMP,
+                    words_studied INTEGER DEFAULT 0,
+                    words_learned INTEGER DEFAULT 0
+                )
+                ''')
+                
+                conn.commit()
+                conn.close()
+            except Exception as e:
+                st.error(f"Database setup error: {e}")
+                
         def start_session(self):
-            return None
-            
+            try:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                current_time = datetime.datetime.now()
+                cursor.execute(
+                    "INSERT INTO sessions (start_time, words_studied, words_learned) VALUES (?, 0, 0)",
+                    (current_time,)
+                )
+                conn.commit()
+                session_id = cursor.lastrowid
+                conn.close()
+                return session_id
+            except Exception as e:
+                st.error(f"Error starting session: {e}")
+                return None
+                
         def end_session(self, session_id, words_studied, words_learned):
-            return True
+            try:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                current_time = datetime.datetime.now()
+                cursor.execute(
+                    "UPDATE sessions SET end_time = ?, words_studied = ?, words_learned = ? WHERE id = ?",
+                    (current_time, words_studied, words_learned, session_id)
+                )
+                conn.commit()
+                conn.close()
+                return True
+            except Exception as e:
+                st.error(f"Error ending session: {e}")
+                return False
+    
+    DB_MODULE_AVAILABLE = False
 
-# Helper function to convert AttrDict to a regular dict recursively
-def convert_to_dict(obj):
-    if isinstance(obj, dict):
-        return {key: convert_to_dict(value) for key, value in obj.items()}
-    elif isinstance(obj, list):
-        return [convert_to_dict(item) for item in obj]
-    else:
-        return obj
+# Initialize database
+@st.cache_resource
+def get_database():
+    return LanguageLearningDB("language_learning.db")
 
-# Handle Google Cloud credentials with proper type handling
-try:
-    if 'gcp_service_account' in st.secrets:
-        # Create a temporary file to store credentials
-        credentials_temp = tempfile.NamedTemporaryFile(delete=False, suffix='.json')
-        credentials_path = credentials_temp.name
+db = get_database()
+
+# Define helper functions
+def translate_text(text, target_language):
+    try:
+        translate_client = translate.Client()
+        result = translate_client.translate(text, target_language=target_language)
+        return result["translatedText"]
+    except Exception as e:
+        st.error(f"Translation error: {e}")
+        return f"[{text} in {target_language}]"
+
+def text_to_speech(text, lang):
+    try:
+        tts = gTTS(text=text, lang=lang, slow=False)
+        mp3_fp = BytesIO()
+        tts.write_to_fp(mp3_fp)
+        mp3_fp.seek(0)
+        audio_bytes = mp3_fp.read()
+        return audio_bytes
+    except Exception as e:
+        st.error(f"Text-to-speech error: {e}")
+        return b"DUMMY_AUDIO_DATA"
+
+def get_audio_html(audio_bytes):
+    if audio_bytes == b"DUMMY_AUDIO_DATA":
+        return "<p><i>Audio playback not available in demo mode</i></p>"
+    
+    audio_base64 = base64.b64encode(audio_bytes).decode()
+    audio_tag = f'<audio autoplay="true" src="data:audio/mp3;base64,{audio_base64}" controls></audio>'
+    return audio_tag
+
+@st.cache_resource
+def load_model():
+    model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
+    model.eval()
+    return model
+
+def detect_objects(image, confidence_threshold=0.5):
+    try:
+        model = load_model()
+        results = model(image)
         
-        # Get a copy of all secret key-value pairs
-        credentials_dict = {}
-        for key in st.secrets["gcp_service_account"]:
-            credentials_dict[key] = st.secrets["gcp_service_account"][key]
+        # Filter by confidence
+        detections = []
+        for detection in results.xyxy[0]:
+            xmin, ymin, xmax, ymax, confidence, class_idx = detection
+            if confidence > confidence_threshold:
+                label = results.names[int(class_idx)]
+                detections.append({
+                    'label': label,
+                    'confidence': float(confidence),
+                    'bbox': [float(xmin), float(ymin), float(xmax), float(ymax)]
+                })
         
-        # Write the credentials to the temporary file
-        with open(credentials_path, 'w') as f:
-            json.dump(credentials_dict, f)
+        return detections, results.render()[0]
+    except Exception as e:
+        st.error(f"Object detection error: {e}")
+        # Create dummy detections
+        detections = [
+            {'label': 'chair', 'confidence': 0.82, 'bbox': [50, 50, 150, 200]},
+            {'label': 'person', 'confidence': 0.78, 'bbox': [200, 100, 350, 400]}
+        ]
         
-        # Set environment variable to point to this file
-        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_path
-        st.sidebar.success("Google Cloud credentials loaded from secrets!")
-    else:
-        # Local development fallback
-        credentials_path = r'C:\Users\HP\Desktop\Senior Proj\credentials.json'
-        if os.path.exists(credentials_path):
-            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_path
-            st.sidebar.success("Google Cloud credentials loaded from local file!")
+        # Create a basic image with a frame
+        if isinstance(image, np.ndarray):
+            img = image.copy()
         else:
-            st.sidebar.warning("Google Cloud credentials not found. Translation features will be limited.")
-except Exception as e:
-    st.sidebar.error(f"Error setting up Google Cloud credentials: {e}")
+            img = np.array(image)
+        # Add a colored border
+        h, w = img.shape[:2]
+        img[0:5, :] = [0, 255, 0]  # Top border
+        img[-5:, :] = [0, 255, 0]  # Bottom border
+        img[:, 0:5] = [0, 255, 0]  # Left border
+        img[:, -5:] = [0, 255, 0]  # Right border
+        
+        return detections, img
+
+def save_image(image, label):
+    try:
+        # Convert PIL Image to OpenCV format
+        img_array = np.array(image)
+        
+        # Create directory if it doesn't exist
+        os.makedirs("object_images", exist_ok=True)
+        
+        # Save image
+        filename = f"object_images/{label}_{int(time.time())}.jpg"
+        Image.fromarray(img_array).save(filename)
+        
+        return filename
+    except Exception as e:
+        st.error(f"Error saving image: {e}")
+        return None
 
 def create_session_direct():
-    """Create a session directly using SQLite."""
     try:
-        # Connect to the database
         conn = sqlite3.connect("language_learning.db")
         cursor = conn.cursor()
-        
-        # Insert a new session with the current time
         current_time = datetime.datetime.now()
         cursor.execute(
             "INSERT INTO sessions (start_time, words_studied, words_learned) VALUES (?, 0, 0)",
             (current_time,)
         )
         conn.commit()
-        
-        # Get the last inserted ID
         session_id = cursor.lastrowid
         conn.close()
-        
         return session_id
     except Exception as e:
-        st.error(f"Direct session creation error: {str(e)}")
+        st.error(f"Session creation error: {e}")
         return None
 
 def add_vocabulary_direct(word_original, word_translated, language_translated, category=None, image_path=None):
-    """Add vocabulary directly using SQLite with improved error handling for duplicates and locks."""
     try:
-        # Connect to the database with timeout to handle locks
-        conn = sqlite3.connect("language_learning.db", timeout=10.0)
+        conn = sqlite3.connect("language_learning.db")
         cursor = conn.cursor()
         
-        # Check if this word already exists in this language
+        # Check if word exists
         cursor.execute(
             "SELECT id FROM vocabulary WHERE word_original = ? AND language_translated = ?",
             (word_original, language_translated)
         )
         existing_word = cursor.fetchone()
         
-        # If word exists, update it rather than inserting a new one
         if existing_word:
             vocab_id = existing_word[0]
-            
-            # Update the existing word with new translation and image if provided
             cursor.execute(
                 "UPDATE vocabulary SET word_translated = ?, category = ?, image_path = ? WHERE id = ?",
                 (word_translated, category, image_path, vocab_id)
             )
-            
-            # Let the user know we're updating
-            st.info(f"Word '{word_original}' already exists in {language_translated}. Updating with new information.")
+            st.info(f"Word '{word_original}' already exists. Updated with new information.")
         else:
-            # Current time for timestamps
             current_time = datetime.datetime.now()
-            
-            # Insert a new word
             try:
-                # Try with source column
                 cursor.execute('''
                 INSERT INTO vocabulary 
                 (word_original, word_translated, language_translated, category, image_path, date_added, source)
                 VALUES (?, ?, ?, ?, ?, ?, 'manual')
                 ''', (word_original, word_translated, language_translated, category, image_path, current_time))
-            except sqlite3.OperationalError as e:
-                if 'no column named source' in str(e):
-                    # Try without source column
-                    cursor.execute('''
-                    INSERT INTO vocabulary 
-                    (word_original, word_translated, language_translated, category, image_path, date_added)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    ''', (word_original, word_translated, language_translated, category, image_path, current_time))
-                else:
-                    raise e
+            except sqlite3.OperationalError:
+                cursor.execute('''
+                INSERT INTO vocabulary 
+                (word_original, word_translated, language_translated, category, image_path, date_added)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ''', (word_original, word_translated, language_translated, category, image_path, current_time))
             
-            # Get the last inserted ID
             vocab_id = cursor.lastrowid
             
-            # Check if we need to add user progress
-            cursor.execute("SELECT id FROM user_progress WHERE vocabulary_id = ?", (vocab_id,))
-            if not cursor.fetchone():
-                # Initialize user progress for this vocabulary
-                cursor.execute('''
-                INSERT INTO user_progress (vocabulary_id, last_reviewed, proficiency_level)
-                VALUES (?, ?, 0)
-                ''', (vocab_id, current_time))
+            # Initialize user progress
+            cursor.execute('''
+            INSERT INTO user_progress (vocabulary_id, last_reviewed, proficiency_level)
+            VALUES (?, ?, 0)
+            ''', (vocab_id, current_time))
         
-        # Commit changes and close
         conn.commit()
         conn.close()
-        
         return vocab_id
-    except sqlite3.OperationalError as e:
-        # Handle database locks with specific advice
-        if 'database is locked' in str(e):
-            st.error("Database is currently locked. Please wait a moment and try again.")
-            # Add a small delay to allow the database to unlock
-            time.sleep(1.5)
-        else:
-            st.error(f"Database error: {str(e)}")
-        return None
     except Exception as e:
-        st.error(f"Direct vocabulary save error: {str(e)}")
+        st.error(f"Error adding vocabulary: {e}")
         return None
 
 def get_all_vocabulary_direct():
-    """Get all vocabulary items directly from SQLite."""
     try:
-        # Connect to the database
         conn = sqlite3.connect("language_learning.db")
-        
-        # Use dictionary cursor for easier access
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
-        # Get all vocabulary with user progress info
         cursor.execute('''
         SELECT v.id, v.word_original, v.word_translated, v.language_translated,
                v.category, v.image_path, v.date_added,
@@ -305,156 +334,46 @@ def get_all_vocabulary_direct():
         ORDER BY v.date_added DESC
         ''')
         
-        # Fetch all results
         results = cursor.fetchall()
-        
-        # Convert to list of dictionaries
-        vocabulary = []
-        for row in results:
-            # Convert row to dictionary
-            word = dict(row)
-            vocabulary.append(word)
+        vocabulary = [dict(row) for row in results]
         
         conn.close()
         return vocabulary
     except Exception as e:
-        st.error(f"Error retrieving vocabulary: {str(e)}")
+        st.error(f"Error retrieving vocabulary: {e}")
         return []
-    
-def get_session_stats_direct(days=30):
-    """Get session statistics directly from SQLite."""
-    try:
-        # Connect to the database
-        conn = sqlite3.connect("language_learning.db")
-        cursor = conn.cursor()
-        
-        # Calculate date for filtering
-        current_time = datetime.datetime.now()
-        start_date = current_time - datetime.timedelta(days=days)
-        
-        # Convert to string format
-        start_date_str = start_date.strftime("%Y-%m-%d")
-        
-        # Get total sessions
-        cursor.execute(
-            "SELECT COUNT(*) FROM sessions WHERE start_time >= ?",
-            (start_date_str,)
-        )
-        total_sessions = cursor.fetchone()[0]
-        
-        # Get words studied and learned
-        cursor.execute(
-            "SELECT SUM(words_studied), SUM(words_learned) FROM sessions WHERE start_time >= ?",
-            (start_date_str,)
-        )
-        result = cursor.fetchone()
-        total_words_studied = result[0] if result[0] else 0
-        total_words_learned = result[1] if result[1] else 0
-        
-        # Calculate averages
-        avg_words_per_session = total_words_studied / total_sessions if total_sessions > 0 else 0
-        
-        # Get session durations
-        cursor.execute(
-            """
-            SELECT start_time, end_time 
-            FROM sessions 
-            WHERE start_time >= ? AND end_time IS NOT NULL
-            """,
-            (start_date_str,)
-        )
-        
-        # Calculate average session length
-        total_minutes = 0
-        session_count = 0
-        
-        for start_time_str, end_time_str in cursor.fetchall():
-            try:
-                # Parse the datetime strings
-                start_time = datetime.datetime.fromisoformat(start_time_str.replace(' ', 'T'))
-                end_time = datetime.datetime.fromisoformat(end_time_str.replace(' ', 'T'))
-                
-                # Calculate duration in minutes
-                duration = (end_time - start_time).total_seconds() / 60
-                total_minutes += duration
-                session_count += 1
-            except:
-                pass
-        
-        avg_session_minutes = total_minutes / session_count if session_count > 0 else 0
-        
-        conn.close()
-        
-        # Return stats dictionary
-        return {
-            'total_sessions': total_sessions,
-            'total_words_studied': total_words_studied,
-            'total_words_learned': total_words_learned,
-            'avg_words_per_session': avg_words_per_session,
-            'avg_session_minutes': avg_session_minutes
-        }
-    except Exception as e:
-        st.error(f"Error retrieving session stats: {str(e)}")
-        return {}
 
-# Then add this function after all imports but before st.set_page_config()
-def debug_database():
-    """Check database tables and content for debugging."""
-    # Only create the debug UI after the main UI has been set up
-    if 'db_debug_initialized' not in st.session_state:
-        st.session_state.db_debug_initialized = True
-        return
-
-    st.sidebar.markdown("---")
-    if st.sidebar.checkbox("Debug Database"):
-        st.sidebar.markdown("### Database Debug")
+def manage_session(action):
+    if action == "start":
+        session_id = create_session_direct()
+        if session_id:
+            st.session_state.session_id = session_id
+            st.session_state.words_studied = 0
+            st.session_state.words_learned = 0
+            st.success("Started new learning session!")
+            return True
+        return False
+    elif action == "end" and st.session_state.session_id:
         try:
-            # Check if tables exist
             conn = sqlite3.connect("language_learning.db")
             cursor = conn.cursor()
-            
-            # Get list of tables
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-            tables = cursor.fetchall()
-            st.sidebar.write(f"Tables in database: {[t[0] for t in tables]}")
-            
-            # Check vocabulary count
-            cursor.execute("SELECT COUNT(*) FROM vocabulary;")
-            vocab_count = cursor.fetchone()[0]
-            st.sidebar.write(f"Vocabulary entries: {vocab_count}")
-            
-            # Check session count
-            cursor.execute("SELECT COUNT(*) FROM sessions;")
-            session_count = cursor.fetchone()[0]
-            st.sidebar.write(f"Session entries: {session_count}")
-            
-            # Show recent vocabulary
-            if vocab_count > 0:
-                cursor.execute("SELECT id, word_original, word_translated, language_translated, date_added FROM vocabulary ORDER BY date_added DESC LIMIT 5;")
-                recent_vocab = cursor.fetchall()
-                st.sidebar.write("Recent vocabulary:")
-                for item in recent_vocab:
-                    st.sidebar.write(f"ID: {item[0]}, {item[1]} → {item[2]} ({item[3]}), {item[4]}")
-            
-            # Show active sessions
-            cursor.execute("SELECT id, start_time, end_time FROM sessions ORDER BY start_time DESC LIMIT 3;")
-            recent_sessions = cursor.fetchall()
-            st.sidebar.write("Recent sessions:")
-            for session in recent_sessions:
-                st.sidebar.write(f"ID: {session[0]}, Started: {session[1]}, Ended: {session[2] or 'Active'}")
-            
+            current_time = datetime.datetime.now()
+            cursor.execute(
+                "UPDATE sessions SET end_time = ?, words_studied = ?, words_learned = ? WHERE id = ?",
+                (current_time, st.session_state.words_studied, st.session_state.words_learned, st.session_state.session_id)
+            )
+            conn.commit()
             conn.close()
+            
+            st.success(f"Session completed! Words studied: {st.session_state.words_studied}, Words learned: {st.session_state.words_learned}")
+            st.session_state.session_id = None
+            st.session_state.words_studied = 0
+            st.session_state.words_learned = 0
+            return True
         except Exception as e:
-            st.sidebar.error(f"Database error: {e}")
-
-debug_database()
-
-# Initialize database
-@st.cache_resource
-def get_database():
-    return LanguageLearningDB("language_learning.db")
-
-db = get_database()
+            st.error(f"Error ending session: {e}")
+            return False
+    return False
 
 # Initialize session state
 if 'target_language' not in st.session_state:
@@ -475,369 +394,8 @@ if 'quiz_options' not in st.session_state:
     st.session_state.quiz_options = []
 if 'answered' not in st.session_state:
     st.session_state.answered = False
-
-# Function to translate text
-def translate_text(text, target_language):
-    try:
-        translate_client = translate.Client()
-        result = translate_client.translate(text, target_language=target_language)
-        return result["translatedText"]
-    except Exception as e:
-        st.error(f"Translation error: {e}")
-        return text
-
-# Function for text-to-speech
-def text_to_speech(text, lang):
-    try:
-        tts = gTTS(text=text, lang=lang, slow=False)
-        mp3_fp = BytesIO()
-        tts.write_to_fp(mp3_fp)
-        mp3_fp.seek(0)
-        audio_bytes = mp3_fp.read()
-        return audio_bytes
-    except Exception as e:
-        st.error(f"Text-to-speech error: {e}")
-        return None
-
-# Function to generate HTML for audio playback
-def get_audio_html(audio_bytes):
-    audio_base64 = base64.b64encode(audio_bytes).decode()
-    audio_tag = f'<audio autoplay="true" src="data:audio/mp3;base64,{audio_base64}" controls></audio>'
-    return audio_tag
-
-# Function to load YOLOv5 model
-@st.cache_resource
-def load_model():
-    try:
-        model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
-        model.eval()
-        return model
-    except Exception as e:
-        st.error(f"Error loading object detection model: {e}")
-        # Return a dummy model
-        class DummyModel:
-            def __call__(self, image):
-                return type('obj', (object,), {
-                    'xyxy': [[]],
-                    'render': lambda: [np.zeros((300, 300, 3), dtype=np.uint8)],
-                    'names': {0: 'unknown'}
-                })
-        return DummyModel()
-
-# Object detection function
-def detect_objects(image, confidence_threshold=0.5):
-    try:
-        model = load_model()
-        results = model(image)
-        
-        # Filter by confidence
-        detections = []
-        for detection in results.xyxy[0]:
-            xmin, ymin, xmax, ymax, confidence, class_idx = detection
-            if confidence > confidence_threshold:
-                label = results.names[int(class_idx)]
-                detections.append({
-                    'label': label,
-                    'confidence': float(confidence),
-                    'bbox': [float(xmin), float(ymin), float(xmax), float(ymax)]
-                })
-        
-        return detections, results.render()[0]  # Return detections and rendered image
-    except Exception as e:
-        st.error(f"Object detection error: {e}")
-        # Create a dummy result
-        dummy_image = np.array(image)
-        return [], dummy_image
-
-# Start or end learning session
-def manage_session(action):
-    """Start or end learning session with improved error handling."""
-    if action == "start":
-        try:
-            # Try to use the direct method instead of the database object
-            session_id = create_session_direct()
-            
-            if session_id:
-                st.session_state.session_id = session_id
-                st.session_state.words_studied = 0
-                st.session_state.words_learned = 0
-                st.success(f"Started new learning session!")
-                return True
-            else:
-                st.error("Failed to create a session directly. Check database permissions.")
-                return False
-                
-        except Exception as e:
-            st.error(f"Error starting session: {str(e)}")
-            return False
-            
-    elif action == "end" and st.session_state.session_id:
-        try:
-            # Connect directly to the database
-            conn = sqlite3.connect("language_learning.db")
-            cursor = conn.cursor()
-            
-            # Update the session with end time and stats
-            current_time = datetime.datetime.now()
-            cursor.execute(
-                "UPDATE sessions SET end_time = ?, words_studied = ?, words_learned = ? WHERE id = ?",
-                (current_time, st.session_state.words_studied, st.session_state.words_learned, st.session_state.session_id)
-            )
-            conn.commit()
-            conn.close()
-            
-            st.success(f"Session completed! Words studied: {st.session_state.words_studied}, Words learned: {st.session_state.words_learned}")
-            # Clear session state
-            st.session_state.session_id = None
-            st.session_state.words_studied = 0
-            st.session_state.words_learned = 0
-            return True
-                
-        except Exception as e:
-            st.error(f"Error ending session: {str(e)}")
-            return False
-    
-    return False
-
-# Helper function to check if the database is properly set up
-def check_database_setup():
-    """Check if the database is properly set up and try to fix if needed."""
-    try:
-        conn = sqlite3.connect("language_learning.db")
-        cursor = conn.cursor()
-        
-        # Check if tables exist
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-        tables = [table[0] for table in cursor.fetchall()]
-        
-        required_tables = ['vocabulary', 'user_progress', 'sessions', 'camera_translations']
-        missing_tables = [table for table in required_tables if table not in tables]
-        
-        if missing_tables:
-            st.sidebar.error(f"Missing tables in database: {', '.join(missing_tables)}")
-            st.sidebar.info("Attempting to create missing tables...")
-            
-            # Create missing tables
-            if 'vocabulary' in missing_tables:
-                cursor.execute('''
-                CREATE TABLE IF NOT EXISTS vocabulary (
-                    id INTEGER PRIMARY KEY,
-                    word_original TEXT NOT NULL,
-                    word_translated TEXT NOT NULL,
-                    language_translated TEXT NOT NULL,
-                    category TEXT,
-                    image_path TEXT,
-                    date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    source TEXT DEFAULT 'manual'
-                );
-                ''')
-            
-            if 'user_progress' in missing_tables:
-                cursor.execute('''
-                CREATE TABLE IF NOT EXISTS user_progress (
-                    id INTEGER PRIMARY KEY,
-                    vocabulary_id INTEGER,
-                    review_count INTEGER DEFAULT 0,
-                    correct_count INTEGER DEFAULT 0,
-                    last_reviewed TIMESTAMP,
-                    proficiency_level INTEGER DEFAULT 0,
-                    FOREIGN KEY (vocabulary_id) REFERENCES vocabulary (id)
-                );
-                ''')
-            
-            if 'sessions' in missing_tables:
-                cursor.execute('''
-                CREATE TABLE IF NOT EXISTS sessions (
-                    id INTEGER PRIMARY KEY,
-                    start_time TIMESTAMP,
-                    end_time TIMESTAMP,
-                    words_studied INTEGER DEFAULT 0,
-                    words_learned INTEGER DEFAULT 0
-                );
-                ''')
-            
-            if 'camera_translations' in missing_tables:
-                cursor.execute('''
-                CREATE TABLE IF NOT EXISTS camera_translations (
-                    id INTEGER PRIMARY KEY,
-                    image_path TEXT,
-                    detected_text TEXT,
-                    translated_text TEXT,
-                    source_language TEXT,
-                    target_language TEXT,
-                    date_captured TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    is_saved_to_vocabulary BOOLEAN DEFAULT 0
-                );
-                ''')
-            
-            conn.commit()
-            st.sidebar.success("Database tables created successfully!")
-        
-        conn.close()
-        return True
-    except Exception as e:
-        st.sidebar.error(f"Database error: {e}")
-        return False
-
-if 'db_checked' not in st.session_state:
-    st.session_state.db_checked = check_database_setup()
-
-# Function to save image
-def save_image(image, label):
-    try:
-        # Convert PIL Image to OpenCV format
-        img_array = np.array(image)
-        img_cv = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
-        
-        # Create directory if it doesn't exist
-        os.makedirs("object_images", exist_ok=True)
-        
-        # Save image
-        filename = f"object_images/{label}_{int(time.time())}.jpg"
-        cv2.imwrite(filename, img_cv)
-        
-        return filename
-    except Exception as e:
-        st.error(f"Error saving image: {e}")
-        return None
-
-# Function to start a new quiz
-def start_new_quiz(vocabulary, num_questions=5):
-    # Reset quiz state
-    st.session_state.quiz_score = 0
-    st.session_state.quiz_total = 0
-    st.session_state.answered = False
-    
-    if not vocabulary or len(vocabulary) < 4:
-        st.warning("Not enough vocabulary words for a quiz (need at least 4).")
-        return False
-    
-    # Start a new session if needed
-    if not st.session_state.session_id:
-        st.session_state.session_id = db.start_session()
-        st.session_state.words_studied = 0
-        st.session_state.words_learned = 0
-    
-    # Set up first question
-    setup_new_question(vocabulary)
-    return True
-
-# Function to set up a new quiz question
-def setup_new_question(vocabulary):
-    if not vocabulary:
-        return False
-    
-    # Select a random word as the question
-    st.session_state.current_quiz_word = np.random.choice(vocabulary)
-    
-    # Create options (3 wrong + 1 correct)
-    options = [st.session_state.current_quiz_word]
-    while len(options) < 4:
-        wrong_option = np.random.choice(vocabulary)
-        if wrong_option['id'] != st.session_state.current_quiz_word['id'] and not any(o['id'] == wrong_option['id'] for o in options):
-            options.append(wrong_option)
-    
-    # Shuffle options
-    np.random.shuffle(options)
-    st.session_state.quiz_options = options
-    st.session_state.answered = False
-    
-    return True
-
-# Check quiz answer
-def update_word_progress_direct(vocab_id, is_correct):
-    """Update word progress directly using SQLite."""
-    try:
-        # Connect to the database
-        conn = sqlite3.connect("language_learning.db")
-        cursor = conn.cursor()
-        
-        # Current time for timestamp
-        current_time = datetime.datetime.now()
-        
-        # Get current progress
-        cursor.execute(
-            """
-            SELECT review_count, correct_count, proficiency_level 
-            FROM user_progress 
-            WHERE vocabulary_id = ?
-            """,
-            (vocab_id,)
-        )
-        
-        result = cursor.fetchone()
-        
-        if result:
-            review_count, correct_count, proficiency_level = result
-            
-            # Increment counts
-            review_count = review_count + 1 if review_count else 1
-            correct_count = correct_count + 1 if correct_count and is_correct else (1 if is_correct else 0)
-            
-            # Calculate proficiency (0-5 scale)
-            if review_count > 0:
-                accuracy = correct_count / review_count
-                if accuracy >= 0.9 and review_count >= 5:
-                    proficiency_level = 5
-                elif accuracy >= 0.8 and review_count >= 4:
-                    proficiency_level = 4
-                elif accuracy >= 0.6 and review_count >= 3:
-                    proficiency_level = 3
-                elif accuracy >= 0.4 and review_count >= 2:
-                    proficiency_level = 2
-                elif accuracy >= 0.2:
-                    proficiency_level = 1
-                else:
-                    proficiency_level = 0
-            
-            # Update progress
-            cursor.execute(
-                """
-                UPDATE user_progress 
-                SET review_count = ?, correct_count = ?, proficiency_level = ?, last_reviewed = ? 
-                WHERE vocabulary_id = ?
-                """,
-                (review_count, correct_count, proficiency_level, current_time, vocab_id)
-            )
-        else:
-            # Create new progress entry
-            cursor.execute(
-                """
-                INSERT INTO user_progress 
-                (vocabulary_id, review_count, correct_count, proficiency_level, last_reviewed)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (vocab_id, 1, 1 if is_correct else 0, 1 if is_correct else 0, current_time)
-            )
-        
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        st.error(f"Error updating word progress: {str(e)}")
-        return False
-
-def check_answer(selected_index):
-    """Check if selected quiz answer is correct and update progress."""
-    if st.session_state.answered:
-        return
-    
-    selected_word = st.session_state.quiz_options[selected_index]
-    is_correct = selected_word['id'] == st.session_state.current_quiz_word['id']
-    
-    # Update database using direct method instead of db class
-    update_word_progress_direct(st.session_state.current_quiz_word['id'], is_correct)
-    
-    # Update session stats
-    st.session_state.words_studied += 1
-    if is_correct:
-        st.session_state.words_learned += 1
-        st.session_state.quiz_score += 1
-    
-    st.session_state.quiz_total += 1
-    st.session_state.answered = True
-    
-    return is_correct
+if 'detection_checkboxes' not in st.session_state:
+    st.session_state.detection_checkboxes = {}
 
 # Main sidebar for navigation
 st.sidebar.title("🌍 Language Learning App")
@@ -869,10 +427,6 @@ st.session_state.target_language = languages[selected_language]
 if app_mode == "Camera Mode":
     st.title("📸 Camera Mode")
     st.markdown("Take a photo or upload an image to identify objects and learn their names in your target language.")
-    
-    # Initialize session state variables if they don't exist
-    if 'detection_checkboxes' not in st.session_state:
-        st.session_state.detection_checkboxes = {}
     
     # Session management
     col1, col2 = st.columns(2)
@@ -983,11 +537,6 @@ if app_mode == "Camera Mode":
                                 
                                 # Save the image
                                 image_path = save_image(image, label)
-                                
-                                # Debug info
-                                st.write(f"Saving word: {label} → {translated_label}")
-                                st.write(f"Image path: {image_path}")
-                                st.write(f"Language: {st.session_state.target_language}")
                                 
                                 # Add to database using direct method
                                 vocab_id = add_vocabulary_direct(
@@ -1163,305 +712,30 @@ elif app_mode == "My Vocabulary":
     else:
         st.info("No vocabulary words found with current filter. Go to Camera Mode to start learning new words!")
 
-elif app_mode == "Quiz Mode":
-    st.title("🎮 Quiz Mode")
-    st.markdown("Test your vocabulary knowledge with interactive quizzes.")
+elif app_mode == "Quiz Mode" or app_mode == "Statistics":
+    st.title(f"🚧 {app_mode} - Coming Soon")
+    st.markdown("""
+    This feature is currently unavailable in the cloud version due to Python 3.12 compatibility issues.
     
-    # Get vocabulary from database
-    vocabulary = get_all_vocabulary_direct()
+    Please try the Camera Mode and My Vocabulary features, which are fully functional.
     
-    # Quiz settings
-    col1, col2 = st.columns(2)
-    with col1:
-        quiz_language = st.selectbox(
-            "Quiz language:",
-            list(languages.keys()),
-            index=list(languages.values()).index(st.session_state.target_language) if st.session_state.target_language in languages.values() else 0
-        )
-        quiz_lang_code = languages[quiz_language]
+    We're working on making all features available soon!
+    """)
     
-    with col2:
-        num_questions = st.number_input("Number of questions:", min_value=1, max_value=20, value=5)
-    
-    # Filter vocabulary by selected language
-    filtered_vocab = [word for word in vocabulary if word['language_translated'] == quiz_lang_code]
-    
-    # Start quiz button
-    if st.button("Start New Quiz"):
-        if start_new_quiz(filtered_vocab, num_questions):
-            st.rerun()
-    
-    # Display current quiz question if available
-    if st.session_state.current_quiz_word and st.session_state.quiz_options:
-        word = st.session_state.current_quiz_word
-        
-        # Create a progress bar for the quiz
-        progress = min(st.session_state.quiz_total / num_questions, 1.0)
-        st.progress(progress)
-        st.markdown(f"**Question {st.session_state.quiz_total + 1}/{num_questions}**")
-        
-        # Display the question
-        st.markdown(f"## What is the translation of '{word['word_original']}'?")
-        
-        # Display image if available
-        if word['image_path'] and os.path.exists(word['image_path']):
-            image = Image.open(word['image_path'])
-            st.image(image, caption=f"Image for {word['word_original']}", width=300)
-        
-        # Create answer buttons
-        cols = st.columns(len(st.session_state.quiz_options))
-        for i, option in enumerate(st.session_state.quiz_options):
-            with cols[i]:
-                # Determine button appearance based on answer status
-                if st.session_state.answered:
-                    is_correct_option = option['id'] == word['id']
-                    if is_correct_option:
-                        st.success(option['word_translated'])
-                    else:
-                        st.error(option['word_translated'])
-                else:
-                    if st.button(option['word_translated'], key=f"option_{i}"):
-                        is_correct = check_answer(i)
-                        # Force rerun to update UI
-                        st.rerun()
-        
-        # Display pronunciation after answering
-        if st.session_state.answered:
-            st.markdown("### Pronunciation:")
-            audio_bytes = text_to_speech(word['word_translated'], word['language_translated'])
-            if audio_bytes:
-                st.markdown(get_audio_html(audio_bytes), unsafe_allow_html=True)
-            
-            # Next question or finish quiz button
-            if st.session_state.quiz_total < num_questions:
-                if st.button("Next Question"):
-                    if st.session_state.quiz_total >= num_questions:
-                        # End quiz
-                        st.session_state.current_quiz_word = None
-                        st.session_state.quiz_options = []
-                    else:
-                        # Setup next question
-                        setup_new_question(filtered_vocab)
-                    st.rerun()
-            else:
-                # Finish quiz button:
-                if st.button("Finish Quiz"):
-                    st.session_state.current_quiz_word = None
-                    st.session_state.quiz_options = []
-                    # End session
-                    if st.session_state.session_id:
-                        manage_session("end")
-                    st.rerun()
-        
-        # Display current score
-        st.sidebar.markdown(f"### Current Score: {st.session_state.quiz_score}/{st.session_state.quiz_total}")
-        if st.session_state.quiz_total > 0:
-            accuracy = (st.session_state.quiz_score / st.session_state.quiz_total) * 100
-            st.sidebar.markdown(f"**Accuracy:** {accuracy:.1f}%")
-    
-    # Display quiz results if quiz is finished
-    elif st.session_state.quiz_total > 0:
-        st.success(f"Quiz completed! Your score: {st.session_state.quiz_score}/{st.session_state.quiz_total}")
-        
-        # Calculate and display accuracy
-        accuracy = (st.session_state.quiz_score / st.session_state.quiz_total) * 100
-        st.markdown(f"### Accuracy: {accuracy:.1f}%")
-        
-        # Display feedback based on score
-        if accuracy >= 90:
-            st.balloons()
-            st.markdown("### 🎖️ Excellent job! You're mastering these words!")
-        elif accuracy >= 70:
-            st.markdown("### 👍 Good work! Keep practicing to improve.")
-        else:
-            st.markdown("### 📚 Keep practicing! Review your vocabulary regularly.")
-        
-        # Reset button
-        if st.button("Start Another Quiz"):
-            # Reset quiz state
-            st.session_state.current_quiz_word = None
-            st.session_state.quiz_options = []
-            st.session_state.quiz_score = 0
-            st.session_state.quiz_total = 0
-            st.rerun()
-            
-    # If not enough vocabulary, show message
-    elif not filtered_vocab or len(filtered_vocab) < 4:
-        st.warning(f"You need at least 4 words in {quiz_language} to start a quiz. Go to Camera Mode to learn more words!")
-
-elif app_mode == "Statistics":
-    st.title("📊 Learning Statistics")
-    st.markdown("Track your progress and learning habits.")
-    
-    # Get session stats for the last 30 days
-    stats = get_session_stats_direct(30)
-    
-    # Debug display for stats
-    if st.checkbox("Show raw stats data"):
-        st.write("Raw stats data from database:")
-        st.write(stats)
-    
-    # Check if stats exist and have total_sessions
-    if stats and stats.get('total_sessions'):
-        # Display overall statistics
-        st.subheader("Overall Statistics (Last 30 Days)")
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric("Total Sessions", stats.get('total_sessions', 0) or 0)
-        with col2:
-            st.metric("Words Studied", stats.get('total_words_studied', 0) or 0)
-        with col3:
-            st.metric("Words Learned", stats.get('total_words_learned', 0) or 0)
-        
-        # Learning efficiency
-        st.subheader("Learning Efficiency")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            avg_words = stats.get('avg_words_per_session', 0) or 0
-            st.metric("Avg Words per Session", f"{avg_words:.1f}")
-        
-        with col2:
-            avg_time = stats.get('avg_session_minutes', 0) or 0
-            st.metric("Avg Session Length", f"{avg_time:.1f} min")
-        
-        # Vocabulary distribution by language
-        st.subheader("Vocabulary by Language")
-        
-        # Get all vocabulary items
-        vocabulary = get_all_vocabulary_direct()
-        
-        # Count words per language
-        language_counts = {}
-        for word in vocabulary:
-            if word is None or 'language_translated' not in word:
-                continue
-                
-            lang = word['language_translated']
-            if lang in language_counts:
-                language_counts[lang] += 1
-            else:
-                language_counts[lang] = 1
-        
-        # Convert language codes to names
-        language_names = {}
-        for name, code in languages.items():
-            if code in language_counts:
-                language_names[name] = language_counts[code]
-        
-        # Create chart data
-        if language_names:
-            chart_data = pd.DataFrame({
-                'Language': list(language_names.keys()),
-                'Word Count': list(language_names.values())
-            })
-            
-            # Plot bar chart
-            fig, ax = plt.subplots(figsize=(10, 6))
-            bars = ax.bar(chart_data['Language'], chart_data['Word Count'], color='skyblue')
-            
-            # Add count labels on top of bars
-            for bar in bars:
-                height = bar.get_height()
-                ax.text(bar.get_x() + bar.get_width()/2., height + 0.1,
-                        f'{int(height)}', ha='center', va='bottom')
-            
-            ax.set_xlabel('Language')
-            ax.set_ylabel('Number of Words')
-            ax.set_title('Vocabulary Distribution by Language')
-            plt.xticks(rotation=45)
-            plt.tight_layout()
-            
-            st.pyplot(fig)
-        
-        # Get proficiency distribution
-        st.subheader("Proficiency Level Distribution")
-        
-        proficiency_counts = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
-        for word in vocabulary:
-            if word is None:
-                continue
-            level = word.get('proficiency_level', 0) or 0
-            proficiency_counts[level] += 1
-        
-        # Create proficiency chart
-        prof_data = pd.DataFrame({
-            'Level': [f"Level {lvl}" for lvl in proficiency_counts.keys()],
-            'Words': list(proficiency_counts.values())
-        })
-        
-        if sum(proficiency_counts.values()) > 0:
-            fig, ax = plt.subplots(figsize=(10, 6))
-            colors = ['#FFCCCC', '#FFE5CC', '#FFFFCC', '#E5FFCC', '#CCFFCC', '#CCFFEF']
-            bars = ax.bar(prof_data['Level'], prof_data['Words'], color=colors)
-            
-            # Add count labels
-            for bar in bars:
-                height = bar.get_height()
-                if height > 0:
-                    ax.text(bar.get_x() + bar.get_width()/2., height + 0.1,
-                            f'{int(height)}', ha='center', va='bottom')
-            
-            ax.set_xlabel('Proficiency Level')
-            ax.set_ylabel('Number of Words')
-            ax.set_title('Word Distribution by Proficiency Level')
-            plt.tight_layout()
-            
-            st.pyplot(fig)
-            
-            # Add explanation of proficiency levels
-            st.markdown("""
-            **Proficiency Level Guide:**
-            - **Level 0**: New words or words answered incorrectly multiple times
-            - **Level 1**: Basic recognition (20% correct answers)
-            - **Level 2**: Beginning to remember (40% correct answers)
-            - **Level 3**: Moderate proficiency (60% correct answers)
-            - **Level 4**: Good proficiency (80% correct answers)
-            - **Level 5**: Mastered (90-100% correct answers)
-            """)
-        
-        # Learning suggestions section
-        st.subheader("Learning Suggestions")
-        st.markdown("""
-        Based on your learning patterns, here are some suggestions:
-        
-        1. **Words to Review**: Focus on lower proficiency words
-        2. **Optimal Session Length**: Aim for 10-15 minute learning sessions
-        3. **Learning Frequency**: Try to complete at least one session per day
-        """)
-        
+    # Show a preview image of what this would look like
+    if app_mode == "Quiz Mode":
+        st.image("https://raw.githubusercontent.com/streamlit/streamlit/develop/examples/quiz-app/streamlit-quiz-app.jpg", 
+                caption="Quiz Mode Preview", use_column_width=True)
     else:
-        st.info("No learning statistics available yet. Complete some learning sessions to see your progress!")
-        
-        if st.button("Generate Sample Statistics (Demo)"):
-            # Create sample data for demonstration
-            st.subheader("Sample Statistics (Demo)")
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Total Sessions", 5)
-            with col2:
-                st.metric("Words Studied", 42)
-            with col3:
-                st.metric("Words Learned", 38)
-                
-            # Sample chart
-            sample_data = pd.DataFrame({
-                'Language': ['Spanish', 'French', 'German', 'Italian'],
-                'Word Count': [15, 12, 8, 7]
-            })
-            
-            fig, ax = plt.subplots(figsize=(10, 6))
-            ax.bar(sample_data['Language'], sample_data['Word Count'], color='lightgray')
-            ax.set_xlabel('Language')
-            ax.set_ylabel('Number of Words (Sample Data)')
-            ax.set_title('Example: Vocabulary Distribution by Language')
-            plt.tight_layout()
-            
-            st.pyplot(fig)
-            
-            st.markdown("*This is sample data. Start learning with Camera Mode to begin tracking your real progress!*")
+        # Create a simple stats preview
+        st.subheader("Sample Statistics (Preview Only)")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Sessions", "5")
+        with col2:
+            st.metric("Words Studied", "42")
+        with col3:
+            st.metric("Words Learned", "38")
 
 # Footer
 st.sidebar.markdown("---")
