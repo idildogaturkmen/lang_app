@@ -1318,8 +1318,8 @@ if app_mode == "Camera Mode":
                                     st.markdown(f"**{label}** ({confidence:.2f})")
                                     st.markdown(f"→ **{translated_label}**")
                                     
-                                    # Create two columns for audio and checkbox
-                                    col1, col2 = st.columns([3, 1])
+                                    # Create columns for audio, example, checkbox
+                                    col1, col2, col3 = st.columns([2, 2, 1])
                                     
                                     with col1:
                                         # Generate audio for the translated word
@@ -1330,28 +1330,29 @@ if app_mode == "Camera Mode":
                                         # Add pronunciation helpers
                                         pronunciation_tips = get_pronunciation_guide(translated_label, st.session_state.target_language)
                                         if pronunciation_tips:
-                                            with st.expander("Pronunciation Tips", expanded=False):
-                                                for tip in pronunciation_tips:
-                                                    st.markdown(f"- {tip}")
+                                            st.markdown("**Pronunciation Tips:**")
+                                            for tip in pronunciation_tips:
+                                                st.markdown(f"- {tip}")
                                     
                                     with col2:
+                                        # Add example sentence directly (no nested expander)
+                                        example = get_example_sentence(label, st.session_state.target_language)
+                                        st.markdown("**Example:**")
+                                        st.markdown(f"EN: {example['english']}")
+                                        st.markdown(f"{selected_language}: {example['translated']}")
+                                        
+                                        # Add audio for the example sentence if needed
+                                        example_audio = text_to_speech(example['translated'], st.session_state.target_language)
+                                        if example_audio:
+                                            st.markdown(get_audio_html(example_audio), unsafe_allow_html=True)
+                                    
+                                    with col3:
                                         # Add checkbox for this object
                                         st.session_state.detection_checkboxes[checkbox_key] = st.checkbox(
                                             "Save", 
                                             value=True,
                                             key=checkbox_key
                                         )
-                                    
-                                    # Add example sentence
-                                    with st.expander("See example in context", expanded=False):
-                                        example = get_example_sentence(label, st.session_state.target_language)
-                                        st.markdown(f"**English:** {example['english']}")
-                                        st.markdown(f"**{list(languages.keys())[list(languages.values()).index(st.session_state.target_language)]}:** {example['translated']}")
-                                        
-                                        # Add audio for the example sentence
-                                        example_audio = text_to_speech(example['translated'], st.session_state.target_language)
-                                        if example_audio:
-                                            st.markdown(get_audio_html(example_audio), unsafe_allow_html=True)
                                     
                                     st.markdown("---")  # Add separator
                     
@@ -1696,7 +1697,7 @@ elif app_mode == "My Vocabulary":
                 else:
                     st.markdown("*No image available for this word*")
                 
-                # Add example sentence
+                # Add example sentence directly (no expander)
                 st.markdown("**Example in context:**")
                 example = get_example_sentence(word.get('word_original', ''), word.get('language_translated', ''))
                 st.markdown(f"**English:** {example['english']}")
