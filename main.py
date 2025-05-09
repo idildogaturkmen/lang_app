@@ -367,15 +367,10 @@ def detect_text_in_image(image):
         return f"Text detection error: {e}"
 
 # Function to get example sentence
+# If deep-translator isn't available, we can use Google Translate API directly
 def get_example_sentence(word, target_language):
     """Generate an example sentence using the word."""
     try:
-        if not has_deep_translator:
-            return {
-                "english": f"Example unavailable: Install deep-translator package.",
-                "translated": ""
-            }
-        
         # Simple English templates
         templates = [
             f"The {word} is on the table.",
@@ -388,20 +383,25 @@ def get_example_sentence(word, target_language):
         # Select a random template
         example = np.random.choice(templates)
         
-        # Translate to target language
-        translator = GoogleTranslator(source='en', target=target_language)
-        translated_example = translator.translate(example)
+        # Try to translate using the Google Translate API
+        try:
+            translate_client = translate.Client()
+            result = translate_client.translate(example, target_language=target_language)
+            translated_example = result.get("translatedText", "")
+        except Exception:
+            translated_example = ""
         
         return {
             "english": example,
             "translated": translated_example
         }
-    except Exception as e:
+    except Exception:
+        # Return English example but empty translation
         return {
-            "english": f"Example unavailable: {str(e)}",
+            "english": f"The {word} is on the table.",
             "translated": ""
         }
-
+        
 # Function to get pronunciation guide
 def get_pronunciation_guide(word, language_code):
     """Generate a simple pronunciation guide for the word."""
@@ -1339,12 +1339,17 @@ if app_mode == "Camera Mode":
                                         example = get_example_sentence(label, st.session_state.target_language)
                                         st.markdown("**Example:**")
                                         st.markdown(f"EN: {example['english']}")
-                                        st.markdown(f"{selected_language}: {example['translated']}")
                                         
-                                        # Add audio for the example sentence if needed
-                                        example_audio = text_to_speech(example['translated'], st.session_state.target_language)
-                                        if example_audio:
-                                            st.markdown(get_audio_html(example_audio), unsafe_allow_html=True)
+                                        # Only display translated example if available
+                                        if example['translated']:
+                                            st.markdown(f"{selected_language}: {example['translated']}")
+                                            
+                                            # Only generate audio if there's text to speak
+                                            example_audio = text_to_speech(example['translated'], st.session_state.target_language)
+                                            if example_audio:
+                                                st.markdown(get_audio_html(example_audio), unsafe_allow_html=True)
+                                        else:
+                                            st.markdown("*Translation not available. Please install deep-translator package.*")
                                     
                                     with col3:
                                         # Add checkbox for this object
@@ -1701,12 +1706,18 @@ elif app_mode == "My Vocabulary":
                 st.markdown("**Example in context:**")
                 example = get_example_sentence(word.get('word_original', ''), word.get('language_translated', ''))
                 st.markdown(f"**English:** {example['english']}")
-                st.markdown(f"**{lang_name}:** {example['translated']}")
                 
-                # Add audio for the example
-                example_audio = text_to_speech(example['translated'], word.get('language_translated', ''))
-                if example_audio:
-                    st.markdown(get_audio_html(example_audio), unsafe_allow_html=True)
+                # Only show translated example if available
+                if example['translated']:
+                    st.markdown(f"**{lang_name}:** {example['translated']}")
+                    
+                    # Only generate audio if there's text to speak
+                    example_audio = text_to_speech(example['translated'], word.get('language_translated', ''))
+                    if example_audio:
+                        st.markdown(get_audio_html(example_audio), unsafe_allow_html=True)
+                else:
+                    st.markdown("*Translation not available. Please install deep-translator package.*")
+
         else:
             st.warning("There was an issue with the vocabulary data format.")
     else:
