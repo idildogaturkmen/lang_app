@@ -1,47 +1,41 @@
 import streamlit as st
+import os
+import sys
 
-st.title("Minimal Test App")
-st.write("This is a minimal test app to debug installation issues.")
+st.title("Diagnostic App")
+st.write(f"Python version: {sys.version}")
+st.write(f"Current working directory: {os.getcwd()}")
 
-# Test imports one by one
-import_statuses = {}
+# Try importing dependencies one by one
+import_results = {}
 
-try:
-    import numpy as np
-    import_statuses["numpy"] = "✅ Success"
-except Exception as e:
-    import_statuses["numpy"] = f"❌ Failed: {str(e)}"
+# Base libraries
+for lib in ["numpy", "pandas", "matplotlib", "PIL"]:
+    try:
+        if lib == "PIL":
+            from PIL import Image
+            import_results[lib] = "✅ Success"
+        else:
+            __import__(lib)
+            import_results[lib] = "✅ Success"
+    except Exception as e:
+        import_results[lib] = f"❌ Failed: {str(e)}"
 
-try:
-    import pandas as pd
-    import_statuses["pandas"] = "✅ Success"
-except Exception as e:
-    import_statuses["pandas"] = f"❌ Failed: {str(e)}"
-
-try:
-    import matplotlib.pyplot as plt
-    import_statuses["matplotlib"] = "✅ Success"
-except Exception as e:
-    import_statuses["matplotlib"] = f"❌ Failed: {str(e)}"
-
-try:
-    from PIL import Image
-    import_statuses["Pillow"] = "✅ Success"
-except Exception as e:
-    import_statuses["Pillow"] = f"❌ Failed: {str(e)}"
-
+# Computer vision
 try:
     import cv2
-    import_statuses["OpenCV"] = "✅ Success"
+    import_results["OpenCV"] = f"✅ Success (v{cv2.__version__})"
 except Exception as e:
-    import_statuses["OpenCV"] = f"❌ Failed: {str(e)}"
+    import_results["OpenCV"] = f"❌ Failed: {str(e)}"
 
+# Deep learning
 try:
     import torch
-    import_statuses["PyTorch"] = "✅ Success"
+    import_results["PyTorch"] = f"✅ Success (v{torch.__version__})"
 except Exception as e:
-    import_statuses["PyTorch"] = f"❌ Failed: {str(e)}"
+    import_results["PyTorch"] = f"❌ Failed: {str(e)}"
 
+# Display results
 st.write("## Import Status")
-for package, status in import_statuses.items():
+for package, status in import_results.items():
     st.write(f"**{package}**: {status}")
