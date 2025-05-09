@@ -1245,48 +1245,25 @@ if app_mode == "Camera Mode":
             "Detection Confidence Threshold", 
             min_value=0.2, 
             max_value=0.9, 
-            value=0.4,  # Lower default threshold to detect more objects
+            value=0.35,  # Optimized default threshold to balance precision and detection
             step=0.05
         )
         
-        # Detection mode selection
-        detection_mode = st.radio(
-            "Detection Mode:",
-            ["Standard", "High Precision", "Maximum Objects"],
-            help="Standard: Balanced detection, High Precision: Fewer but more accurate detections, Maximum Objects: Detect as many objects as possible"
-        )
+        # Set iou_threshold for optimal detection (balance between precision and maximum detection)
+        iou_threshold = 0.3  # Using a lower threshold to detect more objects while maintaining precision
         
-        # Map detection mode to appropriate settings
-        if detection_mode == "High Precision":
-            confidence_threshold = max(confidence_threshold, 0.5)  # Ensure higher confidence
-            iou_threshold = 0.45  # Stricter overlap threshold
-        elif detection_mode == "Maximum Objects":
-            confidence_threshold = min(confidence_threshold, 0.3)  # Lower confidence threshold
-            iou_threshold = 0.25  # More permissive overlap threshold
-        else:  # Standard
-            iou_threshold = 0.45  # Default
-        
-        # Image enhancement options
-        with st.expander("Advanced Image Settings", expanded=False):
-            use_enhancement = st.checkbox("Apply Image Enhancement", value=False)
-            if use_enhancement:
-                enhancement_type = st.selectbox(
-                    "Enhancement Type",
-                    ["auto", "brightness", "contrast"],
-                    index=0,
-                    help="Auto: Apply all enhancements, Brightness: Adjust light levels, Contrast: Improve image definition"
-                )
+        # Auto-enhancement is always applied
+        enhancement_type = "auto"
     
     # Process image if available
     if image is not None:
         # Show original image
         st.image(image, caption="Original Image", use_column_width=True)
         
-        # Apply enhancement if selected
-        if detection_type == "Objects" and 'use_enhancement' in locals() and use_enhancement:
-            with st.spinner("Enhancing image..."):
+        # Always apply enhancement for object detection
+        if detection_type == "Objects":
+            with st.spinner("Enhancing image for better detection..."):
                 enhanced_image = enhance_image(image, enhancement_type)
-                st.image(enhanced_image, caption="Enhanced Image", use_column_width=True)
                 # Use the enhanced image for detection
                 image_for_detection = enhanced_image
         else:
