@@ -29,10 +29,8 @@ st.set_page_config(
 # Try importing OCR with fallback
 try:
     import pytesseract
-    tech_details.append("PyTesseract: Imported successfully")
     has_tesseract = True
 except ImportError as e:
-    tech_details.append(f"PyTesseract: Failed to import ({e})")
     has_tesseract = False
     # Dummy implementation
     class DummyTesseract:
@@ -43,9 +41,7 @@ except ImportError as e:
 # Try importing OpenCV with robust fallback mechanism
 try:
     import cv2
-    tech_details.append("OpenCV: Imported successfully")
 except ImportError as e:
-    tech_details.append(f"OpenCV: Failed to import ({e})")
     # Create dummy CV2 class to prevent crashes
     class DummyCV2:
         def __init__(self):
@@ -81,14 +77,11 @@ except ImportError as e:
     
     # Replace cv2 with our dummy implementation
     cv2 = DummyCV2()
-    tech_details.append("OpenCV: Using fallback implementation")
 
 # Import other dependencies with careful error handling
 try:
     import torch
-    tech_details.append("PyTorch: Imported successfully")
 except ImportError as e:
-    tech_details.append(f"PyTorch: Failed to import ({e})")
     # Dummy torch for fallback
     class DummyTorch:
         def __init__(self):
@@ -112,9 +105,7 @@ except ImportError as e:
 # Try importing Google Cloud libraries
 try:
     from google.cloud import translate_v2 as translate
-    tech_details.append("Google Cloud Translation: Imported successfully")
 except ImportError as e:
-    tech_details.append(f"Google Cloud Translation: Failed to import ({e})")
     # Dummy translate for fallback
     class DummyTranslate:
         class Client:
@@ -129,10 +120,8 @@ except ImportError as e:
 # Try importing deep translator with fallback
 try:
     from deep_translator import GoogleTranslator
-    tech_details.append("deep_translator: Imported successfully")
     has_deep_translator = True
 except ImportError as e:
-    tech_details.append(f"deep_translator: Failed to import ({e})")
     has_deep_translator = False
     # Fallback function
     def dummy_translator(*args, **kwargs):
@@ -142,9 +131,7 @@ except ImportError as e:
 # Try importing gTTS
 try:
     from gtts import gTTS
-    tech_details.append("gTTS: Imported successfully")
 except ImportError as e:
-    tech_details.append(f"gTTS: Failed to import ({e})")
     # Create a dummy gTTS class
     class DummyGTTS:
         def __init__(self, text="", lang="en", slow=False):
@@ -159,9 +146,7 @@ except ImportError as e:
 # Import database module with error handling
 try:
     from database import LanguageLearningDB
-    tech_details.append("Database module: Imported successfully")
 except ImportError as e:
-    tech_details.append(f"Database module: Failed to import ({e})")
     # Define a basic LanguageLearningDB class for fallback
     class LanguageLearningDB:
         def __init__(self, db_path):
@@ -200,17 +185,13 @@ try:
         
         # Set environment variable to point to this file
         os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_path
-        tech_details.append("Google Cloud credentials: Loaded from secrets")
     else:
         # Local development fallback
         credentials_path = r'C:\Users\HP\Desktop\Senior Proj\credentials.json'
         if os.path.exists(credentials_path):
             os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_path
-            tech_details.append("Google Cloud credentials: Loaded from local file")
-        else:
-            tech_details.append("Google Cloud credentials: Not found")
 except Exception as e:
-    tech_details.append(f"Google Cloud credentials: Error setting up ({e})")
+    pass
 
 # Define object categories for better organization
 OBJECT_CATEGORIES = {
@@ -674,6 +655,84 @@ def get_session_stats_direct(days=30):
         st.error(f"Error retrieving session stats: {str(e)}")
         return {}
 
+# Function to check if database is properly set up
+def check_database_setup():
+    """Check if the database is properly set up and try to fix if needed."""
+    try:
+        conn = sqlite3.connect("language_learning.db")
+        cursor = conn.cursor()
+        
+        # Check if tables exist
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tables = [table[0] for table in cursor.fetchall()]
+        
+        required_tables = ['vocabulary', 'user_progress', 'sessions', 'camera_translations']
+        missing_tables = [table for table in required_tables if table not in tables]
+        
+        if missing_tables:
+            # Create missing tables
+            if 'vocabulary' in missing_tables:
+                cursor.execute('''
+                CREATE TABLE IF NOT EXISTS vocabulary (
+                    id INTEGER PRIMARY KEY,
+                    word_original TEXT NOT NULL,
+                    word_translated TEXT NOT NULL,
+                    language_translated TEXT NOT NULL,
+                    category TEXT,
+                    image_path TEXT,
+                    date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    source TEXT DEFAULT 'manual'
+                );
+                ''')
+            
+            if 'user_progress' in missing_tables:
+                cursor.execute('''
+                CREATE TABLE IF NOT EXISTS user_progress (
+                    id INTEGER PRIMARY KEY,
+                    vocabulary_id INTEGER,
+                    review_count INTEGER DEFAULT 0,
+                    correct_count INTEGER DEFAULT 0,
+                    last_reviewed TIMESTAMP,
+                    proficiency_level INTEGER DEFAULT 0,
+                    FOREIGN KEY (vocabulary_id) REFERENCES vocabulary (id)
+                );
+                ''')
+            
+            if 'sessions' in missing_tables:
+                cursor.execute('''
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id INTEGER PRIMARY KEY,
+                    start_time TIMESTAMP,
+                    end_time TIMESTAMP,
+                    words_studied INTEGER DEFAULT 0,
+                    words_learned INTEGER DEFAULT 0
+                );
+                ''')
+            
+            if 'camera_translations' in missing_tables:
+                cursor.execute('''
+                CREATE TABLE IF NOT EXISTS camera_translations (
+                    id INTEGER PRIMARY KEY,
+                    image_path TEXT,
+                    detected_text TEXT,
+                    translated_text TEXT,
+                    source_language TEXT,
+                    target_language TEXT,
+                    date_captured TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    is_saved_to_vocabulary BOOLEAN DEFAULT 0
+                );
+                ''')
+            
+            conn.commit()
+        
+        conn.close()
+        return True
+    except Exception as e:
+        st.error(f"Database error: {e}")
+        return False
+
+if 'db_checked' not in st.session_state:
+    st.session_state.db_checked = check_database_setup()
 
 # Initialize database
 @st.cache_resource
@@ -912,92 +971,6 @@ def manage_session(action):
     
     return False
 
-# Function to check if database is properly set up
-def check_database_setup():
-    """Check if the database is properly set up and try to fix if needed."""
-    try:
-        conn = sqlite3.connect("language_learning.db")
-        cursor = conn.cursor()
-        
-        # Check if tables exist
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-        tables = [table[0] for table in cursor.fetchall()]
-        
-        required_tables = ['vocabulary', 'user_progress', 'sessions', 'camera_translations']
-        missing_tables = [table for table in required_tables if table not in tables]
-        
-        if missing_tables:
-            with st.sidebar.expander("Database Setup", expanded=False):
-                st.error(f"Missing tables in database: {', '.join(missing_tables)}")
-                st.info("Attempting to create missing tables...")
-            
-            # Create missing tables
-            if 'vocabulary' in missing_tables:
-                cursor.execute('''
-                CREATE TABLE IF NOT EXISTS vocabulary (
-                    id INTEGER PRIMARY KEY,
-                    word_original TEXT NOT NULL,
-                    word_translated TEXT NOT NULL,
-                    language_translated TEXT NOT NULL,
-                    category TEXT,
-                    image_path TEXT,
-                    date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    source TEXT DEFAULT 'manual'
-                );
-                ''')
-            
-            if 'user_progress' in missing_tables:
-                cursor.execute('''
-                CREATE TABLE IF NOT EXISTS user_progress (
-                    id INTEGER PRIMARY KEY,
-                    vocabulary_id INTEGER,
-                    review_count INTEGER DEFAULT 0,
-                    correct_count INTEGER DEFAULT 0,
-                    last_reviewed TIMESTAMP,
-                    proficiency_level INTEGER DEFAULT 0,
-                    FOREIGN KEY (vocabulary_id) REFERENCES vocabulary (id)
-                );
-                ''')
-            
-            if 'sessions' in missing_tables:
-                cursor.execute('''
-                CREATE TABLE IF NOT EXISTS sessions (
-                    id INTEGER PRIMARY KEY,
-                    start_time TIMESTAMP,
-                    end_time TIMESTAMP,
-                    words_studied INTEGER DEFAULT 0,
-                    words_learned INTEGER DEFAULT 0
-                );
-                ''')
-            
-            if 'camera_translations' in missing_tables:
-                cursor.execute('''
-                CREATE TABLE IF NOT EXISTS camera_translations (
-                    id INTEGER PRIMARY KEY,
-                    image_path TEXT,
-                    detected_text TEXT,
-                    translated_text TEXT,
-                    source_language TEXT,
-                    target_language TEXT,
-                    date_captured TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    is_saved_to_vocabulary BOOLEAN DEFAULT 0
-                );
-                ''')
-            
-            conn.commit()
-            with st.sidebar.expander("Database Setup", expanded=False):
-                st.success("Database tables created successfully!")
-        
-        conn.close()
-        return True
-    except Exception as e:
-        with st.sidebar.expander("Database Setup", expanded=False):
-            st.error(f"Database error: {e}")
-        return False
-
-if 'db_checked' not in st.session_state:
-    st.session_state.db_checked = check_database_setup()
-
 # Function to save image
 def save_image(image, label):
     try:
@@ -1175,7 +1148,7 @@ def check_answer(selected_index):
 
 # Main sidebar for navigation
 st.sidebar.title("🌍 Vocam")
-app_mode_options = ["Camera Mode", "My Vocabulary", "Quiz Mode", "Statistics", "Progress"]
+app_mode_options = ["Camera Mode", "My Vocabulary", "Quiz Mode", "Statistics", "My Progress"]
 app_mode = st.sidebar.selectbox(
     "Choose a mode",
     app_mode_options
@@ -2037,7 +2010,7 @@ elif app_mode == "Statistics":
             st.pyplot(fig)
             
             st.markdown("*This is sample data. Start learning with Camera Mode to begin tracking your real progress!*")
-elif app_mode == "Progress":
+elif app_mode == "My Progress":
     try:
         gamification.render_dashboard()
     except Exception as e:
