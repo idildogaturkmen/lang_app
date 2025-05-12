@@ -898,8 +898,10 @@ def text_to_speech(text, lang):
 
 # Function to generate HTML for audio playback
 def get_audio_html(audio_bytes):
+    """Generate HTML for audio playback without autoplay."""
     audio_base64 = base64.b64encode(audio_bytes).decode()
-    audio_tag = f'<audio autoplay="true" src="data:audio/mp3;base64,{audio_base64}" controls></audio>'
+    # Remove the autoplay attribute - only keep controls
+    audio_tag = f'<audio src="data:audio/mp3;base64,{audio_base64}" controls></audio>'
     return audio_tag
 
 # Function to load YOLOv5 model
