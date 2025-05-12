@@ -1,5 +1,16 @@
 [server]
 enableXsrfProtection = false
+enableCORS = false
 
-[global]
-developmentMode = false
+[browser]
+gatherUsageStats = false
+
+[runner]
+fastReruns = true
+
+[theme]
+primaryColor = "#5465FF"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F0F2F6"
+textColor = "#262730"
+font = "sans serif"

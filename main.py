@@ -22,6 +22,16 @@ from collections import defaultdict
 import io
 
 
+try:
+    from cloud_detector import detect_streamlit_cloud
+    is_cloud = detect_streamlit_cloud()
+except ImportError:
+    is_cloud = False
+
+if is_cloud:
+    os.environ['IS_STREAMLIT_CLOUD'] = 'true'
+    print("Running in Streamlit Cloud - some features may be limited")
+
 # First, display Python version for debugging
 st.set_page_config(
     page_title="Vocam",

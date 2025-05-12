@@ -64,22 +64,67 @@ def create_pronunciation_practice(text_to_speech_func=None, get_audio_html_func=
     Returns:
         An instance of PronunciationPractice class
     """
+    # Check if we're running on Streamlit Cloud (which won't support audio recording)
+    import os
+    if os.environ.get('STREAMLIT_SHARING') or os.environ.get('IS_STREAMLIT_CLOUD'):
+        st.write("Running on Streamlit Cloud - using DummyPronunciationPractice")
+        return DummyPronunciationPractice(
+            text_to_speech_func,
+            get_audio_html_func,
+            translate_text_func
+        )
+        
     try:
         # Try to import required libraries
         import speech_recognition as sr
-        import Levenshtein
-        from pydub import AudioSegment
+        has_sr = True
+    except ImportError:
+        has_sr = False
         
-        # Create and return the practice module
-        return PronunciationPractice(
-            text_to_speech_func,
-            get_audio_html_func,
-            translate_text_func,
-            sr,
-            Levenshtein,
-            AudioSegment
-        )
-    except ImportError as e:
+    try:
+        import Levenshtein
+        has_levenshtein = True
+    except ImportError:
+        has_levenshtein = False
+        
+    try:
+        from pydub import AudioSegment
+        has_audiosegment = True
+    except ImportError:
+        has_audiosegment = False
+        
+    # Only proceed if all dependencies are available
+    if has_sr and has_levenshtein and has_audiosegment:
+        try:
+            # Test if PyAudio is actually working by creating a microphone instance
+            micro_test = sr.Microphone()
+            # If we got here without errors, PyAudio is working
+            
+            # Create and return the practice module
+            return PronunciationPractice(
+                text_to_speech_func,
+                get_audio_html_func,
+                translate_text_func,
+                sr,
+                Levenshtein,
+                AudioSegment
+            )
+        except Exception as e:
+            print(f"PyAudio test failed: {str(e)}")
+            # PyAudio exists but isn't working properly
+            return DummyPronunciationPractice(
+                text_to_speech_func,
+                get_audio_html_func,
+                translate_text_func
+            )
+    else:
+        # At least one dependency is missing
+        missing = []
+        if not has_sr: missing.append("SpeechRecognition")
+        if not has_levenshtein: missing.append("python-Levenshtein")
+        if not has_audiosegment: missing.append("pydub")
+        print(f"Missing pronunciation dependencies: {', '.join(missing)}")
+        
         # Create a dummy practice module that shows installation instructions
         return DummyPronunciationPractice(
             text_to_speech_func,
