@@ -529,22 +529,25 @@ def add_vocabulary_direct(word_original, word_translated, language_translated, c
         conn.commit()
         conn.close()
         
-        # NEW CODE: Integration with gamification system
+        # NEW CODE: Integration with gamification system - with error handling
         if vocab_id:
-            # Check for gamification achievements
-            gamification.check_achievements(
-                "word_learned",
-                word=word_original,
-                category=category,
-                language=language_translated
-            )
-            
-            # Check for daily challenges
-            gamification.check_challenge_progress(
-                word_original=word_original,
-                word_translated=word_translated,
-                language=language_translated
-            )
+            try:
+                # Check for gamification achievements
+                gamification.check_achievements(
+                    "word_learned",
+                    word=word_original,
+                    category=category,
+                    language=language_translated
+                )
+                
+                # Check for daily challenges
+                gamification.check_challenge_progress(
+                    word_original=word_original,
+                    word_translated=word_translated,
+                    language=language_translated
+                )
+            except Exception as e:
+                print(f"Gamification error in add_vocabulary_direct: {e}")
         
         return vocab_id
     except sqlite3.OperationalError as e:
@@ -559,7 +562,7 @@ def add_vocabulary_direct(word_original, word_translated, language_translated, c
     except Exception as e:
         st.error(f"Direct vocabulary save error: {str(e)}")
         return None
-
+    
 
 # Function to get all vocabulary items from the database
 def get_all_vocabulary_direct():
@@ -775,6 +778,17 @@ if 'answered' not in st.session_state:
     st.session_state.answered = False
 if 'detection_checkboxes' not in st.session_state:
     st.session_state.detection_checkboxes = {}
+# Ensure session state variables are initialized first
+if 'level' not in st.session_state:
+    st.session_state.level = 1
+if 'points' not in st.session_state:
+    st.session_state.points = 0
+if 'streak_days' not in st.session_state:
+    st.session_state.streak_days = 0
+if 'daily_challenges' not in st.session_state:
+    st.session_state.daily_challenges = []
+if 'word_of_the_day' not in st.session_state:
+    st.session_state.word_of_the_day = None
 
 @st.cache_resource
 def get_gamification():
@@ -782,6 +796,8 @@ def get_gamification():
 
 # Initialize gamification
 gamification = get_gamification()
+# Make sure state is explicitly initialized
+gamification.initialize_state()
 
 
 # Function to translate text
@@ -1199,19 +1215,22 @@ def check_answer(selected_index):
     st.session_state.quiz_total += 1
     st.session_state.answered = True
     
-    # Check if any challenges are completed
-    gamification.check_challenge_progress(
-        quiz_score=st.session_state.quiz_score,
-        quiz_total=st.session_state.quiz_total
-    )
-    
-    # Check for quiz-related achievements
-    if st.session_state.quiz_total >= 5:  # Only check if quiz is substantial
-        gamification.check_achievements(
-            "quiz_completed",
-            score=st.session_state.quiz_score,
-            total=st.session_state.quiz_total
+    # Check if any challenges are completed - with error handling
+    try:
+        gamification.check_challenge_progress(
+            quiz_score=st.session_state.quiz_score,
+            quiz_total=st.session_state.quiz_total
         )
+        
+        # Check for quiz-related achievements
+        if st.session_state.quiz_total >= 5:  # Only check if quiz is substantial
+            gamification.check_achievements(
+                "quiz_completed",
+                score=st.session_state.quiz_score,
+                total=st.session_state.quiz_total
+            )
+    except Exception as e:
+        print(f"Gamification error in check_answer: {e}")
     
     return is_correct
 
@@ -1224,8 +1243,11 @@ app_mode = st.sidebar.selectbox(
 )
 
 # Add gamification info to the sidebar
-gamification.update_sidebar()
-
+try:
+    gamification.update_sidebar()
+except Exception as e:
+    st.sidebar.markdown("🏆 **Gamification system is initializing...**")
+    print(f"Sidebar update error: {e}")
 
 # Language selection
 languages = {
@@ -2076,10 +2098,15 @@ elif app_mode == "Statistics":
             st.pyplot(fig)
             
             st.markdown("*This is sample data. Start learning with Camera Mode to begin tracking your real progress!*")
-        elif app_mode == "Gamification Dashboard":
-            gamification.render_dashboard()
+elif app_mode == "Gamification Dashboard":
+    try:
+        gamification.render_dashboard()
+    except Exception as e:
+        st.error("There was an error displaying the Gamification Dashboard. The system might be initializing.")
+        st.info("Please try again in a moment or add some vocabulary first to initialize the system.")
+        print(f"Dashboard error: {e}")
 
-# Footer
+
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Session Info")
 if st.session_state.session_id:

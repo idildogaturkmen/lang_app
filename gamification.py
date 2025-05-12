@@ -46,39 +46,39 @@ class GamificationSystem:
         """Initialize session state variables for gamification."""
         # Achievement and badge system
         if 'achievements' not in st.session_state:
-            st.session_state.achievements = {}
+            st.session_state['achievements'] = {}
         if 'badges' not in st.session_state:
-            st.session_state.badges = {}
+            st.session_state['badges'] = {}
         if 'displayed_achievements' not in st.session_state:
-            st.session_state.displayed_achievements = set()
+            st.session_state['displayed_achievements'] = set()
         
         # Daily challenges
         if 'daily_challenges' not in st.session_state:
-            st.session_state.daily_challenges = []
+            st.session_state['daily_challenges'] = []
         if 'daily_challenges_completed' not in st.session_state:
-            st.session_state.daily_challenges_completed = set()
+            st.session_state['daily_challenges_completed'] = set()
         if 'word_of_the_day' not in st.session_state:
-            st.session_state.word_of_the_day = None
+            st.session_state['word_of_the_day'] = None
         if 'word_of_the_day_date' not in st.session_state:
-            st.session_state.word_of_the_day_date = None
+            st.session_state['word_of_the_day_date'] = None
             
         # Streak system
         if 'streak_days' not in st.session_state:
-            st.session_state.streak_days = 0
+            st.session_state['streak_days'] = 0
         if 'last_active_date' not in st.session_state:
-            st.session_state.last_active_date = None
+            st.session_state['last_active_date'] = None
         if 'streak_savers' not in st.session_state:
-            st.session_state.streak_savers = 0
+            st.session_state['streak_savers'] = 0
             
         # Progress tracking
         if 'points' not in st.session_state:
-            st.session_state.points = 0
+            st.session_state['points'] = 0
         if 'level' not in st.session_state:
-            st.session_state.level = 1
+            st.session_state['level'] = 1
         if 'category_progress' not in st.session_state:
-            st.session_state.category_progress = {}
+            st.session_state['category_progress'] = {}
         if 'vocabulary_tree' not in st.session_state:
-            st.session_state.vocabulary_tree = {
+            st.session_state['vocabulary_tree'] = {
                 'size': 1,
                 'leaves': 0,
                 'fruit': 0,
@@ -1058,25 +1058,38 @@ class GamificationSystem:
     
     def update_sidebar(self):
         """Update the sidebar with gamification information."""
-        with st.sidebar.expander("🏆 Gamification", expanded=True):
-            # Level and points
-            st.markdown(f"**Level {st.session_state.level}** | {st.session_state.points} points")
-            
-            # Streak
-            if st.session_state.streak_days > 0:
-                st.markdown(f"🔥 **{st.session_state.streak_days}** day streak")
-            
-            # Word of the day preview
-            if st.session_state.word_of_the_day:
-                wotd = st.session_state.word_of_the_day
-                st.markdown("**✨ Word of the Day**")
-                st.markdown(f"{wotd['original']} → {wotd['translated']}")
-            
-            # Challenge preview
-            if st.session_state.daily_challenges:
-                completed = sum(1 for c in st.session_state.daily_challenges if c["completed"])
-                total = len(st.session_state.daily_challenges)
-                st.markdown(f"**📅 Challenges**: {completed}/{total} completed")
+        try:
+            with st.sidebar.expander("🏆 Gamification", expanded=True):
+                # Use get() with default values to safely access session state
+                level = st.session_state.get("level", 1)  # Default to 1 if not exists
+                points = st.session_state.get("points", 0)  # Default to 0 if not exists
+                
+                # Display level and points
+                st.markdown(f"**Level {level}** | {points} points")
+                
+                # Streak - check if it exists first
+                streak_days = st.session_state.get("streak_days", 0)
+                if streak_days > 0:
+                    st.markdown(f"🔥 **{streak_days}** day streak")
+                
+                # Word of the day preview - check if it exists first
+                wotd = st.session_state.get("word_of_the_day")
+                if wotd and isinstance(wotd, dict):  # Ensure it's a valid dictionary
+                    st.markdown("**✨ Word of the Day**")
+                    original = wotd.get('original', '?')
+                    translated = wotd.get('translated', '?')
+                    st.markdown(f"{original} → {translated}")
+                
+                # Challenge preview - check if they exist first
+                daily_challenges = st.session_state.get("daily_challenges", [])
+                if daily_challenges and isinstance(daily_challenges, list) and len(daily_challenges) > 0:
+                    completed = sum(1 for c in daily_challenges if c.get("completed", False))
+                    total = len(daily_challenges)
+                    st.markdown(f"**📅 Challenges**: {completed}/{total} completed")
+        except Exception as e:
+            # Provide a fallback if anything goes wrong
+            st.sidebar.markdown("🏆 **Gamification system is initializing...**")
+            print(f"Error in update_sidebar: {e}")  # Log the error
     
     #=========================================================================
     # Helper Functions
