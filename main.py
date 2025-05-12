@@ -17,6 +17,9 @@ from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
 from io import BytesIO
 from gamification import GamificationSystem
+import random
+from collections import defaultdict
+import io
 
 
 # First, display Python version for debugging
@@ -216,6 +219,18 @@ OBJECT_CATEGORIES = {
     "household": ["bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "book", "clock", 
                  "vase", "scissors", "teddy bear", "hair drier", "toothbrush"]
 }
+
+# Define question types
+QUESTION_TYPES = [
+    "translation_to_target",     # English → Target language
+    "translation_to_english",    # Target language → English
+    "image_recognition",         # Show image, select correct word
+    "category_match",            # Match word to correct category
+    "sentence_completion",       # Fill in blank in a sentence
+    "multiple_choice_category",  # Choose words from same category
+    "audio_recognition"          # Hear word, select correct option
+]
+
 
 def get_object_category(label):
     """Get the category for a detected object label."""
@@ -1709,135 +1724,160 @@ elif app_mode == "Quiz Mode":
     st.title("🎮 Quiz Mode")
     st.markdown("Test your vocabulary knowledge with interactive quizzes.")
     
+    # Import the quiz system if not already imported
+    if 'quiz_system' not in st.session_state:
+        try:
+            # Import quiz system
+            from quiz_system import QuizSystem
+            
+            # Create a dictionary of database functions
+            db_functions = {
+                'get_all_vocabulary_direct': get_all_vocabulary_direct,
+                'update_word_progress_direct': update_word_progress_direct
+            }
+            
+            # Initialize the quiz system
+            quiz_system = QuizSystem(
+                db_functions=db_functions,
+                text_to_speech=text_to_speech,
+                get_audio_html=get_audio_html,
+                get_example_sentence=get_example_sentence,
+                get_pronunciation_guide=get_pronunciation_guide
+            )
+            
+            # Store in session state
+            st.session_state.quiz_system = quiz_system
+            
+            # Add gamification to session state for access by quiz system
+            st.session_state.gamification = gamification
+            
+        except ImportError as e:
+            st.error(f"Error loading quiz system: {e}")
+            st.info("Please make sure quiz_system.py is in the same directory as main.py")
+            st.stop()
+    
+    # Get the quiz system from session state
+    quiz_system = st.session_state.quiz_system
+    
     # Get vocabulary from database
     vocabulary = get_all_vocabulary_direct()
     
-    # Quiz settings
-    col1, col2 = st.columns(2)
-    with col1:
-        quiz_language = st.selectbox(
-            "Quiz language:",
-            list(languages.keys()),
-            index=list(languages.values()).index(st.session_state.target_language) if st.session_state.target_language in languages.values() else 0
-        )
-        quiz_lang_code = languages[quiz_language]
-    
-    with col2:
-        num_questions = st.number_input("Number of questions:", min_value=1, max_value=20, value=5)
-    
-    # Filter vocabulary by selected language
-    filtered_vocab = [word for word in vocabulary if word['language_translated'] == quiz_lang_code]
-    
-    # Start quiz button
-    if st.button("Start New Quiz"):
-        if start_new_quiz(filtered_vocab, num_questions):
-            st.rerun()
-    
-    # Display current quiz question if available
+    # Quiz settings tab and quiz display tab
+    if 'quiz_completed' not in st.session_state:
+        st.session_state.quiz_completed = False
+        
     if st.session_state.current_quiz_word and st.session_state.quiz_options:
-        word = st.session_state.current_quiz_word
+        # Quiz is already in progress, display it
+        quiz_system.display_quiz_question(languages, manage_session)
         
-        # Create a progress bar for the quiz
-        progress = min(st.session_state.quiz_total / num_questions, 1.0)
-        st.progress(progress)
-        st.markdown(f"**Question {st.session_state.quiz_total + 1}/{num_questions}**")
-        
-        # Display the question
-        st.markdown(f"## What is the translation of '{word['word_original']}'?")
-        
-        # Display image if available
-        if word['image_path'] and os.path.exists(word['image_path']):
-            image = Image.open(word['image_path'])
-            st.image(image, caption=f"Image for {word['word_original']}", width=300)
-        
-        # Create answer buttons
-        cols = st.columns(len(st.session_state.quiz_options))
-        for i, option in enumerate(st.session_state.quiz_options):
-            with cols[i]:
-                # Determine button appearance based on answer status
-                if st.session_state.answered:
-                    is_correct_option = option['id'] == word['id']
-                    if is_correct_option:
-                        st.success(option['word_translated'])
-                    else:
-                        st.error(option['word_translated'])
-                else:
-                    if st.button(option['word_translated'], key=f"option_{i}"):
-                        is_correct = check_answer(i)
-                        # Force rerun to update UI
-                        st.rerun()
-        
-        # Display pronunciation after answering
-        if st.session_state.answered:
-            st.markdown("### Pronunciation:")
-            audio_bytes = text_to_speech(word['word_translated'], word['language_translated'])
-            if audio_bytes:
-                st.markdown(get_audio_html(audio_bytes), unsafe_allow_html=True)
-            
-            # Add pronunciation tips
-            pronunciation_tips = get_pronunciation_guide(word['word_translated'], word['language_translated'])
-            if pronunciation_tips:
-                st.markdown("**Tips:**")
-                for tip in pronunciation_tips:
-                    st.markdown(f"- {tip}")
-            
-            # Next question or finish quiz button
-            if st.session_state.quiz_total < num_questions:
-                if st.button("Next Question"):
-                    if st.session_state.quiz_total >= num_questions:
-                        # End quiz
-                        st.session_state.current_quiz_word = None
-                        st.session_state.quiz_options = []
-                    else:
-                        # Setup next question
-                        setup_new_question(filtered_vocab)
-                    st.rerun()
-            else:
-                # Finish quiz button:
-                if st.button("Finish Quiz"):
-                    st.session_state.current_quiz_word = None
-                    st.session_state.quiz_options = []
-                    # End session
-                    if st.session_state.session_id:
-                        manage_session("end")
-                    st.rerun()
-        
-        # Display current score
+        # Display current score in sidebar
         st.sidebar.markdown(f"### Current Score: {st.session_state.quiz_score}/{st.session_state.quiz_total}")
         if st.session_state.quiz_total > 0:
             accuracy = (st.session_state.quiz_score / st.session_state.quiz_total) * 100
             st.sidebar.markdown(f"**Accuracy:** {accuracy:.1f}%")
-    
-    # Display quiz results if quiz is finished
-    elif st.session_state.quiz_total > 0:
-        st.success(f"Quiz completed! Your score: {st.session_state.quiz_score}/{st.session_state.quiz_total}")
-        
-        # Calculate and display accuracy
-        accuracy = (st.session_state.quiz_score / st.session_state.quiz_total) * 100
-        st.markdown(f"### Accuracy: {accuracy:.1f}%")
-        
-        # Display feedback based on score
-        if accuracy >= 90:
-            st.balloons()
-            st.markdown("### 🎖️ Excellent job! You're mastering these words!")
-        elif accuracy >= 70:
-            st.markdown("### 👍 Good work! Keep practicing to improve.")
-        else:
-            st.markdown("### 📚 Keep practicing! Review your vocabulary regularly.")
-        
-        # Reset button
-        if st.button("Start Another Quiz"):
-            # Reset quiz state
-            st.session_state.current_quiz_word = None
-            st.session_state.quiz_options = []
-            st.session_state.quiz_score = 0
-            st.session_state.quiz_total = 0
-            st.rerun()
             
-    # If not enough vocabulary, show message
-    elif not filtered_vocab or len(filtered_vocab) < 4:
-        st.warning(f"You need at least 4 words in {quiz_language} to start a quiz. Go to Camera Mode to learn more words!")
-
+    # Display quiz results if quiz is completed
+    elif st.session_state.quiz_completed and st.session_state.quiz_total > 0:
+        quiz_system.display_quiz_results()
+        
+    # Display quiz setup
+    else:
+        # Introduction
+        st.markdown("""
+        Choose your quiz settings below to test your vocabulary knowledge.
+        The quiz will randomly include different types of questions:
+        
+        - 🔄 Translation (both directions)
+        - 🖼️ Image recognition
+        - 📝 Sentence completion
+        - 🎯 Category matching
+        - 📊 Related words identification
+        - 🔊 Audio recognition
+        
+        Start with a small number of questions and work your way up!
+        """)
+        
+        # Quiz settings in columns
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            quiz_language = st.selectbox(
+                "Quiz language:",
+                list(languages.keys()),
+                index=list(languages.values()).index(st.session_state.target_language) if st.session_state.target_language in languages.values() else 0
+            )
+            quiz_lang_code = languages[quiz_language]
+        
+        with col2:
+            num_questions = st.number_input("Number of questions:", min_value=1, max_value=20, value=5)
+        
+        with col3:
+            # Get all categories from vocabulary
+            categories = set()
+            for word in vocabulary:
+                if word and 'category' in word and word['category'] and word['category'] not in ['other', 'manual']:
+                    categories.add(word['category'])
+            
+            if categories:
+                category_filter = st.selectbox(
+                    "Category filter (optional):",
+                    ["All Categories"] + sorted(list(categories))
+                )
+            else:
+                category_filter = "All Categories"
+        
+        # Filter vocabulary by selected language
+        filtered_vocab = [word for word in vocabulary if word['language_translated'] == quiz_lang_code]
+        
+        # Further filter by category if selected
+        if category_filter != "All Categories":
+            filtered_vocab = [word for word in filtered_vocab if word.get('category') == category_filter]
+        
+        # Display information about available words
+        if filtered_vocab:
+            st.markdown(f"**{len(filtered_vocab)} words available** for your quiz in {quiz_language}" + 
+                        (f" ({category_filter} category)" if category_filter != "All Categories" else ""))
+            
+            # Count words with images
+            words_with_images = sum(1 for word in filtered_vocab 
+                                  if word.get('image_path') and os.path.exists(word.get('image_path', '')))
+            
+            # Show details on available question types
+            st.markdown(f"*{words_with_images} words have images for image recognition questions*")
+            
+            # Start quiz button with dynamic label
+            start_label = "Start Quiz" if len(filtered_vocab) >= 4 else f"Need {4-len(filtered_vocab)} More Word(s)"
+            if st.button(start_label, type="primary", disabled=len(filtered_vocab) < 4):
+                if quiz_system.start_new_quiz(filtered_vocab, languages, num_questions, manage_session):
+                    st.rerun()
+            
+            # Show word preview 
+            if st.checkbox("Preview Available Words"):
+                # Create a simple table of words
+                preview_data = []
+                for word in filtered_vocab[:20]:  # Limit preview to 20 words
+                    preview_data.append({
+                        "Original": word.get('word_original', ''),
+                        "Translation": word.get('word_translated', ''),
+                        "Category": word.get('category', '')
+                    })
+                
+                st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
+                
+                if len(filtered_vocab) > 20:
+                    st.markdown(f"*...and {len(filtered_vocab) - 20} more words*")
+        else:
+            st.warning(f"No vocabulary words found with current filter. Go to Camera Mode to add words in {quiz_language}" +
+                      (f" for the {category_filter} category" if category_filter != "All Categories" else "") + ".")
+            
+            # Show a specific message for empty vocabulary
+            if not vocabulary:
+                st.info("Start by learning some words in Camera Mode to build your vocabulary!")
+            elif not any(word['language_translated'] == quiz_lang_code for word in vocabulary):
+                st.info(f"You don't have any words in {quiz_language} yet. Try selecting a different language or add some new words.")
+            else:
+                st.info(f"No words found in the {category_filter} category. Try selecting 'All Categories' or add words in this category.")
+                
 elif app_mode == "Statistics":
     st.title("📊 Learning Statistics")
     st.markdown("Track your progress and learning habits.")
