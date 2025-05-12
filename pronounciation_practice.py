@@ -1,297 +1,352 @@
 """
 Pronunciation Practice Module for Vocam Language Learning App
-
-This module provides voice recognition capabilities to let users practice
-pronunciation and receive feedback on their spoken language skills.
+This module provides speech recognition and pronunciation feedback functionality.
 """
 
-import streamlit as st
-import base64
 import time
-import numpy as np
-from io import BytesIO
-import re
-import tempfile
 import os
-from typing import Tuple, Dict, List, Optional, Union
-import random
+import re
+from io import BytesIO
+import numpy as np
+import streamlit as st
+import tempfile
 
-# Try importing the required libraries with graceful fallbacks
-try:
-    import speech_recognition as sr
-    has_speech_recognition = True
-except ImportError:
-    has_speech_recognition = False
+# Define difficult sounds by language
+DIFFICULT_SOUNDS = {
+    "es": {  # Spanish
+        'j': {'sound': 'h', 'example': 'jalapeño → halapeño'},
+        'll': {'sound': 'y', 'example': 'llamar → yamar'},
+        'ñ': {'sound': 'ny', 'example': 'niño → ninyo'},
+        'rr': {'sound': 'rolled r', 'example': 'perro → pe(rolled r)o'},
+        'v': {'sound': 'b/v', 'example': 'vaca sounds like baca'}
+    },
+    "fr": {  # French
+        'r': {'sound': 'guttural r', 'example': 'rouge → (guttural r)oozh'},
+        'u': {'sound': 'ü (rounded lips)', 'example': 'tu → tü'},
+        'eu': {'sound': 'like "e" in "the"', 'example': 'peu → puh'},
+        'ou': {'sound': 'oo', 'example': 'vous → voo'},
+        'au/eau': {'sound': 'oh', 'example': 'beau → boh'},
+        'ai/è': {'sound': 'eh', 'example': 'mais → meh'},
+        'an/en': {'sound': 'nasal "ah"', 'example': 'enfant → ahfah (nasal)'}
+    },
+    "de": {  # German
+        'ch': {'sound': 'kh/sh', 'example': 'ich → ish, Bach → bakh'},
+        'r': {'sound': 'guttural r', 'example': 'rot → (guttural r)oht'},
+        'ü': {'sound': 'ü (rounded lips)', 'example': 'über → üba'},
+        'ö': {'sound': 'eu sound', 'example': 'schön → sheun'},
+        'ä': {'sound': 'eh', 'example': 'Mädchen → mehdshen'},
+        'ei': {'sound': 'eye', 'example': 'nein → nine'},
+        'ie': {'sound': 'ee', 'example': 'wie → vee'},
+        'z': {'sound': 'ts', 'example': 'zu → tsoo'},
+        'v': {'sound': 'f', 'example': 'Vater → fata'}
+    },
+    "it": {  # Italian
+        'gli': {'sound': 'ly', 'example': 'figlio → feelyo'},
+        'gn': {'sound': 'ny', 'example': 'gnocchi → nyokee'},
+        'r': {'sound': 'rolled r', 'example': 'Roma → (rolled r)oma'},
+        'c+e/i': {'sound': 'ch', 'example': 'ciao → chow'},
+        'c+a/o/u': {'sound': 'k', 'example': 'casa → kaza'},
+        'sc+e/i': {'sound': 'sh', 'example': 'scienza → shentsa'},
+        'z': {'sound': 'ts/dz', 'example': 'pizza → peetsa'}
+    },
+    # Add more languages as needed
+}
+
+def create_pronunciation_practice(text_to_speech_func=None, get_audio_html_func=None, translate_text_func=None):
+    """
+    Factory function to create a pronunciation practice module.
     
-try:
-    import pydub
-    from pydub import AudioSegment
-    has_pydub = True
-except ImportError:
-    has_pydub = False
-
-def _default_text_to_speech(text, lang):
-    """Fallback text-to-speech function."""
-    try:
-        from gtts import gTTS
-        tts = gTTS(text=text, lang=lang, slow=False)
-        mp3_fp = BytesIO()
-        tts.write_to_fp(mp3_fp)
-        mp3_fp.seek(0)
-        audio_bytes = mp3_fp.read()
-        return audio_bytes
-    except Exception as e:
-        print(f"Text-to-speech error: {e}")
-        return None
-
-def _default_get_audio_html(audio_bytes):
-    """Fallback function to generate HTML for audio playback."""
-    if not audio_bytes:
-        return "<p>Audio not available</p>"
-    audio_base64 = base64.b64encode(audio_bytes).decode()
-    audio_tag = f'<audio src="data:audio/mp3;base64,{audio_base64}" controls></audio>'
-    return audio_tag
-
-def _default_translate_text(text, target_language):
-    """Fallback translation function."""
-    try:
-        # Try to use Google Translate API
-        from google.cloud import translate_v2 as translate
-        translate_client = translate.Client()
-        result = translate_client.translate(text, target_language=target_language)
-        return result["translatedText"]
-    except:
-        try:
-            # Try to use deep_translator
-            from deep_translator import GoogleTranslator
-            translator = GoogleTranslator(source='auto', target=target_language)
-            return translator.translate(text)
-        except:
-            # Return the original text if translation fails
-            return f"[Translation to {target_language} not available]"
+    Args:
+        text_to_speech_func: Function to convert text to speech audio
+        get_audio_html_func: Function to generate HTML for audio playback
+        translate_text_func: Function to translate text between languages
         
+    Returns:
+        An instance of PronunciationPractice class
+    """
+    try:
+        # Try to import required libraries
+        import speech_recognition as sr
+        import Levenshtein
+        from pydub import AudioSegment
+        
+        # Create and return the practice module
+        return PronunciationPractice(
+            text_to_speech_func,
+            get_audio_html_func,
+            translate_text_func,
+            sr,
+            Levenshtein,
+            AudioSegment
+        )
+    except ImportError as e:
+        # Create a dummy practice module that shows installation instructions
+        return DummyPronunciationPractice(
+            text_to_speech_func,
+            get_audio_html_func,
+            translate_text_func
+        )
+
+class DummyPronunciationPractice:
+    """
+    Dummy class that provides instructions for installing required packages
+    when actual pronunciation practice isn't available.
+    """
+    
+    def __init__(self, text_to_speech_func, get_audio_html_func, translate_text_func):
+        self.text_to_speech = text_to_speech_func
+        self.get_audio_html = get_audio_html_func
+        self.translate_text = translate_text_func
+        # Initialize difficult_sounds attribute
+        self.difficult_sounds = DIFFICULT_SOUNDS
+    
+    def render_practice_ui(self, word):
+        """Render a message about installing required packages."""
+        with st.expander("🎤 Practice Pronunciation"):
+            st.warning("Pronunciation practice requires additional packages.")
+            st.info("To enable pronunciation practice, install the following packages:")
+            st.code("sudo apt-get install portaudio19-dev python3-pyaudio")
+            st.code("pip install SpeechRecognition pydub PyAudio python-Levenshtein")
+            
+            st.markdown("After installing, restart the application to use pronunciation practice.")
+    
+    def render_practice_session(self, vocabulary, language_code):
+        """Render a message about installing required packages for the practice session."""
+        st.warning("Pronunciation practice requires additional packages.")
+        st.info("To enable pronunciation practice, install the following packages:")
+        
+        st.markdown("### System Dependencies:")
+        st.code("sudo apt-get install portaudio19-dev python3-pyaudio")
+        
+        st.markdown("### Python Packages:")
+        st.code("pip install SpeechRecognition pydub PyAudio python-Levenshtein")
+        
+        st.markdown("After installing, restart the application to use pronunciation practice.")
+        
+        # Show sample of what it will look like
+        st.markdown("### Sample Pronunciation Feature")
+        st.image("https://i.ibb.co/GTxfJsQ/pronunciation-practice-sample.png", 
+                caption="Sample pronunciation practice interface")
 
 class PronunciationPractice:
-    """Handles voice recognition and pronunciation feedback."""
+    """
+    Main class for pronunciation practice functionality.
+    Provides speech recognition and feedback for language learning.
+    """
     
-    def __init__(self, 
-             text_to_speech_func=None, 
-             get_audio_html_func=None,
-             translate_text_func=None):
+    def __init__(self, text_to_speech_func, get_audio_html_func, translate_text_func, 
+                 speech_recognition, levenshtein, audio_segment):
+        # Store dependencies
+        self.text_to_speech = text_to_speech_func
+        self.get_audio_html = get_audio_html_func
+        self.translate_text = translate_text_func
+        self.sr = speech_recognition
+        self.Levenshtein = levenshtein
+        self.AudioSegment = audio_segment
+        
+        # Create a speech recognizer
+        self.recognizer = self.sr.Recognizer()
+        
+        # Initialize difficult_sounds attribute 
+        self.difficult_sounds = DIFFICULT_SOUNDS
+        
+        # Set language-specific properties
+        self._init_language_settings()
+    
+    def _init_language_settings(self):
+        """Initialize language-specific settings."""
+        # Map language codes to speech recognition language settings
+        self.recognition_languages = {
+            "es": "es-ES",  # Spanish
+            "fr": "fr-FR",  # French
+            "de": "de-DE",  # German
+            "it": "it-IT",  # Italian
+            "pt": "pt-BR",  # Portuguese
+            "ru": "ru-RU",  # Russian
+            "ja": "ja-JP",  # Japanese
+            "zh-CN": "zh-CN",  # Chinese (Simplified)
+            "en": "en-US"   # English
+        }
+    
+    def render_practice_ui(self, word):
         """
-        Initialize the pronunciation practice module.
+        Render the pronunciation practice UI for a specific word.
         
         Args:
-            text_to_speech_func: Function that converts text to speech
-            get_audio_html_func: Function that generates HTML for audio playback
-            translate_text_func: Function that translates text between languages
+            word: Dictionary containing the vocabulary word data
         """
-        # Use provided functions or fallbacks
-        self.text_to_speech = text_to_speech_func or _default_text_to_speech
-        self.get_audio_html = get_audio_html_func or _default_get_audio_html
-        self.translate_text = translate_text_func or _default_translate_text
+        with st.expander("🎤 Practice Pronunciation"):
+            # Get word data
+            original_word = word.get('word_original', '')
+            translated_word = word.get('word_translated', '')
+            language_code = word.get('language_translated', 'en')
             
-    def is_available(self) -> bool:
-        """Check if voice recognition is available."""
-        return has_speech_recognition and has_pydub
-    
-    def get_requirements(self) -> List[str]:
-        """Get a list of required packages that are missing."""
-        missing = []
-        if not has_speech_recognition:
-            missing.append("SpeechRecognition (pip install SpeechRecognition)")
-        if not has_pydub:
-            missing.append("pydub (pip install pydub)")
-        if not has_speech_recognition or not has_pydub:
-            missing.append("PyAudio (pip install PyAudio)")
-        return missing
-    
-    def render_practice_ui(self, word: Dict, vocabulary: List[Dict] = None) -> None:
-        """
-        Render the pronunciation practice UI for a given word.
-        
-        Args:
-            word: Dictionary containing word information
-            vocabulary: Optional list of vocabulary words for related practice
-        """
-        if not self.is_available():
-            st.warning("Pronunciation practice requires additional packages.")
-            st.info("Please install the following packages to enable pronunciation practice:")
-            for pkg in self.get_requirements():
-                st.code(f"pip install {pkg}")
-            return
-        
-        with st.expander("🎤 Practice Pronunciation", expanded=True):
-            col1, col2 = st.columns([1, 1])
+            # Display the word to practice
+            st.subheader(f"Practice: {translated_word}")
             
-            with col1:
-                st.markdown("### Listen to the correct pronunciation")
-                if word.get('word_translated') and self.text_to_speech and self.get_audio_html:
-                    audio_bytes = self.text_to_speech(word['word_translated'], word['language_translated'])
-                    if audio_bytes:
-                        st.markdown(self.get_audio_html(audio_bytes), unsafe_allow_html=True)
-                        st.markdown("👆 Listen carefully and try to match the pronunciation")
-                
-                # Show pronunciation tips
-                st.markdown("### Pronunciation Tips")
-                self._show_pronunciation_tips(word)
+            # Play the pronunciation
+            st.markdown("**Listen to correct pronunciation:**")
+            audio_bytes = self.text_to_speech(translated_word, language_code)
+            if audio_bytes:
+                st.markdown(self.get_audio_html(audio_bytes), unsafe_allow_html=True)
             
-            with col2:
-                st.markdown("### Your Pronunciation")
-                
-                # Add record button for voice input
-                if st.button("🎙️ Record Pronunciation"):
-                    with st.spinner("Listening... Speak now"):
-                        audio_data, error = self._record_audio()
-                        
-                        if error:
-                            st.error(f"Error recording audio: {error}")
-                        elif audio_data:
-                            # Save to session state to preserve between renders
-                            st.session_state.last_recorded_audio = audio_data
-                            st.rerun()
-                
-                # If we have recorded audio, display and analyze it
-                if hasattr(st.session_state, 'last_recorded_audio') and st.session_state.last_recorded_audio:
-                    # Convert the audio data to a format that can be played in the browser
-                    with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
-                        tmp_file.write(st.session_state.last_recorded_audio)
-                        tmp_path = tmp_file.name
-                    
-                    # Display audio player for recorded audio
-                    audio_bytes = open(tmp_path, 'rb').read()
-                    st.audio(audio_bytes, format="audio/wav")
-                    
-                    # Now try to recognize the speech
-                    with st.spinner("Analyzing your pronunciation..."):
-                        recognized_text, confidence = self._recognize_speech(
-                            st.session_state.last_recorded_audio,
-                            language_code=self.language_codes.get(word['language_translated'], 'en-US')
-                        )
-                        
-                        # Calculate similarity score
-                        similarity_score = self._calculate_similarity(recognized_text, word['word_translated'])
-                        
-                        # Show results
-                        self._show_pronunciation_results(
-                            word['word_translated'], recognized_text, similarity_score, confidence
-                        )
-                    
-                    # Clean up temp file
-                    try:
-                        os.unlink(tmp_path)
-                    except:
-                        pass
-                    
-                    # Option to clear recording and try again
-                    if st.button("Clear and Try Again"):
-                        if hasattr(st.session_state, 'last_recorded_audio'):
-                            del st.session_state.last_recorded_audio
-                        st.rerun()
+            # Show pronunciation tips
+            self._show_pronunciation_tips(word)
+            
+            # Record pronunciation button
+            if st.button("Record Pronunciation", key=f"record_{word['id']}"):
+                # Record and analyze
+                self._record_and_analyze(translated_word, language_code)
     
-    def render_practice_session(self, vocabulary: List[Dict], language_code: str) -> None:
+    def render_practice_session(self, vocabulary, language_code):
         """
         Render a full pronunciation practice session with multiple words.
         
         Args:
             vocabulary: List of vocabulary words
-            language_code: Language code for practice
+            language_code: Language code for the practice session
         """
-        if not self.is_available():
-            st.warning("Pronunciation practice requires additional packages.")
-            st.info("Please install the following packages to enable pronunciation practice:")
-            for pkg in self.get_requirements():
-                st.code(f"pip install {pkg}")
-            return
-        
-        # Get words for the selected language
-        filtered_vocab = [w for w in vocabulary if w.get('language_translated') == language_code]
-        
-        if not filtered_vocab:
-            st.warning(f"No vocabulary words found for this language. Add words in Camera Mode first.")
-            return
-        
-        # Initialize session state for practice session
+        # If there's no practice session data, show a message
         if 'practice_words' not in st.session_state:
-            # Select 5 random words for practice
-            practice_size = min(5, len(filtered_vocab))
-            st.session_state.practice_words = random.sample(filtered_vocab, practice_size)
-            st.session_state.current_practice_index = 0
-            st.session_state.practice_scores = []
+            st.info("Click 'Start Practice Session' to begin pronunciation practice.")
+            return
         
-        # Show progress
+        # Display current practice word
         current_index = st.session_state.current_practice_index
-        total_words = len(st.session_state.practice_words)
-        st.progress((current_index) / total_words)
-        st.markdown(f"**Word {current_index + 1} of {total_words}**")
-        
-        # Get current word
-        if current_index < total_words:
+        if current_index < len(st.session_state.practice_words):
             current_word = st.session_state.practice_words[current_index]
             
-            # Display word information
-            st.markdown(f"## {current_word['word_translated']}")
-            st.markdown(f"*Means: {current_word['word_original']}*")
+            # Progress bar
+            progress = current_index / len(st.session_state.practice_words)
+            st.progress(progress)
+            st.subheader(f"Word {current_index + 1} of {len(st.session_state.practice_words)}")
             
-            # Show practice UI for this word
+            # Display the practice UI for this word
             self.render_practice_ui(current_word)
             
-            # Navigation buttons
-            cols = st.columns([1, 1, 1])
+            # Show stats if available
+            if 'practice_scores' in st.session_state and len(st.session_state.practice_scores) > 0:
+                scores = st.session_state.practice_scores
+                avg_score = sum(scores) / len(scores)
+                st.info(f"Current accuracy: {avg_score:.0f}%")
             
-            with cols[0]:
-                if current_index > 0:
-                    if st.button("⬅️ Previous Word"):
-                        st.session_state.current_practice_index -= 1
-                        if hasattr(st.session_state, 'last_recorded_audio'):
-                            del st.session_state.last_recorded_audio
-                        st.rerun()
+            # Next word button
+            if st.button("Next Word", type="primary"):
+                st.session_state.current_practice_index += 1
+                st.rerun()
+        else:
+            # Practice session completed
+            self._show_practice_results()
             
-            with cols[2]:
-                if current_index < total_words - 1:
-                    if st.button("Next Word ➡️"):
-                        st.session_state.current_practice_index += 1
-                        if hasattr(st.session_state, 'last_recorded_audio'):
-                            del st.session_state.last_recorded_audio
-                        st.rerun()
-                else:
-                    if st.button("Finish Practice 🎉"):
-                        st.session_state.practice_complete = True
-                        st.rerun()
-        
-        # Show practice results
-        if hasattr(st.session_state, 'practice_complete') and st.session_state.practice_complete:
-            st.success("Practice session complete!")
-            
-            # Show summary of performance
-            if st.session_state.practice_scores:
-                avg_score = sum(st.session_state.practice_scores) / len(st.session_state.practice_scores)
-                st.markdown(f"### Your average pronunciation score: {avg_score:.1f}%")
-                
-                # Create a bar chart of scores
-                score_data = pd.DataFrame({
-                    'Word': [w['word_translated'] for w in st.session_state.practice_words[:len(st.session_state.practice_scores)]],
-                    'Score': st.session_state.practice_scores
-                })
-                
-                st.bar_chart(score_data.set_index('Word'))
-            
-            # Option to start a new practice session
-            if st.button("Start New Practice Session"):
-                # Reset practice session state
-                if 'practice_words' in st.session_state:
-                    del st.session_state.practice_words
-                if 'current_practice_index' in st.session_state:
-                    del st.session_state.current_practice_index
-                if 'practice_scores' in st.session_state:
-                    del st.session_state.practice_scores
-                if 'practice_complete' in st.session_state:
-                    del st.session_state.practice_complete
-                if 'last_recorded_audio' in st.session_state:
-                    del st.session_state.last_recorded_audio
+            # Reset button
+            if st.button("Practice Again", type="primary"):
+                import random
+                # Create a new set of practice words
+                filtered_vocab = [word for word in vocabulary 
+                                if word['language_translated'] == language_code]
+                practice_size = min(5, len(filtered_vocab))
+                st.session_state.practice_words = random.sample(filtered_vocab, practice_size)
+                st.session_state.current_practice_index = 0
+                st.session_state.practice_scores = []
                 st.rerun()
     
-    def _record_audio(self, duration=5) -> Tuple[bytes, Optional[str]]:
+    def _record_and_analyze(self, target_word, language_code):
+        """
+        Record user's pronunciation and analyze it.
+        
+        Args:
+            target_word: The word the user should pronounce
+            language_code: Language code for speech recognition
+        """
+        # Create a placeholder for the recording UI
+        recording_placeholder = st.empty()
+        
+        try:
+            with recording_placeholder.container():
+                st.info("🎤 Recording... Speak the word clearly")
+                
+                # Record audio
+                audio_data = self._record_audio(5)  # 5 seconds recording
+                
+                if audio_data:
+                    # Display success message
+                    st.success("Recording complete!")
+                    
+                    # Play back recording
+                    st.audio(audio_data, format="audio/wav")
+                    
+                    # Convert audio data to the format needed for recognition
+                    # Use a temporary file for the audio data
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as f:
+                        f.write(audio_data)
+                        temp_filename = f.name
+                    
+                    # Process the audio for speech recognition
+                    with self.sr.AudioFile(temp_filename) as source:
+                        audio = self.recognizer.record(source)
+                    
+                    # Perform speech recognition
+                    recognition_lang = self.recognition_languages.get(language_code, "en-US")
+                    
+                    try:
+                        recognized_text = self.recognizer.recognize_google(
+                            audio, 
+                            language=recognition_lang
+                        )
+                        
+                        # Clean up temp file
+                        try:
+                            os.unlink(temp_filename)
+                        except:
+                            pass
+                        
+                        # Show recognition result
+                        recognized_text = recognized_text.lower().strip()
+                        target_word = target_word.lower().strip()
+                        
+                        # Calculate similarity score
+                        similarity = self._calculate_similarity(recognized_text, target_word)
+                        
+                        # Store score
+                        if 'practice_scores' not in st.session_state:
+                            st.session_state.practice_scores = []
+                        st.session_state.practice_scores.append(similarity)
+                        
+                        # Clear the recording UI
+                        recording_placeholder.empty()
+                        
+                        # Display result with feedback
+                        self._show_pronunciation_feedback(
+                            target_word, recognized_text, similarity, language_code
+                        )
+                    
+                    except Exception as e:
+                        # Clear the recording UI
+                        recording_placeholder.empty()
+                        st.error(f"Could not recognize speech: {str(e)}")
+                        
+                        # If we got an error, it might be because the word wasn't spoken
+                        # or the recognition failed. Either way, provide guidance.
+                        st.info("Try again! Make sure to speak clearly and closely to the microphone.")
+                else:
+                    # Clear the recording UI
+                    recording_placeholder.empty()
+                    st.error("No audio data captured. Please check your microphone settings.")
+        
+        except Exception as e:
+            # Clear the recording UI
+            recording_placeholder.empty()
+            st.error(f"Error recording audio: {str(e)}")
+            
+            # Provide fallback instructions
+            st.info("""
+            If you're having trouble with the microphone:
+            1. Make sure your browser has permission to access the microphone
+            2. Try using a headset or external microphone
+            3. Speak clearly and closely to the microphone
+            """)
+    
+    def _record_audio(self, duration=5):
         """
         Record audio from the microphone.
         
@@ -299,256 +354,214 @@ class PronunciationPractice:
             duration: Recording duration in seconds
             
         Returns:
-            Tuple of (audio_data, error_message)
+            Audio data as bytes
         """
-        if not has_speech_recognition:
-            return None, "SpeechRecognition library not available"
+        # Create a recognizer and microphone instance
+        r = self.sr.Recognizer()
+        mic = self.sr.Microphone()
         
-        try:
-            with sr.Microphone() as source:
-                # Adjust for ambient noise
-                self.recognizer.adjust_for_ambient_noise(source)
-                
-                # Record audio
-                audio = self.recognizer.record(source, duration=duration)
-                
-                # Convert to WAV format
-                wav_data = audio.get_wav_data()
-                
-                return wav_data, None
-        except Exception as e:
-            return None, str(e)
+        # Record audio
+        with mic as source:
+            # Adjust for ambient noise
+            r.adjust_for_ambient_noise(source)
+            audio = r.listen(source, timeout=duration, phrase_time_limit=duration)
+        
+        # Convert audio to WAV format
+        wav_data = audio.get_wav_data()
+        return wav_data
     
-    def _recognize_speech(self, audio_data, language_code='en-US') -> Tuple[str, float]:
+    def _calculate_similarity(self, text1, text2):
         """
-        Recognize speech from audio data.
+        Calculate similarity between two strings.
         
         Args:
-            audio_data: Audio data to recognize
-            language_code: Language code for recognition
+            text1: First string
+            text2: Second string
             
         Returns:
-            Tuple of (recognized_text, confidence)
+            Similarity score (0-100%)
         """
-        if not has_speech_recognition:
-            return "", 0.0
+        # Remove punctuation and extra spaces
+        text1 = re.sub(r'[^\w\s]', '', text1).strip().lower()
+        text2 = re.sub(r'[^\w\s]', '', text2).strip().lower()
         
-        try:
-            # Convert audio bytes to AudioData object
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
-                tmp_file.write(audio_data)
-                tmp_path = tmp_file.name
+        # If either string is empty, return 0
+        if not text1 or not text2:
+            return 0
+        
+        # Calculate Levenshtein distance
+        distance = self.Levenshtein.distance(text1, text2)
+        
+        # Calculate similarity as percentage
+        max_len = max(len(text1), len(text2))
+        if max_len == 0:
+            return 100  # Both strings are empty
+        
+        similarity = 100 * (1 - distance / max_len)
+        return similarity
+    
+    def _show_pronunciation_feedback(self, target, recognized, similarity, language_code):
+        """
+        Show feedback on pronunciation with suggestions for improvement.
+        
+        Args:
+            target: Target word or phrase
+            recognized: Recognized word or phrase
+            similarity: Similarity score (0-100%)
+            language_code: Language code
+        """
+        # Create a feedback container
+        with st.container():
+            st.subheader("Pronunciation Feedback")
             
-            with sr.AudioFile(tmp_path) as source:
-                audio = self.recognizer.record(source)
+            # Display what was heard vs what was expected
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("**You said:**")
+                st.markdown(f"### {recognized}")
             
-            # Use Google's speech recognition
-            result = self.recognizer.recognize_google(
-                audio, 
-                language=language_code,
-                show_all=True
-            )
+            with col2:
+                st.markdown("**Correct pronunciation:**")
+                st.markdown(f"### {target}")
             
-            # Clean up temp file
-            try:
-                os.unlink(tmp_path)
-            except:
-                pass
-            
-            # Extract text and confidence
-            if result and isinstance(result, dict) and 'alternative' in result:
-                top_result = result['alternative'][0]
-                text = top_result.get('transcript', '').lower()
-                confidence = top_result.get('confidence', 0.0)
-                return text, confidence
-            elif result and isinstance(result, list) and len(result) > 0:
-                return result[0], 0.5  # Default confidence if not provided
+            # Display similarity score
+            if similarity >= 90:
+                st.success(f"Excellent pronunciation! {similarity:.0f}% accuracy")
+            elif similarity >= 70:
+                st.info(f"Good pronunciation! {similarity:.0f}% accuracy")
+            elif similarity >= 50:
+                st.warning(f"Fair pronunciation. {similarity:.0f}% accuracy")
             else:
-                return "", 0.0
-        except Exception as e:
-            print(f"Recognition error: {e}")
-            return "", 0.0
+                st.error(f"Needs improvement. {similarity:.0f}% accuracy")
+            
+            # Show specific feedback based on differences
+            if similarity < 90:
+                st.markdown("### Tips for Improvement")
+                
+                # Identify specific sounds to focus on
+                problematic_sounds = self._identify_problematic_sounds(target, recognized, language_code)
+                
+                if problematic_sounds:
+                    st.markdown("Focus on these sounds:")
+                    for sound in problematic_sounds:
+                        # Get example for this sound if available
+                        sound_data = self.difficult_sounds.get(language_code, {}).get(sound, None)
+                        if sound_data:
+                            st.markdown(f"- **'{sound}'** sounds like **'{sound_data['sound']}'** (Example: {sound_data['example']})")
+                        else:
+                            st.markdown(f"- Practice the **'{sound}'** sound")
+                
+                # General advice
+                st.markdown("""
+                **Practice techniques:**
+                1. Listen to the correct pronunciation multiple times
+                2. Speak slowly and clearly
+                3. Exaggerate mouth movements at first
+                4. Record yourself and compare with the original
+                """)
     
-    def _calculate_similarity(self, recognized_text: str, target_text: str) -> float:
+    def _identify_problematic_sounds(self, target, recognized, language_code):
         """
-        Calculate similarity between recognized text and target text.
+        Identify potentially problematic sounds based on mispronunciation.
         
         Args:
-            recognized_text: Text recognized from speech
-            target_text: Expected text
+            target: Target word
+            recognized: Recognized word
+            language_code: Language code
             
         Returns:
-            Similarity score between 0 and 100
+            List of problematic sounds
         """
-        # Normalize both texts
-        recognized = recognized_text.lower().strip()
-        target = target_text.lower().strip()
+        # Get difficult sounds for this language
+        language_sounds = self.difficult_sounds.get(language_code, {})
         
-        if not recognized or not target:
-            return 0.0
+        # If no language-specific sounds, return empty list
+        if not language_sounds:
+            return []
         
-        # Direct match check
-        if recognized == target:
-            return 100.0
+        # Check for these sounds in the target word
+        problematic = []
         
-        # Check if target appears in recognized
-        if target in recognized:
-            return 90.0
+        for sound, data in language_sounds.items():
+            # If the sound is in the target word but the recognition is different
+            if sound in target.lower() and (sound not in recognized.lower() or similarity < 70):
+                problematic.append(sound)
         
-        # Check if recognized is in target
-        if recognized in target:
-            return 80.0
+        # If we didn't find specific problems, check for other common issues
+        if not problematic and similarity < 50:
+            for sound in language_sounds.keys():
+                if sound in target.lower():
+                    problematic.append(sound)
         
-        # Use Levenshtein distance for partial match scoring
-        try:
-            import Levenshtein
-            distance = Levenshtein.distance(recognized, target)
-            max_len = max(len(recognized), len(target))
-            if max_len == 0:
-                return 0.0
-            similarity = (1 - (distance / max_len)) * 100
-            return max(0, similarity)
-        except ImportError:
-            # Fallback to simple character matching if Levenshtein not available
-            # Count matching characters in sequence
-            matches = 0
-            for r, t in zip(recognized, target):
-                if r == t:
-                    matches += 1
-            
-            similarity = (matches / len(target)) * 100
-            return similarity
+        return problematic[:3]  # Limit to top 3 problems
     
-    def _show_pronunciation_tips(self, word: Dict) -> None:
+    def _show_pronunciation_tips(self, word):
         """
         Show pronunciation tips for a word.
         
         Args:
-            word: Word dictionary with translation and language info
+            word: Word dictionary
         """
+        # Get language code
         language_code = word.get('language_translated', 'en')
-        word_text = word.get('word_translated', '')
         
-        # Get language-specific difficult sounds
+        # Get the word to show tips for
+        translated_word = word.get('word_translated', '')
+        
+        # Get difficult sounds for this language
         language_sounds = self.difficult_sounds.get(language_code, {})
         
-        # Check for difficult sounds in the word
+        # Find sounds in this word
         tips = []
-        for sound, tip in language_sounds.items():
-            if sound in word_text.lower():
-                tips.append(f"- The sound '{sound}' is pronounced as {tip}")
-        
-        # Show general pronunciation pattern
-        if language_code == 'es':
-            tips.append("- Spanish is pronounced as it's written, with consistent vowel sounds")
-        elif language_code == 'fr':
-            tips.append("- French often has silent letters at the end of words")
-        elif language_code == 'de':
-            tips.append("- German has strong consonants and consistent vowel pronunciation")
-        elif language_code == 'it':
-            tips.append("- Italian has melodic pronunciation with clear vowels")
+        for sound, data in language_sounds.items():
+            if sound in translated_word.lower():
+                tips.append(f"**'{sound}'** sounds like **'{data['sound']}'**")
         
         # Display tips
         if tips:
+            st.markdown("**Pronunciation tips:**")
             for tip in tips:
-                st.markdown(tip)
+                st.markdown(f"- {tip}")
         else:
-            st.markdown("- Focus on clear pronunciation and matching the audio example")
-        
-        # Add tip for listening and repeating
-        st.markdown("- Listen to the audio multiple times and try to mimic it exactly")
+            st.markdown("*No specific pronunciation tips for this word.*")
     
-    def _show_pronunciation_results(
-        self, 
-        expected_text: str, 
-        recognized_text: str, 
-        similarity_score: float, 
-        confidence: float
-    ) -> None:
-        """
-        Show pronunciation analysis results.
+    def _show_practice_results(self):
+        """Show results of the practice session."""
+        st.subheader("🎉 Practice Session Completed!")
         
-        Args:
-            expected_text: What should have been said
-            recognized_text: What was actually recognized
-            similarity_score: How similar they are (0-100)
-            confidence: Speech recognition confidence
-        """
-        st.markdown("### Pronunciation Analysis")
+        # Get scores
+        scores = st.session_state.practice_scores
         
-        # Display recognized text
-        st.markdown(f"**Recognized:** {recognized_text or 'No speech detected'}")
+        if not scores:
+            st.info("No pronunciation attempts were recorded.")
+            return
         
-        # Display score with color coding
-        if similarity_score >= 80:
-            st.success(f"Pronunciation Score: {similarity_score:.1f}%")
-            feedback = "Excellent pronunciation! Keep it up!"
-        elif similarity_score >= 60:
-            st.info(f"Pronunciation Score: {similarity_score:.1f}%")
-            feedback = "Good pronunciation. Try to match the audio more closely."
-        elif similarity_score >= 40:
-            st.warning(f"Pronunciation Score: {similarity_score:.1f}%")
-            feedback = "Your pronunciation needs some work. Listen carefully to the example and try again."
+        # Calculate stats
+        avg_score = sum(scores) / len(scores)
+        min_score = min(scores)
+        max_score = max(scores)
+        
+        # Display stats
+        st.markdown(f"**Average accuracy: {avg_score:.0f}%**")
+        st.markdown(f"Best pronunciation: {max_score:.0f}%")
+        st.markdown(f"Areas for improvement: {min_score:.0f}%")
+        
+        # Feedback based on average score
+        if avg_score >= 90:
+            st.success("Outstanding work! Your pronunciation is excellent.")
+        elif avg_score >= 75:
+            st.success("Great job! Your pronunciation is very good.")
+        elif avg_score >= 60:
+            st.info("Good effort! Continue practicing to improve your accent.")
         else:
-            st.error(f"Pronunciation Score: {similarity_score:.1f}%")
-            feedback = "Try again! Focus on matching the sounds in the audio example."
+            st.warning("Keep practicing! Regular practice will improve your pronunciation.")
         
-        # Show feedback
-        st.markdown(f"**Feedback:** {feedback}")
+        # Suggestions for next steps
+        st.markdown("""
+        ### Next Steps
         
-        # Store score in session state for session-level tracking
-        if hasattr(st.session_state, 'practice_scores'):
-            st.session_state.practice_scores.append(similarity_score)
-        
-        # Show specific differences if available
-        if similarity_score < 100 and recognized_text and expected_text:
-            st.markdown("### Pronunciation Tips")
-            
-            if recognized_text in expected_text:
-                st.markdown("- Your pronunciation is close! Try to pronounce the full word clearly.")
-            elif expected_text in recognized_text:
-                st.markdown("- You added extra sounds. Try to pronounce just the word itself.")
-            else:
-                # Highlight specific sounds that might be wrong
-                different_chars = set(expected_text).symmetric_difference(set(recognized_text))
-                if different_chars:
-                    sound_list = ", ".join(f"'{c}'" for c in different_chars)
-                    st.markdown(f"- Focus on the sounds: {sound_list}")
-                
-                # Check for common issues
-                if len(recognized_text) < len(expected_text):
-                    st.markdown("- You may be missing some sounds. Pronounce each syllable clearly.")
-                else:
-                    st.markdown("- Try again, focusing on matching the rhythm of the example audio.")
-        
-        # If excellent, offer to move to next word
-        if similarity_score >= 80 and hasattr(st.session_state, 'practice_words'):
-            if st.session_state.current_practice_index < len(st.session_state.practice_words) - 1:
-                if st.button("Continue to Next Word ➡️"):
-                    st.session_state.current_practice_index += 1
-                    if hasattr(st.session_state, 'last_recorded_audio'):
-                        del st.session_state.last_recorded_audio
-                    st.rerun()
-
-
-# Import pandas for visualization in the practice session
-import pandas as pd
-
-# Function to create the practice module with dependencies injected
-def create_pronunciation_practice(text_to_speech_func, get_audio_html_func, translate_text_func=None):
-    """
-    Create a pronunciation practice module with the required dependencies.
-    
-    Args:
-        text_to_speech_func: Function that converts text to speech
-        get_audio_html_func: Function that generates HTML for audio playback
-        translate_text_func: Function that translates text
-        
-    Returns:
-        PronunciationPractice instance
-    """
-    return PronunciationPractice(
-        text_to_speech_func=text_to_speech_func,
-        get_audio_html_func=get_audio_html_func,
-        translate_text_func=translate_text_func
-    )
+        1. **Listen carefully** to native speakers
+        2. **Record yourself** speaking and compare with native pronunciation
+        3. **Practice daily** for best results
+        4. **Focus on difficult sounds** specific to this language
+        """)
