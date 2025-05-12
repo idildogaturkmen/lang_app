@@ -1009,7 +1009,7 @@ class GamificationSystem:
     
     def render_dashboard(self):
         """Render the complete gamification dashboard."""
-        st.title("🎮 Challenges")
+        st.title("🎮 My Progress")
         
         # User level and points at the top
         col1, col2 = st.columns([1, 3])
@@ -1059,7 +1059,7 @@ class GamificationSystem:
     def update_sidebar(self):
         """Update the sidebar with gamification information."""
         try:
-            with st.sidebar.expander("🏆 Gamification", expanded=True):
+            with st.sidebar.expander("🏆 My Progress", expanded=True):
                 # Use get() with default values to safely access session state
                 level = st.session_state.get("level", 1)  # Default to 1 if not exists
                 points = st.session_state.get("points", 0)  # Default to 0 if not exists
@@ -1088,7 +1088,7 @@ class GamificationSystem:
                     st.markdown(f"**📅 Challenges**: {completed}/{total} completed")
         except Exception as e:
             # Provide a fallback if anything goes wrong
-            st.sidebar.markdown("🏆 **Gamification system is initializing...**")
+            st.sidebar.markdown("🏆 **Progress system is initializing...**")
             print(f"Error in update_sidebar: {e}")  # Log the error
     
     #=========================================================================

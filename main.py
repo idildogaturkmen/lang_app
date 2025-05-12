@@ -18,6 +18,7 @@ from PIL import Image
 from io import BytesIO
 from gamification import GamificationSystem
 
+
 # First, display Python version for debugging
 st.set_page_config(
     page_title="Vocam",
