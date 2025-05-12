@@ -746,6 +746,40 @@ def check_database_setup():
     except Exception as e:
         st.error(f"Database error: {e}")
         return False
+    
+def prepare_vocabulary_for_diverse_questions(vocabulary, languages):
+    """Enhance vocabulary data to support diverse question types."""
+    total_words = len(vocabulary)
+    words_with_categories = 0
+    words_with_images = 0
+    words_with_examples = 0
+    
+    # Count and prepare vocabulary for diverse questions
+    for word in vocabulary:
+        # Check/count category
+        if word.get('category') and word['category'] not in ['other', 'manual', '']:
+            words_with_categories += 1
+        
+        # Check/count image
+        if word.get('image_path') and os.path.exists(word.get('image_path', '')):
+            words_with_images += 1
+        
+        # Test for example sentence
+        try:
+            example = get_example_sentence(word.get('word_original', ''), word.get('language_translated', 'en'))
+            if example and example.get('translated'):
+                words_with_examples += 1
+        except:
+            pass
+    
+    if st.session_state.debug_quiz:
+        st.sidebar.markdown("### Vocabulary Stats")
+        st.sidebar.markdown(f"Total words: {total_words}")
+        st.sidebar.markdown(f"With categories: {words_with_categories}")
+        st.sidebar.markdown(f"With images: {words_with_images}")
+        st.sidebar.markdown(f"With examples: {words_with_examples}")
+    
+    return vocabulary
 
 if 'db_checked' not in st.session_state:
     st.session_state.db_checked = check_database_setup()
@@ -803,6 +837,9 @@ if 'daily_challenges' not in st.session_state:
     st.session_state.daily_challenges = []
 if 'word_of_the_day' not in st.session_state:
     st.session_state.word_of_the_day = None
+# For debugging question type selection
+if 'debug_quiz' not in st.session_state:
+    st.session_state.debug_quiz = False
 
 @st.cache_resource
 def get_gamification():
@@ -1833,6 +1870,7 @@ elif app_mode == "Quiz Mode":
         if category_filter != "All Categories":
             filtered_vocab = [word for word in filtered_vocab if word.get('category') == category_filter]
         
+        filtered_vocab = prepare_vocabulary_for_diverse_questions(filtered_vocab, languages)
         # Display information about available words
         if filtered_vocab:
             st.markdown(f"**{len(filtered_vocab)} words available** for your quiz in {quiz_language}" + 
@@ -1877,7 +1915,7 @@ elif app_mode == "Quiz Mode":
                 st.info(f"You don't have any words in {quiz_language} yet. Try selecting a different language or add some new words.")
             else:
                 st.info(f"No words found in the {category_filter} category. Try selecting 'All Categories' or add words in this category.")
-                
+
 elif app_mode == "Statistics":
     st.title("📊 Learning Statistics")
     st.markdown("Track your progress and learning habits.")

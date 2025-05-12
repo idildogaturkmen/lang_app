@@ -98,47 +98,124 @@ class QuizSystem:
         # Determine what question types are possible with this word
         possible_types = self.get_possible_question_types(word, vocabulary)
         
-        # Choose a question type based on question number to ensure variety
-        # For first few questions, use simpler types to ease the user in
-        if current_question_num == 0:
-            question_type = "translation_to_target"  # Start with basic translation
-        elif current_question_num == 1 and "translation_to_english" in possible_types:
-            question_type = "translation_to_english"  # Second question type
+        # For debugging: log the available question types
+        if st.session_state.debug_quiz:
+            st.sidebar.markdown(f"**Word:** {word.get('word_original', 'unknown')}")
+            st.sidebar.markdown(f"**Possible types:** {len(possible_types)}")
+            for qtype in possible_types:
+                st.sidebar.markdown(f"- {qtype}")
+        
+        # Choose question type:
+        if hasattr(st.session_state, 'force_diverse') and st.session_state.force_diverse:
+            # Force diverse questions by cycling through types
+            # Based on the current_question_num, use a different question type
+            if 'question_type_history' not in st.session_state:
+                st.session_state.question_type_history = []
+            
+            # Get types we've used less frequently
+            type_counts = {}
+            for qtype in self.QUESTION_TYPES:
+                used_count = sum(1 for q in st.session_state.question_type_history if q['type'] == qtype)
+                type_counts[qtype] = used_count
+            
+            # Sort by least used
+            sorted_types = sorted(possible_types, key=lambda t: type_counts.get(t, 0))
+            
+            # Pick the least used type that's possible
+            if sorted_types:
+                question_type = sorted_types[0]
+            else:
+                question_type = "translation_to_target"  # Fallback
         else:
-            # For subsequent questions, choose randomly from possible types
-            question_type = random.choice(possible_types)
+            # Normal selection logic
+            if current_question_num == 0:
+                question_type = "translation_to_target"  # Start with basic translation
+            elif current_question_num == 1 and "translation_to_english" in possible_types:
+                question_type = "translation_to_english"  # Second question type
+            else:
+                # For subsequent questions, choose randomly from possible types
+                question_type = random.choice(possible_types)
         
         # Store the question type
         st.session_state.current_question_type = question_type
         
-        # Create options based on question type
-        if question_type == "translation_to_target":
-            # Translation question: English → Target language
+        # For debugging: record the question type chosen
+        if st.session_state.debug_quiz:
+            if 'question_type_history' not in st.session_state:
+                st.session_state.question_type_history = []
+            
+            st.session_state.question_type_history.append({
+                'num': current_question_num,
+                'word': word.get('word_original', 'unknown'),
+                'type': question_type
+            })
+        
+        # Try to set up the chosen question type
+        success = False
+        try:
+            # Create options based on question type
+            if question_type == "translation_to_target":
+                # Translation question: English → Target language
+                self.setup_translation_question(word, vocabulary, languages, to_english=False)
+                success = True
+            
+            elif question_type == "translation_to_english":
+                # Reverse translation: Target language → English
+                self.setup_translation_question(word, vocabulary, languages, to_english=True)
+                success = True
+            
+            elif question_type == "image_recognition":
+                # Image recognition: Show image, select correct word
+                if word.get('image_path') and os.path.exists(word.get('image_path', '')):
+                    self.setup_image_recognition_question(word, vocabulary, languages)
+                    success = True
+            
+            elif question_type == "category_match":
+                # Category matching: Match word to correct category
+                if word.get('category'):
+                    self.setup_category_match_question(word, vocabulary, languages)
+                    success = True
+            
+            elif question_type == "sentence_completion":
+                # Sentence completion: Fill in blank in sentence
+                example = self.get_example_sentence(word['word_original'], word['language_translated'])
+                if example and example.get('translated'):
+                    self.setup_sentence_completion_question(word, vocabulary, languages)
+                    success = True
+            
+            elif question_type == "multiple_choice_category":
+                # Choose words from same category
+                if word.get('category'):
+                    same_category_words = [w for w in vocabulary 
+                                        if w.get('category') == word.get('category') and w['id'] != word['id']]
+                    if len(same_category_words) >= 2:
+                        self.setup_multiple_choice_category_question(word, vocabulary, languages)
+                        success = True
+            
+            elif question_type == "audio_recognition":
+                # Audio recognition: Hear word, select correct option
+                audio_bytes = self.text_to_speech(word['word_translated'], word['language_translated'])
+                if audio_bytes:
+                    self.setup_audio_recognition_question(word, vocabulary, languages)
+                    success = True
+        
+        except Exception as e:
+            if st.session_state.debug_quiz:
+                st.sidebar.error(f"Error setting up {question_type}: {str(e)}")
+            success = False
+        
+        # Fallback to translation if setup failed
+        if not success:
+            if st.session_state.debug_quiz:
+                st.sidebar.warning(f"Falling back to translation question")
+            
+            # Update question type history if we're tracking
+            if st.session_state.debug_quiz and 'question_type_history' in st.session_state:
+                st.session_state.question_type_history[-1]['type'] = "translation_to_target (fallback)"
+            
+            # Use translation as fallback
             self.setup_translation_question(word, vocabulary, languages, to_english=False)
-        
-        elif question_type == "translation_to_english":
-            # Reverse translation: Target language → English
-            self.setup_translation_question(word, vocabulary, languages, to_english=True)
-        
-        elif question_type == "image_recognition":
-            # Image recognition: Show image, select correct word
-            self.setup_image_recognition_question(word, vocabulary, languages)
-        
-        elif question_type == "category_match":
-            # Category matching: Match word to correct category
-            self.setup_category_match_question(word, vocabulary, languages)
-        
-        elif question_type == "sentence_completion":
-            # Sentence completion: Fill in blank in sentence
-            self.setup_sentence_completion_question(word, vocabulary, languages)
-        
-        elif question_type == "multiple_choice_category":
-            # Choose words from same category
-            self.setup_multiple_choice_category_question(word, vocabulary, languages)
-        
-        elif question_type == "audio_recognition":
-            # Audio recognition: Hear word, select correct option
-            self.setup_audio_recognition_question(word, vocabulary, languages)
+            st.session_state.current_question_type = "translation_to_target"
         
         # Set up question elements
         st.session_state.answered = False
