@@ -30,6 +30,14 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Fix the typo in the import statement
+try:
+    from pronounciation_practice import create_pronunciation_practice
+    has_pronunciation_practice = True
+except ImportError:
+    has_pronunciation_practice = False
+
+    
 # Try importing OCR with fallback
 try:
     import pytesseract
@@ -841,6 +849,7 @@ if 'word_of_the_day' not in st.session_state:
 if 'debug_quiz' not in st.session_state:
     st.session_state.debug_quiz = False
 
+
 @st.cache_resource
 def get_gamification():
     return GamificationSystem()
@@ -1203,7 +1212,7 @@ def check_answer(selected_index):
 
 # Main sidebar for navigation
 st.sidebar.title("🌍 Vocam")
-app_mode_options = ["Camera Mode", "My Vocabulary", "Quiz Mode", "Statistics", "My Progress"]
+app_mode_options = ["Camera Mode", "My Vocabulary", "Quiz Mode", "Statistics", "My Progress", "Pronunciation Practice"]
 app_mode = st.sidebar.selectbox(
     "Choose a mode",
     app_mode_options
@@ -1738,6 +1747,28 @@ elif app_mode == "My Vocabulary":
                 else:
                     st.markdown("*No image available for this word*")
                 
+                # Add pronunciation practice if available
+                if has_pronunciation_practice:
+                    # Only initialize the pronunciation_practice when needed
+                    if 'pronunciation_practice' not in st.session_state:
+                        # Initialize the pronunciation practice module with the functions it needs
+                        st.session_state.pronunciation_practice = create_pronunciation_practice(
+                            text_to_speech_func=text_to_speech,
+                            get_audio_html_func=get_audio_html,
+                            translate_text_func=translate_text
+                        )
+                    
+                    # Now use the initialized module
+                    st.session_state.pronunciation_practice.render_practice_ui(word)
+                else:
+                    # Show a message if pronunciation practice is not available
+                    with st.expander("🎤 Practice Pronunciation"):
+                        st.warning("Pronunciation practice requires additional packages.")
+                        st.info("To enable pronunciation practice, install the following packages:")
+                        st.code("sudo apt-get install portaudio19-dev python3-pyaudio")
+                        st.code("pip install SpeechRecognition pydub PyAudio python-Levenshtein")
+                        st.markdown("After installing, restart the application to use pronunciation practice.")
+                        
                 # Add example sentence directly (no expander)
                 st.markdown("**Example in context:**")
                 example = get_example_sentence(word.get('word_original', ''), word.get('language_translated', ''))
@@ -2098,6 +2129,88 @@ elif app_mode == "My Progress":
         st.error("There was an error displaying the Progress. The system might be initializing.")
         st.info("Please try again in a moment or add some vocabulary first to initialize the system.")
         print(f"Dashboard error: {e}")
+
+elif app_mode == "Pronunciation Practice":
+    st.title("🎤 Pronunciation Practice")
+    st.markdown("Practice your pronunciation and get instant feedback on your speaking skills.")
+    
+    # Session management
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.session_state.session_id is None:
+            if st.button("Start Learning Session"):
+                if manage_session("start"):
+                    st.rerun()
+        else:
+            st.info(f"Session in progress - Words studied: {st.session_state.words_studied}")
+    with col2:
+        if st.session_state.session_id is not None:
+            if st.button("End Session"):
+                if manage_session("end"):
+                    st.rerun()
+    
+    if has_pronunciation_practice:
+        # Only initialize if not already initialized
+        if 'pronunciation_practice' not in st.session_state:
+            # Initialize the pronunciation practice module
+            st.session_state.pronunciation_practice = create_pronunciation_practice(
+                text_to_speech_func=text_to_speech,
+                get_audio_html_func=get_audio_html,
+                translate_text_func=translate_text
+            )
+            
+        # Get vocabulary from database
+        vocabulary = get_all_vocabulary_direct()
+        
+        # Let user select language
+        practice_language = st.selectbox(
+            "Select practice language:",
+            list(languages.keys()),
+            index=list(languages.values()).index(st.session_state.target_language) 
+                if st.session_state.target_language in languages.values() else 0
+        )
+        practice_language_code = languages[practice_language]
+        
+        # Filtered vocabulary for the selected language
+        filtered_vocab = [word for word in vocabulary if word['language_translated'] == practice_language_code]
+        
+        if filtered_vocab:
+            st.info(f"Found {len(filtered_vocab)} words in {practice_language}. Start a practice session to improve your pronunciation.")
+            
+            # Import required module
+            import random
+            
+            # Start a new practice session button
+            if 'practice_words' not in st.session_state:
+                if st.button("Start Practice Session", type="primary"):
+                    # Select 5 random words for practice
+                    practice_size = min(5, len(filtered_vocab))
+                    st.session_state.practice_words = random.sample(filtered_vocab, practice_size)
+                    st.session_state.current_practice_index = 0
+                    st.session_state.practice_scores = []
+                    st.rerun()
+        
+            # Run the practice session if words are selected
+            if 'practice_words' in st.session_state:
+                st.session_state.pronunciation_practice.render_practice_session(
+                    vocabulary, practice_language_code)
+        else:
+            st.warning(f"No vocabulary words found for {practice_language}. Go to Camera Mode to add words first.")
+    else:
+        st.warning("Pronunciation practice requires additional packages.")
+        st.info("To enable pronunciation practice, install the following packages:")
+        
+        st.markdown("### System Dependencies:")
+        st.code("sudo apt-get install portaudio19-dev python3-pyaudio")
+        
+        st.markdown("### Python Packages:")
+        st.code("pip install SpeechRecognition pydub PyAudio python-Levenshtein")
+        
+        st.markdown("After installing, restart the application to use pronunciation practice.")
+        
+        # Add a sample of what the feature will look like
+        st.markdown("### Sample Pronunciation Feature")
+        st.image("https://i.ibb.co/GTxfJsQ/pronunciation-practice-sample.png", caption="Sample pronunciation practice interface")
 
 
 st.sidebar.markdown("---")
