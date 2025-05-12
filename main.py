@@ -26,10 +26,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Create a container for technical details that will be hidden by default
-tech_details = []
-tech_details.append(f"Python Version: {sys.version}")
-
 # Try importing OCR with fallback
 try:
     import pytesseract
@@ -678,63 +674,6 @@ def get_session_stats_direct(days=30):
         st.error(f"Error retrieving session stats: {str(e)}")
         return {}
 
-# Function to debug database
-def debug_database():
-    """Check database tables and content for debugging."""
-    # Only create the debug UI after the main UI has been set up
-    if 'db_debug_initialized' not in st.session_state:
-        st.session_state.db_debug_initialized = True
-        return
-
-    st.sidebar.markdown("---")
-    if st.sidebar.checkbox("Debug Database"):
-        st.sidebar.markdown("### Database Debug")
-        try:
-            # Check if tables exist
-            conn = sqlite3.connect("language_learning.db")
-            cursor = conn.cursor()
-            
-            # Get list of tables
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-            tables = cursor.fetchall()
-            st.sidebar.write(f"Tables in database: {[t[0] for t in tables]}")
-            
-            # Check vocabulary count
-            cursor.execute("SELECT COUNT(*) FROM vocabulary;")
-            vocab_count = cursor.fetchone()[0]
-            st.sidebar.write(f"Vocabulary entries: {vocab_count}")
-            
-            # Check session count
-            cursor.execute("SELECT COUNT(*) FROM sessions;")
-            session_count = cursor.fetchone()[0]
-            st.sidebar.write(f"Session entries: {session_count}")
-            
-            # Show recent vocabulary
-            if vocab_count > 0:
-                cursor.execute("SELECT id, word_original, word_translated, language_translated, date_added FROM vocabulary ORDER BY date_added DESC LIMIT 5;")
-                recent_vocab = cursor.fetchall()
-                st.sidebar.write("Recent vocabulary:")
-                for item in recent_vocab:
-                    st.sidebar.write(f"ID: {item[0]}, {item[1]} → {item[2]} ({item[3]}), {item[4]}")
-            
-            # Show active sessions
-            cursor.execute("SELECT id, start_time, end_time FROM sessions ORDER BY start_time DESC LIMIT 3;")
-            recent_sessions = cursor.fetchall()
-            st.sidebar.write("Recent sessions:")
-            for session in recent_sessions:
-                st.sidebar.write(f"ID: {session[0]}, Started: {session[1]}, Ended: {session[2] or 'Active'}")
-            
-            conn.close()
-        except Exception as e:
-            st.sidebar.error(f"Database error: {e}")
-
-# Call debug database function
-debug_database()
-
-# Add technical details to the sidebar
-with st.sidebar.expander("Technical Details", expanded=False):
-    for detail in tech_details:
-        st.write(detail)
 
 # Initialize database
 @st.cache_resource
@@ -1236,7 +1175,7 @@ def check_answer(selected_index):
 
 # Main sidebar for navigation
 st.sidebar.title("🌍 Vocam")
-app_mode_options = ["Camera Mode", "My Vocabulary", "Quiz Mode", "Statistics", "Gamification Dashboard"]
+app_mode_options = ["Camera Mode", "My Vocabulary", "Quiz Mode", "Statistics", "Progress"]
 app_mode = st.sidebar.selectbox(
     "Choose a mode",
     app_mode_options
@@ -2098,11 +2037,11 @@ elif app_mode == "Statistics":
             st.pyplot(fig)
             
             st.markdown("*This is sample data. Start learning with Camera Mode to begin tracking your real progress!*")
-elif app_mode == "Gamification Dashboard":
+elif app_mode == "Progress":
     try:
         gamification.render_dashboard()
     except Exception as e:
-        st.error("There was an error displaying the Gamification Dashboard. The system might be initializing.")
+        st.error("There was an error displaying the Progress. The system might be initializing.")
         st.info("Please try again in a moment or add some vocabulary first to initialize the system.")
         print(f"Dashboard error: {e}")
 
