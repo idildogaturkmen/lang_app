@@ -239,148 +239,122 @@ class SimplePronunciationPractice:
             if HAS_WEBRTC:
                 st.markdown("### Record Your Pronunciation")
                 
-                # Create an audio processor
-                audio_processor = AudioProcessor()
+                # Define a better audio processor
+                class AudioProcessor:
+                    def __init__(self):
+                        self.frames = []
+                        self.is_recording = False
+                        
+                    def recv(self, frame):
+                        if self.is_recording:
+                            self.frames.append(frame.to_ndarray())
+                        return frame
                 
-                # Create WebRTC streamer
+                # Create a new processor for each session
+                if 'audio_processor' not in st.session_state:
+                    st.session_state.audio_processor = AudioProcessor()
+                
+                # Configure WebRTC with more STUN servers for better connectivity
                 rtc_configuration = RTCConfiguration(
-                    {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+                    {"iceServers": [
+                        {"urls": ["stun:stun.l.google.com:19302", 
+                                "stun:stun1.l.google.com:19302",
+                                "stun:stun2.l.google.com:19302"]}
+                    ]}
                 )
                 
-                media_stream_constraints = MediaStreamConstraints(
-                    audio=True,
+                # Explicitly set media constraints
+                media_constraints = MediaStreamConstraints(
+                    audio={"echoCancellation": True, "noiseSuppression": True},
                     video=False
                 )
                 
-                # Unique key for WebRTC
-                key = f"webrtc_{current_index}_{int(time.time())}"
+                # Unique key for WebRTC - use timestamp to prevent reuse
+                key = f"pronunciation_webrtc_{current_index}_{int(time.time())}"
                 
-                # Create WebRTC streamer
-                ctx = webrtc_streamer(
+                # Create WebRTC streamer with clearer state feedback
+                webrtc_ctx = webrtc_streamer(
                     key=key,
                     mode=WebRtcMode.SENDRECV,
                     rtc_configuration=rtc_configuration,
-                    media_stream_constraints=media_stream_constraints,
-                    audio_processor_factory=lambda: audio_processor,
-                    async_processing=False,
+                    media_stream_constraints=media_constraints,
+                    audio_processor_factory=lambda: st.session_state.audio_processor,
+                    async_processing=True,  # Set to True for better performance
                 )
                 
-                # After recording is stopped
-                if ctx.state.playing and 'recording' not in st.session_state:
-                    st.session_state.recording = True
-                    st.markdown("🎙️ Recording... Speak the word clearly.")
+                # Clear recording status indicators
+                col1, col2 = st.columns(2)
                 
-                elif not ctx.state.playing and st.session_state.get('recording'):
-                    st.session_state.recording = False
-                    
-                    # Show analysis button
-                    if st.button("Analyze Recording"):
-                        # Create simple feedback
-                        st.success("Recording analyzed!")
-                        
-                        # Rate the pronunciation
-                        rating = st.select_slider(
-                            "How well did you pronounce the word?",
-                            options=["Poor", "Fair", "Good", "Very Good", "Excellent"],
-                            value="Good"
-                        )
-                        
-                        # Convert rating to score
-                        score_map = {
-                            "Poor": 20,
-                            "Fair": 40,
-                            "Good": 60,
-                            "Very Good": 80,
-                            "Excellent": 95
-                        }
-                        score = score_map.get(rating, 60)
-                        
-                        # Show feedback
-                        self._show_simple_feedback(
-                            current_word.get('word_translated', ''), 
-                            language_code, 
-                            score
-                        )
-                        
-                        # Store score
-                        if 'practice_scores' not in st.session_state:
-                            st.session_state.practice_scores = []
-                        st.session_state.practice_scores.append(score)
-                        
-                        # Next button
-                        if st.button("Next Word", type="primary"):
-                            st.session_state.current_practice_index += 1
-                            del st.session_state.recording
+                # Record button with state management
+                with col1:
+                    if webrtc_ctx.state.playing:
+                        if st.button("🔴 STOP RECORDING", type="primary"):
+                            st.session_state.audio_processor.is_recording = False
+                            st.session_state.recording_complete = True
                             st.rerun()
-            else:
-                # Self-assessment fallback
-                st.markdown("### Record Your Pronunciation")
-                st.markdown("Record yourself saying the word (using any method) and rate your pronunciation:")
+                        
+                        if not st.session_state.get('recording_started', False):
+                            st.session_state.recording_started = True
+                            st.session_state.audio_processor.is_recording = True
+                            st.info("🎙️ Recording in progress... Speak the word clearly")
+                    else:
+                        st.session_state.recording_started = False
                 
-                # Create a simple rating system
-                rating = st.select_slider(
-                    "How well did you pronounce the word?",
-                    options=["Poor", "Fair", "Good", "Very Good", "Excellent"],
-                    value="Good"
-                )
+                # Reset button
+                with col2:
+                    if st.button("🔄 Reset Recording"):
+                        if 'audio_processor' in st.session_state:
+                            st.session_state.audio_processor.frames = []
+                            st.session_state.audio_processor.is_recording = False
+                        st.session_state.recording_started = False
+                        st.session_state.recording_complete = False
+                        st.rerun()
                 
-                # Calculate score based on rating
-                score_map = {
-                    "Poor": 20,
-                    "Fair": 40,
-                    "Good": 60,
-                    "Very Good": 80,
-                    "Excellent": 95
-                }
-                score = score_map.get(rating, 60)
-                
-                # Show feedback based on self-rating
-                self._show_simple_feedback(
-                    current_word.get('word_translated', ''), 
-                    language_code, 
-                    score
-                )
-                
-                # Next word button
-                if st.button("Next Word", type="primary"):
+                # After recording is complete
+                if st.session_state.get('recording_complete', False) and not webrtc_ctx.state.playing:
+                    st.success("✅ Recording completed!")
+                    
+                    # Provide a way to playback the recording
+                    st.markdown("### Your Recording")
+                    
+                    # Simple self-assessment as fallback until we implement audio playback
+                    rating = st.select_slider(
+                        "How well did you pronounce the word?",
+                        options=["Poor", "Fair", "Good", "Very Good", "Excellent"],
+                        value="Good"
+                    )
+                    
+                    # Calculate score based on rating
+                    score_map = {
+                        "Poor": 20,
+                        "Fair": 40,
+                        "Good": 60,
+                        "Very Good": 80,
+                        "Excellent": 95
+                    }
+                    score = score_map.get(rating, 60)
+                    
+                    # Show feedback
+                    self._show_simple_feedback(
+                        current_word.get('word_translated', ''), 
+                        language_code, 
+                        score
+                    )
+                    
                     # Store score
                     if 'practice_scores' not in st.session_state:
                         st.session_state.practice_scores = []
                     st.session_state.practice_scores.append(score)
                     
-                    # Next word
-                    st.session_state.current_practice_index += 1
-                    st.rerun()
-            
-            # Example in context
-            example = self._get_example_sentence(
-                current_word.get('word_original', ''), 
-                current_word.get('language_translated', 'en')
-            )
-            
-            with st.expander("Example in Context"):
-                st.markdown(f"**English:** {example['english']}")
-                if example.get('translated'):
-                    st.markdown(f"**{LANGUAGE_NAMES.get(language_code, language_code)}:** {example['translated']}")
-                    example_audio = self.text_to_speech(example['translated'], language_code)
-                    if example_audio:
-                        st.markdown(self.get_audio_html(example_audio), unsafe_allow_html=True)
-        else:
-            # Practice session completed
-            self._show_practice_results()
-            
-            # Reset button
-            if st.button("Practice Again", type="primary"):
-                import random
-                
-                # Create a new set of practice words
-                filtered_vocab = [word for word in vocabulary 
-                                if word['language_translated'] == language_code]
-                practice_size = min(5, len(filtered_vocab))
-                st.session_state.practice_words = random.sample(filtered_vocab, practice_size)
-                st.session_state.current_practice_index = 0
-                st.session_state.practice_scores = []
-                st.rerun()
+                    # Next button
+                    if st.button("Next Word", type="primary"):
+                        st.session_state.current_practice_index += 1
+                        # Clear the recording state
+                        st.session_state.recording_complete = False
+                        st.session_state.recording_started = False
+                        if 'audio_processor' in st.session_state:
+                            st.session_state.audio_processor.frames = []
+                        st.rerun()
     
     def _show_simple_feedback(self, target_word, language_code, similarity_score):
         """Show simplified pronunciation feedback"""
