@@ -61,34 +61,68 @@ def apply_custom_css():
             background-color: var(--accent-lighter);
         }
         
-        /* Sidebar styling - UPDATED */
+        /* Sidebar styling - FIXED */
         section[data-testid="stSidebar"] {
             background-color: var(--primary-dark);
         }
         section[data-testid="stSidebar"] > div {
             background-color: var(--primary-dark);
         }
-        /* Make ALL text in sidebar white for better visibility */
-        section[data-testid="stSidebar"] * {
+        
+        /* White text for standard elements */
+        section[data-testid="stSidebar"] h1,
+        section[data-testid="stSidebar"] h2,
+        section[data-testid="stSidebar"] h3,
+        section[data-testid="stSidebar"] h4,
+        section[data-testid="stSidebar"] h5,
+        section[data-testid="stSidebar"] p,
+        section[data-testid="stSidebar"] span:not(.st-emotion-cache-10trblm),
+        section[data-testid="stSidebar"] label,
+        section[data-testid="stSidebar"] .stMarkdown {
             color: var(--text-light) !important;
         }
-        /* Make selectbox options visible (dark text) */
-        section[data-testid="stSidebar"] .stSelectbox option {
+        
+        /* Fix dropdown styling */
+        section[data-testid="stSidebar"] .stSelectbox label {
+            color: var(--text-light) !important;
+        }
+        
+        /* Style the selectbox itself */
+        section[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] {
+            background-color: #ffffff !important;
+        }
+        
+        /* Style the selectbox text */
+        section[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] span {
             color: var(--text-dark) !important;
         }
-        /* Make expandable sections visible */
+        
+        /* Ensure dropdown options are visible */
+        section[data-testid="stSidebar"] .stSelectbox option,
+        section[data-testid="stSidebar"] select option,
+        section[data-testid="stSidebar"] div[role="listbox"] *,
+        section[data-testid="stSidebar"] ul[role="listbox"] * {
+            color: var(--text-dark) !important;
+            background-color: #ffffff !important;
+        }
+        
+        /* Fix expandable sections */
         section[data-testid="stSidebar"] .streamlit-expanderHeader {
             color: var(--text-light) !important;
             background-color: var(--primary-medium);
         }
+        
         /* Make links more visible */
         section[data-testid="stSidebar"] a {
             color: var(--accent-lighter) !important;
             font-weight: bold;
         }
-        /* Fix warning and info messages in sidebar */
+        
+        /* Fix messages in sidebar */
         section[data-testid="stSidebar"] .info-box,
-        section[data-testid="stSidebar"] .warning-box {
+        section[data-testid="stSidebar"] .warning-box,
+        section[data-testid="stSidebar"] .success-box,
+        section[data-testid="stSidebar"] .error-box {
             color: var(--text-dark) !important;
         }
         
