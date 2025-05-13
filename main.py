@@ -31,7 +31,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-
 try:
     from cloud_detector import detect_streamlit_cloud
     is_cloud = detect_streamlit_cloud()
