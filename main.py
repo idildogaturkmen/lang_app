@@ -22,7 +22,14 @@ from collections import defaultdict
 import io
 from vocam_ui import apply_custom_css
 
-apply_custom_css()
+# First, display Python version for debugging
+st.set_page_config(
+    page_title="Vocam",
+    page_icon="🌍",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
 
 try:
     from cloud_detector import detect_streamlit_cloud
@@ -51,6 +58,8 @@ from vocam_ui import (
     add_footer
 )
 
+apply_custom_css()
+
 try:
     from cloud_detector import detect_streamlit_cloud
     is_cloud = detect_streamlit_cloud()
@@ -61,13 +70,6 @@ if is_cloud:
     os.environ['IS_STREAMLIT_CLOUD'] = 'true'
     print("Running in Streamlit Cloud - some features may be limited")
 
-# First, display Python version for debugging
-st.set_page_config(
-    page_title="Vocam",
-    page_icon="🌍",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 # Fix the typo in the import statement
 try:
