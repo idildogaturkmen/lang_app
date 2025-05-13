@@ -85,7 +85,7 @@ def handle_audio_data():
     st.markdown(audio_receiver_js, unsafe_allow_html=True)
     
     # Process form submission for audio data
-    form_data = st.query_params()
+    form_data = st.experimental_get_query_params()
     if 'audio_data' in form_data and form_data['audio_data'][0]:
         try:
             # Extract the audio data
@@ -103,7 +103,7 @@ def handle_audio_data():
                 st.session_state.current_recording_word = form_data['word_id'][0]
                 
             # Clear query params to avoid reprocessing
-            st.query_params()
+            st.experimental_set_query_params()
         except Exception as e:
             print(f"Error processing audio data: {e}")
 
@@ -852,7 +852,7 @@ def check_audio_permissions():
     }
     </script>
     """, unsafe_allow_html=True)
-
+    
 # Function to check if database is properly set up
 def check_database_setup():
     """Check if the database is properly set up and try to fix if needed."""
