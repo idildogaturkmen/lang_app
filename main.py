@@ -33,47 +33,63 @@ st.set_page_config(
 
 def handle_audio_data():
     """Handle audio data from JavaScript recorder"""
-    # Use html component instead of declaring a custom component
-    audio_recorder_key = f"audio_recorder_{int(time.time())}"
-    
-    components.html(
-        """
-        <script>
-        if (window.audioRecorderInitialized !== true) {
-            window.audioRecorderInitialized = true;
-            
-            // Listen for messages from the recorder
-            window.addEventListener('message', function(e) {
-                const data = e.data;
+    # Use session state to store audio data
+    if 'audio_data' not in st.session_state:
+        st.session_state.audio_data = None
+    if 'audio_data_received' not in st.session_state:
+        st.session_state.audio_data_received = False
+    if 'current_recording_word' not in st.session_state:
+        st.session_state.current_recording_word = None
+        
+    # Add a hidden element to receive audio data via URL fragment
+    audio_receiver_js = """
+    <script>
+    // Function to check URL hash for audio data
+    function checkForAudioData() {
+        const hash = window.location.hash;
+        if (hash.startsWith('#audiodata=')) {
+            try {
+                // Get the data from hash
+                const encodedData = hash.substring(11);
+                const jsonData = decodeURIComponent(atob(encodedData));
+                const data = JSON.parse(jsonData);
                 
-                // Check if this is recorder data
-                if (data && data.type === 'audio_data') {
-                    // Send to Streamlit
-                    if (window.Streamlit) {
-                        window.Streamlit.setComponentValue(JSON.stringify(data));
-                    }
-                }
-            });
-            
-            console.log("Audio recorder listener initialized");
+                // Submit the form to send data to Streamlit
+                const form = document.getElementById('audio-data-form');
+                document.getElementById('audio-data-input').value = data.audio_data;
+                document.getElementById('word-id-input').value = data.word_id;
+                form.submit();
+                
+                // Clear the hash
+                history.replaceState(null, null, ' ');
+            } catch (e) {
+                console.error('Error processing audio data from URL:', e);
+            }
         }
-        </script>
-        """,
-        height=0,
-        key=audio_recorder_key
-    )
+    }
+
+    // Check for audio data in URL on page load
+    document.addEventListener('DOMContentLoaded', checkForAudioData);
     
-    # Get the component value
-    component_value = st.session_state.get(audio_recorder_key)
+    // Also check periodically
+    setInterval(checkForAudioData, 1000);
+    </script>
+
+    <!-- Hidden form to submit audio data to Streamlit -->
+    <form id="audio-data-form" method="post" style="display:none;">
+        <input type="hidden" id="audio-data-input" name="audio_data">
+        <input type="hidden" id="word-id-input" name="word_id">
+    </form>
+    """
     
-    # Check if there's data from the component
-    if component_value:
+    st.markdown(audio_receiver_js, unsafe_allow_html=True)
+    
+    # Process form submission for audio data
+    form_data = st.experimental_get_query_params()
+    if 'audio_data' in form_data and form_data['audio_data'][0]:
         try:
-            # Parse the data
-            data = json.loads(component_value)
-            
             # Extract the audio data
-            audio_data_base64 = data.get('audio_data')
+            audio_data_base64 = form_data['audio_data'][0]
             
             # Convert base64 to bytes
             audio_bytes = base64.b64decode(audio_data_base64)
@@ -82,13 +98,14 @@ def handle_audio_data():
             st.session_state.audio_data = audio_bytes
             st.session_state.audio_data_received = True
             
-            # Store the word ID
-            word_id = data.get('word_id')
-            if word_id:
-                st.session_state.current_recording_word = word_id
+            # Store the word ID if available
+            if 'word_id' in form_data:
+                st.session_state.current_recording_word = form_data['word_id'][0]
+                
+            # Clear query params to avoid reprocessing
+            st.experimental_set_query_params()
         except Exception as e:
             print(f"Error processing audio data: {e}")
-
 
 
 try:
@@ -809,33 +826,33 @@ def create_audio_recorder_component():
     )
 
 def check_audio_permissions():
-    """Add a check for audio recording permissions"""
+    """Add a simpler check for audio recording permissions"""
     st.markdown("""
+    <div id="audio-support-status">
+      <p>Waiting for microphone permissions...</p>
+    </div>
+    
     <script>
     // Check if browser supports audio recording
-    function checkAudioSupport() {
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-            console.log("Browser doesn't support audio recording");
-            return false;
-        }
-        
-        // Test permissions
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        document.getElementById('audio-support-status').innerHTML = 
+            '<p style="color: red;">❌ Your browser does not support audio recording. Please try Chrome, Firefox, or Edge.</p>';
+    } else {
         navigator.mediaDevices.getUserMedia({ audio: true })
             .then(function(stream) {
-                console.log("Microphone access granted");
+                document.getElementById('audio-support-status').innerHTML = 
+                    '<p style="color: green;">✅ Microphone access granted</p>';
                 // Stop the stream immediately
                 stream.getTracks().forEach(track => track.stop());
             })
             .catch(function(err) {
-                console.log("Microphone access denied: " + err);
+                document.getElementById('audio-support-status').innerHTML = 
+                    '<p style="color: red;">❌ Microphone access denied. Please allow microphone access in your browser settings.</p>';
             });
     }
-    
-    // Run check when document is loaded
-    document.addEventListener('DOMContentLoaded', checkAudioSupport);
     </script>
     """, unsafe_allow_html=True)
-
+    
 # Function to check if database is properly set up
 def check_database_setup():
     """Check if the database is properly set up and try to fix if needed."""

@@ -406,12 +406,21 @@ class SimplePronunciationPractice:
                         // Log for debugging
                         console.log("Audio recording complete, sending data to Streamlit");
                         
-                        // Send message to parent window
-                        window.parent.postMessage({{
-                            type: 'audio_data',
+                        // Create data object
+                        const data = {{
                             audio_data: base64data,
                             word_id: '{st.session_state.current_practice_index if "current_practice_index" in st.session_state else 0}'
-                        }}, '*');
+                        }};
+                        
+                        // Encode data to base64 and add to URL hash
+                        const jsonData = JSON.stringify(data);
+                        const encodedData = btoa(encodeURIComponent(jsonData));
+                        window.location.hash = 'audiodata=' + encodedData;
+                        
+                        // Force reload to process new data
+                        setTimeout(() => {{
+                            window.location.reload();
+                        }}, 100);
                     }};
                     
                     reader.readAsDataURL(audioBlob);
