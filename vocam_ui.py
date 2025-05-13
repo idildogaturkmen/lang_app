@@ -10,7 +10,6 @@ COLORS = {
 }
 
 def apply_custom_css():
-
     """Apply custom CSS for Vocam UI enhancements."""
     st.markdown("""
     <style>
@@ -26,6 +25,8 @@ def apply_custom_css():
             --bg-medium: #EFF3F6;
             --card-bg: #FFFFFF;
             --shadow: rgba(0, 0, 0, 0.1);
+            --success-green: #4CAF50;
+            --lime-green: #8BC34A;
         }
         
         /* Base app styling */
@@ -38,7 +39,7 @@ def apply_custom_css():
         div.stButton > button {
             background-color: var(--primary-medium);
             color: white;
-            border-radius: 8px;
+            border-radius: 12px; /* Increased border radius for smoother corners */
             border: none;
             padding: 0.5rem 1rem;
             font-weight: 500;
@@ -62,12 +63,46 @@ def apply_custom_css():
             background-color: var(--accent-lighter);
         }
         
-        /* Sidebar styling - FIXED */
+        /* Sidebar styling - FIXED with ROUNDED CORNERS */
         section[data-testid="stSidebar"] {
             background-color: var(--primary-dark);
         }
         section[data-testid="stSidebar"] > div {
             background-color: var(--primary-dark);
+        }
+        
+        /* Add rounded corners to all sidebar elements */
+        section[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] > div {
+            border-radius: 12px !important;
+            margin-bottom: 8px;
+        }
+        
+        /* Special styling for My Progress section */
+        section[data-testid="stSidebar"] div:has(h3:contains("My Progress")),
+        section[data-testid="stSidebar"] div:has(div:contains("My Progress")) {
+            background-color: var(--lime-green) !important;
+            border-radius: 12px !important;
+            padding: 10px !important;
+            margin-top: 12px !important;
+            margin-bottom: 12px !important;
+            border: 2px solid var(--accent-lighter);
+        }
+        
+        /* Special styling for Need Help section */
+        section[data-testid="stSidebar"] div.stExpander:has(div:contains("Need Help")),
+        section[data-testid="stSidebar"] details:has(summary:contains("Need Help")) {
+            background-color: var(--success-green) !important;
+            border-radius: 12px !important;
+            border: 2px solid var(--accent-lighter);
+            margin-top: 12px !important;
+        }
+        
+        /* Make Need Help title more visible */
+        section[data-testid="stSidebar"] .streamlit-expanderHeader:contains("Need Help") {
+            background-color: var(--success-green) !important;
+            color: white !important;
+            font-weight: bold !important;
+            border-radius: 10px !important;
         }
         
         /* White text for standard elements */
@@ -88,9 +123,11 @@ def apply_custom_css():
             color: var(--text-light) !important;
         }
         
-        /* Style the selectbox itself */
+        /* Style the selectbox itself with rounded corners */
         section[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] {
             background-color: #ffffff !important;
+            border-radius: 10px !important;
+            overflow: hidden;
         }
         
         /* Style the selectbox text */
@@ -111,6 +148,7 @@ def apply_custom_css():
         section[data-testid="stSidebar"] .streamlit-expanderHeader {
             color: var(--text-light) !important;
             background-color: var(--primary-medium);
+            border-radius: 10px !important;
         }
         
         /* Make links more visible */
@@ -125,12 +163,13 @@ def apply_custom_css():
         section[data-testid="stSidebar"] .success-box,
         section[data-testid="stSidebar"] .error-box {
             color: var(--text-dark) !important;
+            border-radius: 10px !important;
         }
         
         /* Expander styling */
         .streamlit-expanderHeader {
             background-color: var(--bg-medium);
-            border-radius: 5px;
+            border-radius: 10px;
         }
         .streamlit-expanderHeader:hover {
             background-color: var(--bg-light);
