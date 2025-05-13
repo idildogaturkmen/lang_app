@@ -25,8 +25,12 @@ def apply_custom_css():
             --bg-medium: #EFF3F6;
             --card-bg: #FFFFFF;
             --shadow: rgba(0, 0, 0, 0.1);
-            --success-green: #4CAF50;
-            --lime-green: #8BC34A;
+            
+            /* New highlight colors */
+            --highlight-orange: #FF9800;
+            --highlight-gold: #FFC107;
+            --highlight-aqua: #00FFFF;
+            --highlight-turquoise: #40E0D0;
         }
         
         /* Base app styling */
@@ -39,7 +43,7 @@ def apply_custom_css():
         div.stButton > button {
             background-color: var(--primary-medium);
             color: white;
-            border-radius: 12px; /* Increased border radius for smoother corners */
+            border-radius: 12px;
             border: none;
             padding: 0.5rem 1rem;
             font-weight: 500;
@@ -77,32 +81,42 @@ def apply_custom_css():
             margin-bottom: 8px;
         }
         
-        /* Special styling for My Progress section */
+        /* Special styling for My Progress section - BRIGHTER ORANGE */
         section[data-testid="stSidebar"] div:has(h3:contains("My Progress")),
         section[data-testid="stSidebar"] div:has(div:contains("My Progress")) {
-            background-color: var(--lime-green) !important;
+            background-color: var(--highlight-orange) !important;
             border-radius: 12px !important;
             padding: 10px !important;
             margin-top: 12px !important;
             margin-bottom: 12px !important;
-            border: 2px solid var(--accent-lighter);
+            box-shadow: 0 0 10px rgba(255, 152, 0, 0.5);
         }
         
-        /* Special styling for Need Help section */
+        /* Make My Progress text pop */
+        section[data-testid="stSidebar"] div:has(h3:contains("My Progress")) h3,
+        section[data-testid="stSidebar"] div:has(div:contains("My Progress")) div {
+            color: var(--primary-dark) !important;
+            font-weight: bold !important;
+            text-shadow: 0 0 3px rgba(255, 255, 255, 0.5);
+        }
+        
+        /* Special styling for Need Help section - BRIGHT AQUA */
         section[data-testid="stSidebar"] div.stExpander:has(div:contains("Need Help")),
         section[data-testid="stSidebar"] details:has(summary:contains("Need Help")) {
-            background-color: var(--success-green) !important;
+            background-color: var(--highlight-aqua) !important;
             border-radius: 12px !important;
-            border: 2px solid var(--accent-lighter);
             margin-top: 12px !important;
+            box-shadow: 0 0 10px rgba(0, 255, 255, 0.5); 
         }
         
         /* Make Need Help title more visible */
-        section[data-testid="stSidebar"] .streamlit-expanderHeader:contains("Need Help") {
-            background-color: var(--success-green) !important;
-            color: white !important;
+        section[data-testid="stSidebar"] .streamlit-expanderHeader:contains("Need Help"),
+        section[data-testid="stSidebar"] summary:contains("Need Help") {
+            background-color: var(--highlight-turquoise) !important;
+            color: var(--primary-dark) !important;
             font-weight: bold !important;
             border-radius: 10px !important;
+            text-shadow: 0 0 3px rgba(255, 255, 255, 0.5);
         }
         
         /* White text for standard elements */
@@ -144,39 +158,9 @@ def apply_custom_css():
             background-color: #ffffff !important;
         }
         
-        /* Fix expandable sections */
-        section[data-testid="stSidebar"] .streamlit-expanderHeader {
-            color: var(--text-light) !important;
-            background-color: var(--primary-medium);
-            border-radius: 10px !important;
-        }
-        
-        /* Make links more visible */
-        section[data-testid="stSidebar"] a {
-            color: var(--accent-lighter) !important;
-            font-weight: bold;
-        }
-        
-        /* Fix messages in sidebar */
-        section[data-testid="stSidebar"] .info-box,
-        section[data-testid="stSidebar"] .warning-box,
-        section[data-testid="stSidebar"] .success-box,
-        section[data-testid="stSidebar"] .error-box {
-            color: var(--text-dark) !important;
-            border-radius: 10px !important;
-        }
-        
-        /* Expander styling */
-        .streamlit-expanderHeader {
-            background-color: var(--bg-medium);
-            border-radius: 10px;
-        }
-        .streamlit-expanderHeader:hover {
-            background-color: var(--bg-light);
-        }
-        
         /* Rest of the CSS remains unchanged... */
     """, unsafe_allow_html=True)
+
 
 # UI Helper Functions
 def show_loading_spinner(text="Processing your image..."):
