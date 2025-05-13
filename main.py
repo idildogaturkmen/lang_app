@@ -42,7 +42,7 @@ st.set_page_config(
 
 # Fix the typo in the import statement
 try:
-    from pronounciation_practice import create_pronunciation_practice
+    from pronunciation_practice import create_pronunciation_practice
     has_pronunciation_practice = True
 except ImportError:
     has_pronunciation_practice = False

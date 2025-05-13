@@ -311,8 +311,8 @@ class PronunciationPractice:
                     key=webrtc_key,
                     mode=WebRtcMode.SENDONLY,
                     client_settings=self.client_settings,
-                    video_processor_factory=None,
-                    audio_recorder_factory=None,
+                    video_frame_callback=None,
+                    audio_frame_callback=None,
                     async_processing=False,
                 )
                 
