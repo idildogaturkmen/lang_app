@@ -22,6 +22,34 @@ from collections import defaultdict
 import io
 
 
+
+try:
+    from cloud_detector import detect_streamlit_cloud
+    is_cloud = detect_streamlit_cloud()
+except ImportError:
+    is_cloud = False
+
+if is_cloud:
+    os.environ['IS_STREAMLIT_CLOUD'] = 'true'
+    print("Running in Streamlit Cloud - some features may be limited")
+
+# Import the UI enhancement module
+from vocam_ui import (
+    apply_custom_css, 
+    success_message, 
+    info_message, 
+    warning_message, 
+    error_message,
+    show_loading_spinner, 
+    vocam_card, 
+    word_card,
+    add_result_separator,
+    add_scroll_indicator,
+    style_title,
+    style_section_title,
+    add_footer
+)
+
 try:
     from cloud_detector import detect_streamlit_cloud
     is_cloud = detect_streamlit_cloud()
@@ -39,6 +67,8 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+apply_custom_css()
 
 # Fix the typo in the import statement
 try:
@@ -284,7 +314,7 @@ def detect_objects(image, confidence_threshold=0.5, iou_threshold=0.45):
         
         return detections, results.render()[0]
     except Exception as e:
-        st.error(f"Object detection error: {e}")
+        error_message(f"Database error: {e}")
         dummy_image = np.array(image)
         return [], dummy_image
 
@@ -341,7 +371,7 @@ def enhance_image(image, enhance_type="auto"):
         return enhanced_image
     
     except Exception as e:
-        st.error(f"Image enhancement error: {e}")
+        error_message(f"Image enhancement error: {e}")
         return image  # Return original image on error
 
 # Function to detect text in image (OCR)
@@ -470,7 +500,7 @@ def create_session_direct():
         
         return session_id
     except Exception as e:
-        st.error(f"Direct session creation error: {str(e)}")
+        error_message(f"Direct session creation error: {str(e)}")
         return None
 
 # Function to add vocabulary to the database
@@ -500,7 +530,7 @@ def add_vocabulary_direct(word_original, word_translated, language_translated, c
             )
             
             # Let the user know we're updating
-            st.info(f"Word '{word_original}' already exists in {language_translated}. Updating with new information.")
+            info_message(f"Word '{word_original}' already exists in {language_translated}. Updating with new information.")
         else:
             # Current time for timestamps
             current_time = datetime.datetime.now()
@@ -564,14 +594,14 @@ def add_vocabulary_direct(word_original, word_translated, language_translated, c
     except sqlite3.OperationalError as e:
         # Handle database locks with specific advice
         if 'database is locked' in str(e):
-            st.error("Database is currently locked. Please wait a moment and try again.")
+            error_message("Database is currently locked. Please wait a moment and try again.")
             # Add a small delay to allow the database to unlock
             time.sleep(1.5)
         else:
-            st.error(f"Database error: {str(e)}")
+            error_message(f"Database error: {str(e)}")
         return None
     except Exception as e:
-        st.error(f"Direct vocabulary save error: {str(e)}")
+        error_message(f"Direct vocabulary save error: {str(e)}")
         return None
     
 
@@ -609,7 +639,7 @@ def get_all_vocabulary_direct():
         conn.close()
         return vocabulary
     except Exception as e:
-        st.error(f"Error retrieving vocabulary: {str(e)}")
+        error_message(f"Error retrieving vocabulary: {str(e)}")
         return []
 
 # Function to get session statistics
@@ -686,7 +716,7 @@ def get_session_stats_direct(days=30):
             'avg_session_minutes': avg_session_minutes
         }
     except Exception as e:
-        st.error(f"Error retrieving session stats: {str(e)}")
+        error_message(f"Error retrieving session stats: {str(e)}")
         return {}
 
 # Function to check if database is properly set up
@@ -762,7 +792,7 @@ def check_database_setup():
         conn.close()
         return True
     except Exception as e:
-        st.error(f"Database error: {e}")
+        error_message(f"Database error: {e}")
         return False
     
 def prepare_vocabulary_for_diverse_questions(vocabulary, languages):
@@ -877,7 +907,7 @@ def translate_text(text, target_language):
         result = translate_client.translate(text, target_language=target_language)
         return result["translatedText"]
     except Exception as e:
-        st.error(f"Translation error: {e}")
+        error_message(f"Translation error: {e}")
         return text
 
 # Background worker function for translation
@@ -912,7 +942,7 @@ def text_to_speech(text, lang):
         audio_bytes = mp3_fp.read()
         return audio_bytes
     except Exception as e:
-        st.error(f"Text-to-speech error: {e}")
+        error_message(f"Text-to-speech error: {e}")
         return None
 
 # Function to generate HTML for audio playback
@@ -932,7 +962,7 @@ def load_model():
         model.eval()
         return model
     except Exception as e:
-        st.error(f"Error loading object detection model: {e}")
+        error_message(f"Error loading object detection model: {e}")
         # Return a dummy model that won't cause NoneType errors
         class DummyModel:
             def __init__(self):
@@ -1007,14 +1037,14 @@ def manage_session(action):
                 st.session_state.session_id = session_id
                 st.session_state.words_studied = 0
                 st.session_state.words_learned = 0
-                st.success(f"Started new learning session!")
+                success_message(f"Started new learning session!")
                 return True
             else:
-                st.error("Failed to create a session directly. Check database permissions.")
+                error_message("Failed to create a session directly. Check database permissions.")
                 return False
                 
         except Exception as e:
-            st.error(f"Error starting session: {str(e)}")
+            error_message(f"Error starting session: {str(e)}")
             return False
             
     elif action == "end" and st.session_state.session_id:
@@ -1032,7 +1062,7 @@ def manage_session(action):
             conn.commit()
             conn.close()
             
-            st.success(f"Session completed! Words studied: {st.session_state.words_studied}, Words learned: {st.session_state.words_learned}")
+            success_message(f"Session completed! Words studied: {st.session_state.words_studied}, Words learned: {st.session_state.words_learned}")
             # Clear session state
             st.session_state.session_id = None
             st.session_state.words_studied = 0
@@ -1040,7 +1070,7 @@ def manage_session(action):
             return True
                 
         except Exception as e:
-            st.error(f"Error ending session: {str(e)}")
+            error_message(f"Error ending session: {str(e)}")
             return False
     
     return False
@@ -1061,7 +1091,7 @@ def save_image(image, label):
         
         return filename
     except Exception as e:
-        st.error(f"Error saving image: {e}")
+        error_message(f"Error saving image: {e}")
         return None
 
 # Function to start a new quiz
@@ -1072,7 +1102,7 @@ def start_new_quiz(vocabulary, num_questions=5):
     st.session_state.answered = False
     
     if not vocabulary or len(vocabulary) < 4:
-        st.warning("Not enough vocabulary words for a quiz (need at least 4).")
+        warning_message("Not enough vocabulary words for a quiz (need at least 4).")
         return False
     
     # Start a new session if needed
@@ -1177,7 +1207,7 @@ def update_word_progress_direct(vocab_id, is_correct):
         conn.close()
         return True
     except Exception as e:
-        st.error(f"Error updating word progress: {str(e)}")
+        error_message(f"Error updating word progress: {str(e)}")
         return False
 
 # Function to check quiz answer
@@ -1232,7 +1262,10 @@ app_mode = st.sidebar.selectbox(
 try:
     gamification.update_sidebar()
 except Exception as e:
-    st.sidebar.markdown("🏆 **Gamification system is initializing...**")
+    st.sidebar.markdown('<div style="background-color: #1679AB; padding: 10px; border-radius: 5px; margin-top: 10px;">'
+                        '<h3 style="color: #C5FF95; margin: 0;">🏆 Gamification</h3>'
+                        '<p style="color: white; margin-top: 5px;">System initializing...</p>'
+                        '</div>', unsafe_allow_html=True)
     print(f"Sidebar update error: {e}")
 
 # Language selection
@@ -1252,12 +1285,26 @@ selected_language = st.sidebar.selectbox(
     list(languages.keys()),
     index=list(languages.values()).index(st.session_state.target_language) if st.session_state.target_language in languages.values() else 0
 )
-st.session_state.target_language = languages[selected_language]
+# Add help section to the sidebar
+with st.sidebar.expander("ℹ️ Need Help?"):
+    st.markdown("""
+    **Quick Tips:**
+    - 📸 Use **Camera Mode** to capture objects and learn new words
+    - 📚 Review your words in **My Vocabulary**
+    - 🎮 Test yourself in **Quiz Mode**
+    - 📊 Track your progress in **Statistics**
+    
+    **On Mobile:**
+    - After taking a picture, scroll down to see results
+    - Tap buttons to navigate between sections
+    """)
 
 # Display appropriate content based on selected mode
 if app_mode == "Camera Mode":
-    st.title("📸 Camera Mode")
-    st.markdown("Take a photo or upload an image to identify objects and learn their names in your target language.")
+    style_title("📸 Camera Mode")
+
+    # Use the enhanced info message
+    info_message("Take a photo or upload an image to identify objects and learn new vocabulary.")
     
     # Session management
     col1, col2 = st.columns(2)
@@ -1267,7 +1314,7 @@ if app_mode == "Camera Mode":
                 if manage_session("start"):
                     st.rerun()
         else:
-            st.info(f"Session in progress - Words learned: {st.session_state.words_learned}")
+            info_message(f"Session in progress - Words learned: {st.session_state.words_learned}")
     with col2:
         if st.session_state.session_id is not None:
             if st.button("End Session"):
@@ -1312,7 +1359,7 @@ if app_mode == "Camera Mode":
     
     # Process image if available
     if image is not None:
-        # Show original image
+    # Show original image
         st.image(image, caption="Original Image", use_column_width=True)
         
         # Always apply enhancement for object detection
@@ -1325,18 +1372,30 @@ if app_mode == "Camera Mode":
             image_for_detection = image
         
         # Process based on detection type
+        # Around line 1379-1393, after the loading spinner is shown but before detections are processed, 
+# add this code:
+
+# Process based on detection type
         if detection_type == "Objects":
+            # Create container for loading spinner
+            spinner_container = st.container()
+            with spinner_container:
+                show_loading_spinner("Detecting objects... This may take a few seconds.")
+                
+            # Add visual separator for mobile
+            add_result_separator()
+            
             with st.spinner("Detecting objects..."):
-                # Perform object detection
-                detections, result_image = detect_objects(
-                    image_for_detection, 
-                    confidence_threshold=confidence_threshold,
-                    iou_threshold=iou_threshold
-                )
+                # ADD THIS LINE TO FIX THE ERROR:
+                detections, result_image = detect_objects(image_for_detection, confidence_threshold, iou_threshold)
+                
+                # Display results
+                # Clear the spinner once processing is done
+                spinner_container.empty()
                 
                 # Display results
                 if detections:
-                    st.subheader("Detected Objects")
+                    style_section_title("✨ Detected Objects")
                     
                     # Display image with detection boxes
                     st.image(result_image, caption="Detected Objects", use_column_width=True)
@@ -1416,14 +1475,14 @@ if app_mode == "Camera Mode":
                                     
                                     st.markdown("---")  # Add separator
                     
-                    # Add a save button
-                    if st.button("Save Selected Objects to Vocabulary", type="primary"):
+                    # Add a save button with greater prominence
+                    if st.button("💾 Save Selected Objects to Vocabulary", type="primary", use_container_width=True):
                         # Auto-start session if needed
                         if st.session_state.session_id is None:
                             if manage_session("start"):
-                                st.success("Created a new learning session!")
+                                success_message("Created a new learning session!")
                             else:
-                                st.error("Failed to create a session. Please check database connection.")
+                                error_message("Failed to create a session. Please check database connection.")
                                 st.stop()
                         
                         # Count selected objects
@@ -1431,7 +1490,7 @@ if app_mode == "Camera Mode":
                                         if st.session_state.detection_checkboxes.get(f"detect_{i}", False)]
                         
                         if not selected_objects:
-                            st.warning("No objects were selected to save. Please check at least one 'Save' box.")
+                            warning_message("No objects were selected to save. Please check at least one 'Save' box.")
                         else:
                             # Save the selected objects
                             saved_count = 0
@@ -1465,25 +1524,39 @@ if app_mode == "Camera Mode":
                                         st.session_state.words_studied += 1
                                         st.session_state.words_learned += 1
                                     else:
-                                        st.error(f"Failed to save {label} to vocabulary.")
+                                        error_message(f"Failed to save {label} to vocabulary.")
                                 except Exception as e:
-                                    st.error(f"Error saving {label}: {str(e)}")
+                                    error_message(f"Error saving {label}: {str(e)}")
                             
                             if saved_count > 0:
-                                st.success(f"Successfully added {saved_count} new words to your vocabulary!")
-                                st.write("Words saved:")
+                                success_message(f"Successfully added {saved_count} new words to your vocabulary!")
+                                
+                                # Show saved words in a visually appealing list
+                                st.markdown('<h4 style="color: #1679AB;">Words saved:</h4>', unsafe_allow_html=True)
                                 for item in saved_items:
-                                    st.write(f"- {item}")
+                                    st.markdown(f"✅ {item}")
+                                
                                 # Clear checkboxes after saving
                                 st.session_state.detection_checkboxes = {}
+                                
+                                # Show navigation options
+                                next_col1, next_col2 = st.columns(2)
+                                with next_col1:
+                                    st.button("🎮 Go to Quiz Mode", key="goto_quiz", 
+                                            on_click=lambda: setattr(st.session_state, 'app_mode', 'Quiz Mode'),
+                                            use_container_width=True)
+                                with next_col2:
+                                    st.button("📚 View My Vocabulary", key="goto_vocab", 
+                                            on_click=lambda: setattr(st.session_state, 'app_mode', 'My Vocabulary'),
+                                            use_container_width=True)
                                 # Give user a moment to see the success message
                                 time.sleep(1)
                                 st.rerun()
                             else:
-                                st.error("Failed to save any words. Please check database connection.")
+                                error_message("Failed to save any words. Please check database connection.")
                     
                 else:
-                    st.info("No objects detected. Try another image or adjust the confidence threshold.")
+                    info_message("No objects detected. Try another image or adjust the confidence threshold.")
                     
                     # Add manual selection option
                     if st.button("Enable Manual Selection"):
@@ -1518,9 +1591,9 @@ if app_mode == "Camera Mode":
                         # Auto-start session if needed
                         if st.session_state.session_id is None:
                             if manage_session("start"):
-                                st.success("Created a new learning session!")
+                                success_message("Created a new learning session!")
                             else:
-                                st.error("Failed to create a session.")
+                                error_message("Failed to create a session.")
                                 st.stop()
                         
                         # Save the image
@@ -1536,7 +1609,7 @@ if app_mode == "Camera Mode":
                         )
                         
                         if vocab_id:
-                            st.success(f"Successfully added '{st.session_state.manual_label}' to your vocabulary!")
+                            success_message(f"Successfully added '{st.session_state.manual_label}' to your vocabulary!")
                             st.session_state.words_studied += 1
                             st.session_state.words_learned += 1
                             
@@ -1546,7 +1619,7 @@ if app_mode == "Camera Mode":
                             time.sleep(1.5)
                             st.rerun()
                         else:
-                            st.error("Failed to save word to vocabulary.")
+                            error_message("Failed to save word to vocabulary.")
                 
                 # Button to exit manual mode
                 if st.button("Cancel Manual Selection"):
@@ -1555,12 +1628,27 @@ if app_mode == "Camera Mode":
                     st.rerun()
         
         # Text OCR mode
+        # Text OCR mode
         else:  # Text OCR mode
+            # Create container for loading spinner
+            spinner_container = st.container()
+            with spinner_container:
+                show_loading_spinner("Detecting text... This may take a few seconds.")
+                
+            # Add visual separator for mobile
+            add_result_separator()
+            
             with st.spinner("Detecting text..."):
                 detected_text = detect_text_in_image(image)
                 
+                # Clear the spinner
+                spinner_container.empty()
+                
+                # Add scroll indicator for mobile
+                add_scroll_indicator()
+                
                 if detected_text:
-                    st.subheader("Detected Text")
+                    style_section_title("📝 Detected Text")
                     st.write(detected_text)
                     
                     # Split into words for learning
@@ -1605,20 +1693,20 @@ if app_mode == "Camera Mode":
                                         )
                                         
                                         if vocab_id:
-                                            st.success(f"Added '{word}' to vocabulary!")
+                                            success_message(f"Added '{word}' to vocabulary!")
                                             st.session_state.words_studied += 1
                                             st.session_state.words_learned += 1
                                         else:
-                                            st.error(f"Failed to save '{word}'")
+                                            error_message(f"Failed to save '{word}'")
                                 
                                 st.markdown("---")
                     else:
-                        st.info("No clear words detected in the image.")
+                        info_message("No clear words detected in the image.")
                 else:
-                    st.info("No text detected. Try another image or adjust image clarity.")
+                    info_message("No text detected. Try another image or adjust image clarity.")
 
 elif app_mode == "My Vocabulary":
-    st.title("📚 My Vocabulary")
+    style_title("📚 My Vocabulary")
     st.markdown("Review all the words you've learned so far.")
     
     # Get vocabulary from database
@@ -1753,7 +1841,7 @@ elif app_mode == "My Vocabulary":
                         image = Image.open(image_path)
                         st.image(image, caption=f"Image for {word.get('word_original', '')}", use_column_width=True)
                     except Exception as e:
-                        st.error(f"Error loading image: {e}")
+                        error_message(f"Error loading image: {e}")
                 else:
                     st.markdown("*No image available for this word*")
                 
@@ -1776,13 +1864,13 @@ elif app_mode == "My Vocabulary":
                         # Gracefully handle any errors
                         print(f"Error in pronunciation module: {str(e)}")
                         with st.expander("🎤 Practice Pronunciation"):
-                            st.warning("Pronunciation practice is temporarily unavailable.")
-                            st.info("This feature may not be supported in the current environment.")
+                            warning_message("Pronunciation practice is temporarily unavailable.")
+                            info_message("This feature may not be supported in the current environment.")
                 else:
                     # Show a message if pronunciation practice is not available
                     with st.expander("🎤 Practice Pronunciation"):
-                        st.warning("Pronunciation practice requires additional packages.")
-                        st.info("To enable pronunciation practice, install the following packages:")
+                        warning_message("Pronunciation practice requires additional packages.")
+                        info_message("To enable pronunciation practice, install the following packages:")
                         st.code("pip install SpeechRecognition pydub PyAudio python-Levenshtein")
                         st.markdown("After installing, restart the application to use pronunciation practice.")
 
@@ -1804,12 +1892,12 @@ elif app_mode == "My Vocabulary":
                     st.markdown("*Translation not available. Please install deep-translator package.*")
 
         else:
-            st.warning("There was an issue with the vocabulary data format.")
+            warning_message("There was an issue with the vocabulary data format.")
     else:
-        st.info("No vocabulary words found with current filter. Go to Camera Mode to start learning new words!")
+        info_message("No vocabulary words found with current filter. Go to Camera Mode to start learning new words!")
 
 elif app_mode == "Quiz Mode":
-    st.title("🎮 Quiz Mode")
+    style_title("🎮 Quiz Mode")
     st.markdown("Test your vocabulary knowledge with interactive quizzes.")
     
     # Import the quiz system if not already imported
@@ -1840,8 +1928,8 @@ elif app_mode == "Quiz Mode":
             st.session_state.gamification = gamification
             
         except ImportError as e:
-            st.error(f"Error loading quiz system: {e}")
-            st.info("Please make sure quiz_system.py is in the same directory as main.py")
+            error_message(f"Error loading quiz system: {e}")
+            info_message("Please make sure quiz_system.py is in the same directory as main.py")
             st.stop()
     
     # Get the quiz system from session state
@@ -1956,19 +2044,19 @@ elif app_mode == "Quiz Mode":
                 if len(filtered_vocab) > 20:
                     st.markdown(f"*...and {len(filtered_vocab) - 20} more words*")
         else:
-            st.warning(f"No vocabulary words found with current filter. Go to Camera Mode to add words in {quiz_language}" +
+            warning_message(f"No vocabulary words found with current filter. Go to Camera Mode to add words in {quiz_language}" +
                       (f" for the {category_filter} category" if category_filter != "All Categories" else "") + ".")
             
             # Show a specific message for empty vocabulary
             if not vocabulary:
-                st.info("Start by learning some words in Camera Mode to build your vocabulary!")
+                info_message("Start by learning some words in Camera Mode to build your vocabulary!")
             elif not any(word['language_translated'] == quiz_lang_code for word in vocabulary):
-                st.info(f"You don't have any words in {quiz_language} yet. Try selecting a different language or add some new words.")
+                info_message(f"You don't have any words in {quiz_language} yet. Try selecting a different language or add some new words.")
             else:
-                st.info(f"No words found in the {category_filter} category. Try selecting 'All Categories' or add words in this category.")
+                info_message(f"No words found in the {category_filter} category. Try selecting 'All Categories' or add words in this category.")
 
 elif app_mode == "Statistics":
-    st.title("📊 Learning Statistics")
+    style_title("📊 Learning Statistics")
     st.markdown("Track your progress and learning habits.")
     
     # Get session stats for the last 30 days
@@ -2110,7 +2198,7 @@ elif app_mode == "Statistics":
         """)
         
     else:
-        st.info("No learning statistics available yet. Complete some learning sessions to see your progress!")
+        info_message("No learning statistics available yet. Complete some learning sessions to see your progress!")
         
         if st.button("Generate Sample Statistics (Demo)"):
             # Create sample data for demonstration
@@ -2144,12 +2232,12 @@ elif app_mode == "My Progress":
     try:
         gamification.render_dashboard()
     except Exception as e:
-        st.error("There was an error displaying the Progress. The system might be initializing.")
-        st.info("Please try again in a moment or add some vocabulary first to initialize the system.")
+        error_message("There was an error displaying the Progress. The system might be initializing.")
+        info_message("Please try again in a moment or add some vocabulary first to initialize the system.")
         print(f"Dashboard error: {e}")
 
 elif app_mode == "Pronunciation Practice":
-    st.title("🎤 Pronunciation Practice")
+    style_title("🎤 Pronunciation Practice")
     st.markdown("Practice your pronunciation and get instant feedback on your speaking skills.")
     
     # Session management
@@ -2160,7 +2248,7 @@ elif app_mode == "Pronunciation Practice":
                 if manage_session("start"):
                     st.rerun()
         else:
-            st.info(f"Session in progress - Words studied: {st.session_state.words_studied}")
+            info_message(f"Session in progress - Words studied: {st.session_state.words_studied}")
     with col2:
         if st.session_state.session_id is not None:
             if st.button("End Session"):
@@ -2194,7 +2282,7 @@ elif app_mode == "Pronunciation Practice":
             filtered_vocab = [word for word in vocabulary if word['language_translated'] == practice_language_code]
             
             if filtered_vocab:
-                st.info(f"Found {len(filtered_vocab)} words in {practice_language}. Start a practice session to improve your pronunciation.")
+                info_message(f"Found {len(filtered_vocab)} words in {practice_language}. Start a practice session to improve your pronunciation.")
                 
                 # Start a new practice session button
                 if 'practice_words' not in st.session_state:
@@ -2209,7 +2297,7 @@ elif app_mode == "Pronunciation Practice":
                             st.session_state.practice_scores = []
                             st.rerun()
                         except Exception as e:
-                            st.error(f"Error starting practice session: {str(e)}")
+                            error_message(f"Error starting practice session: {str(e)}")
                 
                 # Run the practice session if words are selected
                 if 'practice_words' in st.session_state:
@@ -2217,22 +2305,22 @@ elif app_mode == "Pronunciation Practice":
                         st.session_state.pronunciation_practice.render_practice_session(
                             vocabulary, practice_language_code)
                     except Exception as e:
-                        st.error(f"Error in practice session: {str(e)}")
+                        error_message(f"Error in practice session: {str(e)}")
                         # Add a reset button
                         if st.button("Reset Practice Session"):
                             if 'practice_words' in st.session_state:
                                 del st.session_state.practice_words
                             st.rerun()
             else:
-                st.warning(f"No vocabulary words found for {practice_language}. Go to Camera Mode to add words first.")
+                warning_message(f"No vocabulary words found for {practice_language}. Go to Camera Mode to add words first.")
         
         except Exception as e:
-            st.error(f"Error initializing pronunciation practice: {str(e)}")
-            st.warning("Pronunciation practice is temporarily unavailable.")
-            st.info("This feature may not be supported in the current environment.")
+            error_message(f"Error initializing pronunciation practice: {str(e)}")
+            warning_message("Pronunciation practice is temporarily unavailable.")
+            info_message("This feature may not be supported in the current environment.")
     else:
-        st.warning("Pronunciation practice requires additional packages.")
-        st.info("To enable pronunciation practice, install the following packages:")
+        warning_message("Pronunciation practice requires additional packages.")
+        info_message("To enable pronunciation practice, install the following packages:")
         
         st.markdown("### Python Packages:")
         st.code("pip install SpeechRecognition pydub PyAudio python-Levenshtein")
@@ -2252,3 +2340,5 @@ if st.session_state.session_id:
 else:
     st.sidebar.warning("No active session")
     st.sidebar.markdown("*Start a session in Camera Mode to track progress*")
+
+add_footer()
