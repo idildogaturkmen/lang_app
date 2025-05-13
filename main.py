@@ -20,8 +20,9 @@ from gamification import GamificationSystem
 import random
 from collections import defaultdict
 import io
+from vocam_ui import apply_custom_css
 
-
+apply_custom_css()
 
 try:
     from cloud_detector import detect_streamlit_cloud
@@ -67,8 +68,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-apply_custom_css()
 
 # Fix the typo in the import statement
 try:
