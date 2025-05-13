@@ -1,5 +1,6 @@
 import streamlit as st
 import base64
+import time
 
 # Define color palette
 COLORS = {
@@ -10,6 +11,13 @@ COLORS = {
 }
 
 def apply_custom_css():
+    timestamp = int(time.time())  # Add time import at the top
+    st.markdown(f"""
+    <style data-timestamp="{timestamp}">
+    /* Your CSS here */
+    </style>
+    """, unsafe_allow_html=True)
+
     """Apply custom CSS for Vocam UI enhancements."""
     st.markdown("""
     <style>
