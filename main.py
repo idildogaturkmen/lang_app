@@ -33,11 +33,38 @@ st.set_page_config(
 
 def handle_audio_data():
     """Handle audio data from JavaScript recorder"""
-    # Create a component to receive data from JavaScript
-    component_value = components.declare_component(
-        "audio_recorder_component",
-        render_func=lambda: ""  # Empty render function
+    # Use html component instead of declaring a custom component
+    audio_recorder_key = f"audio_recorder_{int(time.time())}"
+    
+    components.html(
+        """
+        <script>
+        if (window.audioRecorderInitialized !== true) {
+            window.audioRecorderInitialized = true;
+            
+            // Listen for messages from the recorder
+            window.addEventListener('message', function(e) {
+                const data = e.data;
+                
+                // Check if this is recorder data
+                if (data && data.type === 'audio_data') {
+                    // Send to Streamlit
+                    if (window.Streamlit) {
+                        window.Streamlit.setComponentValue(JSON.stringify(data));
+                    }
+                }
+            });
+            
+            console.log("Audio recorder listener initialized");
+        }
+        </script>
+        """,
+        height=0,
+        key=audio_recorder_key
     )
+    
+    # Get the component value
+    component_value = st.session_state.get(audio_recorder_key)
     
     # Check if there's data from the component
     if component_value:
@@ -788,32 +815,26 @@ def check_audio_permissions():
     // Check if browser supports audio recording
     function checkAudioSupport() {
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-            document.getElementById('audio-support-status').innerHTML = 
-                '❌ Your browser does not support audio recording. Please try Chrome, Firefox, or Edge.';
+            console.log("Browser doesn't support audio recording");
             return false;
         }
         
         // Test permissions
         navigator.mediaDevices.getUserMedia({ audio: true })
             .then(function(stream) {
-                document.getElementById('audio-support-status').innerHTML = 
-                    '✅ Microphone access granted';
+                console.log("Microphone access granted");
                 // Stop the stream immediately
                 stream.getTracks().forEach(track => track.stop());
             })
             .catch(function(err) {
-                document.getElementById('audio-support-status').innerHTML = 
-                    '❌ Microphone access denied. Please allow microphone access in your browser settings.';
+                console.log("Microphone access denied: " + err);
             });
     }
     
     // Run check when document is loaded
     document.addEventListener('DOMContentLoaded', checkAudioSupport);
     </script>
-    
-    <div id="audio-support-status">Checking microphone access...</div>
     """, unsafe_allow_html=True)
-
 
 # Function to check if database is properly set up
 def check_database_setup():
@@ -985,6 +1006,7 @@ if 'word_of_the_day' not in st.session_state:
 if 'debug_quiz' not in st.session_state:
     st.session_state.debug_quiz = False
 # Add these initializations with your other session state initializations
+# Add these initializations with your other session state initializations
 if 'audio_data' not in st.session_state:
     st.session_state.audio_data = None
 if 'audio_data_received' not in st.session_state:
@@ -1055,6 +1077,7 @@ def get_audio_html(audio_bytes):
     # Remove the autoplay attribute - only keep controls
     audio_tag = f'<audio src="data:audio/mp3;base64,{audio_base64}" controls></audio>'
     return audio_tag
+
 
 # Function to load YOLOv5 model
 @st.cache_resource
@@ -2355,7 +2378,7 @@ elif app_mode == "Pronunciation Practice":
     
     # Handle audio data
     handle_audio_data()
-    
+
     # Session management
     col1, col2 = st.columns(2)
     with col1:

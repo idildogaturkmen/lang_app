@@ -403,30 +403,14 @@ class SimplePronunciationPractice:
                     reader.onloadend = function() {{
                         const base64data = reader.result.split(',')[1];
                         
-                        // Add debug message
+                        // Log for debugging
                         console.log("Audio recording complete, sending data to Streamlit");
                         
-                        // Create a custom event to send data to Streamlit
-                        const event = new CustomEvent('streamlit:recordComplete', {{
-                            detail: {{ 
-                                audio_data: base64data,
-                                word_id: '{st.session_state.current_practice_index if "current_practice_index" in st.session_state else 0}'
-                            }}
-                        }});
-                        window.dispatchEvent(event);
-                        
-                        // Also try the direct approach
+                        // Send message to parent window
                         window.parent.postMessage({{
-                            type: 'streamlit:setComponentValue',
-                            value: JSON.stringify({{
-                                audio_data: base64data,
-                                word_id: '{st.session_state.current_practice_index if "current_practice_index" in st.session_state else 0}'
-                            }})
-                        }}, '*');
-                        
-                        // Force rerun to update the UI
-                        window.parent.postMessage({{
-                            type: 'streamlit:componentRerun'
+                            type: 'audio_data',
+                            audio_data: base64data,
+                            word_id: '{st.session_state.current_practice_index if "current_practice_index" in st.session_state else 0}'
                         }}, '*');
                     }};
                     
@@ -474,10 +458,6 @@ class SimplePronunciationPractice:
         
         # Add the JavaScript code
         st.markdown(js_code, unsafe_allow_html=True)
-        
-        # Initialize audio data received flag if not present
-        if 'audio_data_received' not in st.session_state:
-            st.session_state.audio_data_received = False
     
     def _evaluate_pronunciation(self, audio_data, target_word, language_code):
         """Evaluate pronunciation using speech recognition"""
