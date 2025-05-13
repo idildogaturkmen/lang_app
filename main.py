@@ -62,7 +62,8 @@ def handle_audio_data():
         except Exception as e:
             print(f"Error processing audio data: {e}")
 
-            
+
+
 try:
     from cloud_detector import detect_streamlit_cloud
     is_cloud = detect_streamlit_cloud()
@@ -752,6 +753,68 @@ def get_session_stats_direct(days=30):
         error_message(f"Error retrieving session stats: {str(e)}")
         return {}
 
+def create_audio_recorder_component():
+    """Create a custom component to handle audio recorder data"""
+    def _handle_audio_data(audio_data, word_id):
+        st.session_state.audio_data = audio_data
+        st.session_state.audio_data_received = True
+        st.session_state.current_recording_word = word_id
+        st.experimental_rerun()
+    
+    # Define a simple component
+    components.html(
+        """
+        <script>
+        // Listen for the custom event from our recorder
+        window.addEventListener('streamlit:recordComplete', function(e) {
+            const data = e.detail;
+            if (data && data.audio_data) {
+                // Send to Streamlit - implementation depends on Streamlit version
+                if (window.Streamlit) {
+                    window.Streamlit.setComponentValue(data);
+                }
+            }
+        });
+        </script>
+        """,
+        height=0,
+        key="audio_recorder_listener"
+    )
+
+def check_audio_permissions():
+    """Add a check for audio recording permissions"""
+    st.markdown("""
+    <script>
+    // Check if browser supports audio recording
+    function checkAudioSupport() {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            document.getElementById('audio-support-status').innerHTML = 
+                '❌ Your browser does not support audio recording. Please try Chrome, Firefox, or Edge.';
+            return false;
+        }
+        
+        // Test permissions
+        navigator.mediaDevices.getUserMedia({ audio: true })
+            .then(function(stream) {
+                document.getElementById('audio-support-status').innerHTML = 
+                    '✅ Microphone access granted';
+                // Stop the stream immediately
+                stream.getTracks().forEach(track => track.stop());
+            })
+            .catch(function(err) {
+                document.getElementById('audio-support-status').innerHTML = 
+                    '❌ Microphone access denied. Please allow microphone access in your browser settings.';
+            });
+    }
+    
+    // Run check when document is loaded
+    document.addEventListener('DOMContentLoaded', checkAudioSupport);
+    </script>
+    
+    <div id="audio-support-status">Checking microphone access...</div>
+    """, unsafe_allow_html=True)
+
+
 # Function to check if database is properly set up
 def check_database_setup():
     """Check if the database is properly set up and try to fix if needed."""
@@ -921,6 +984,13 @@ if 'word_of_the_day' not in st.session_state:
 # For debugging question type selection
 if 'debug_quiz' not in st.session_state:
     st.session_state.debug_quiz = False
+# Add these initializations with your other session state initializations
+if 'audio_data' not in st.session_state:
+    st.session_state.audio_data = None
+if 'audio_data_received' not in st.session_state:
+    st.session_state.audio_data_received = False
+if 'current_recording_word' not in st.session_state:
+    st.session_state.current_recording_word = None
 
 
 @st.cache_resource
@@ -1290,6 +1360,10 @@ app_mode = st.sidebar.selectbox(
     "Choose a mode",
     app_mode_options
 )
+
+# Near the top of your app's main flow
+if "Pronunciation Practice" in app_mode_options:
+    handle_audio_data()
 
 # Add gamification info to the sidebar
 try:
@@ -2272,6 +2346,15 @@ elif app_mode == "My Progress":
 elif app_mode == "Pronunciation Practice":
     style_title("🎤 Pronunciation Practice")
     st.markdown("Practice your pronunciation and get instant feedback on your speaking skills.")
+    
+    # Check audio permissions
+    check_audio_permissions()
+    
+    # Create audio recorder component
+    create_audio_recorder_component()
+    
+    # Handle audio data
+    handle_audio_data()
     
     # Session management
     col1, col2 = st.columns(2)

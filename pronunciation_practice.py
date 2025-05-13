@@ -403,22 +403,30 @@ class SimplePronunciationPractice:
                     reader.onloadend = function() {{
                         const base64data = reader.result.split(',')[1];
                         
-                        // Send data to Streamlit
-                        const data = {{
-                            audio_data: base64data,
-                            word_id: '{st.session_state.current_practice_index if "current_practice_index" in st.session_state else 0}'
-                        }};
+                        // Add debug message
+                        console.log("Audio recording complete, sending data to Streamlit");
                         
-                        // Use Streamlit's custom component API to send data
+                        // Create a custom event to send data to Streamlit
+                        const event = new CustomEvent('streamlit:recordComplete', {{
+                            detail: {{ 
+                                audio_data: base64data,
+                                word_id: '{st.session_state.current_practice_index if "current_practice_index" in st.session_state else 0}'
+                            }}
+                        }});
+                        window.dispatchEvent(event);
+                        
+                        // Also try the direct approach
                         window.parent.postMessage({{
                             type: 'streamlit:setComponentValue',
-                            value: JSON.stringify(data)
+                            value: JSON.stringify({{
+                                audio_data: base64data,
+                                word_id: '{st.session_state.current_practice_index if "current_practice_index" in st.session_state else 0}'
+                            }})
                         }}, '*');
                         
-                        // Trigger rerun
+                        // Force rerun to update the UI
                         window.parent.postMessage({{
-                            type: 'streamlit:componentRerun',
-                            value: JSON.stringify(data)
+                            type: 'streamlit:componentRerun'
                         }}, '*');
                     }};
                     
@@ -454,7 +462,7 @@ class SimplePronunciationPractice:
         <div style="display: flex; flex-direction: column; align-items: center; margin: 20px 0;">
             <button id="record-button-{recorder_id}" 
                     style="background-color: #1679AB; color: white; border: none; padding: 10px 20px; 
-                           border-radius: 8px; cursor: pointer; font-weight: bold;" 
+                        border-radius: 8px; cursor: pointer; font-weight: bold;" 
                     onclick="toggleRecording()">
                 🎙️ Record
             </button>
@@ -467,14 +475,8 @@ class SimplePronunciationPractice:
         # Add the JavaScript code
         st.markdown(js_code, unsafe_allow_html=True)
         
-        # Add a component to receive data from JavaScript
-        if st.session_state.get('audio_data_received'):
-            # Process the received data
-            if 'current_practice_words' in st.session_state and 'current_practice_index' in st.session_state:
-                current_word = st.session_state.practice_words[st.session_state.current_practice_index]
-                st.session_state.current_recording_word = current_word.get('id')
-            
-            # Clear the flag
+        # Initialize audio data received flag if not present
+        if 'audio_data_received' not in st.session_state:
             st.session_state.audio_data_received = False
     
     def _evaluate_pronunciation(self, audio_data, target_word, language_code):
