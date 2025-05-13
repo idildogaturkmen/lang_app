@@ -31,82 +31,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-def handle_audio_data():
-    """Handle audio data from JavaScript recorder"""
-    # Use session state to store audio data
-    if 'audio_data' not in st.session_state:
-        st.session_state.audio_data = None
-    if 'audio_data_received' not in st.session_state:
-        st.session_state.audio_data_received = False
-    if 'current_recording_word' not in st.session_state:
-        st.session_state.current_recording_word = None
-        
-    # Add a hidden element to receive audio data via URL fragment
-    audio_receiver_js = """
-    <script>
-    // Function to check URL hash for audio data
-    function checkForAudioData() {
-        const hash = window.location.hash;
-        if (hash.startsWith('#audiodata=')) {
-            try {
-                // Get the data from hash
-                const encodedData = hash.substring(11);
-                const jsonData = decodeURIComponent(atob(encodedData));
-                const data = JSON.parse(jsonData);
-                
-                // Submit the form to send data to Streamlit
-                const form = document.getElementById('audio-data-form');
-                document.getElementById('audio-data-input').value = data.audio_data;
-                document.getElementById('word-id-input').value = data.word_id;
-                form.submit();
-                
-                // Clear the hash
-                history.replaceState(null, null, ' ');
-            } catch (e) {
-                console.error('Error processing audio data from URL:', e);
-            }
-        }
-    }
-
-    // Check for audio data in URL on page load
-    document.addEventListener('DOMContentLoaded', checkForAudioData);
-    
-    // Also check periodically
-    setInterval(checkForAudioData, 1000);
-    </script>
-
-    <!-- Hidden form to submit audio data to Streamlit -->
-    <form id="audio-data-form" method="post" style="display:none;">
-        <input type="hidden" id="audio-data-input" name="audio_data">
-        <input type="hidden" id="word-id-input" name="word_id">
-    </form>
-    """
-    
-    st.markdown(audio_receiver_js, unsafe_allow_html=True)
-    
-    # Process form submission for audio data
-    form_data = st.experimental_get_query_params()
-    if 'audio_data' in form_data and form_data['audio_data'][0]:
-        try:
-            # Extract the audio data
-            audio_data_base64 = form_data['audio_data'][0]
-            
-            # Convert base64 to bytes
-            audio_bytes = base64.b64decode(audio_data_base64)
-            
-            # Store the audio data in session state
-            st.session_state.audio_data = audio_bytes
-            st.session_state.audio_data_received = True
-            
-            # Store the word ID if available
-            if 'word_id' in form_data:
-                st.session_state.current_recording_word = form_data['word_id'][0]
-                
-            # Clear query params to avoid reprocessing
-            st.experimental_set_query_params()
-        except Exception as e:
-            print(f"Error processing audio data: {e}")
-
 
 try:
     from cloud_detector import detect_streamlit_cloud
@@ -797,62 +721,6 @@ def get_session_stats_direct(days=30):
         error_message(f"Error retrieving session stats: {str(e)}")
         return {}
 
-def create_audio_recorder_component():
-    """Create a custom component to handle audio recorder data"""
-    def _handle_audio_data(audio_data, word_id):
-        st.session_state.audio_data = audio_data
-        st.session_state.audio_data_received = True
-        st.session_state.current_recording_word = word_id
-        st.experimental_rerun()
-    
-    # Define a simple component
-    components.html(
-        """
-        <script>
-        // Listen for the custom event from our recorder
-        window.addEventListener('streamlit:recordComplete', function(e) {
-            const data = e.detail;
-            if (data && data.audio_data) {
-                // Send to Streamlit - implementation depends on Streamlit version
-                if (window.Streamlit) {
-                    window.Streamlit.setComponentValue(data);
-                }
-            }
-        });
-        </script>
-        """,
-        height=0,
-        key="audio_recorder_listener"
-    )
-
-def check_audio_permissions():
-    """Add a simpler check for audio recording permissions"""
-    st.markdown("""
-    <div id="audio-support-status">
-      <p>Waiting for microphone permissions...</p>
-    </div>
-    
-    <script>
-    // Check if browser supports audio recording
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        document.getElementById('audio-support-status').innerHTML = 
-            '<p style="color: red;">❌ Your browser does not support audio recording. Please try Chrome, Firefox, or Edge.</p>';
-    } else {
-        navigator.mediaDevices.getUserMedia({ audio: true })
-            .then(function(stream) {
-                document.getElementById('audio-support-status').innerHTML = 
-                    '<p style="color: green;">✅ Microphone access granted</p>';
-                // Stop the stream immediately
-                stream.getTracks().forEach(track => track.stop());
-            })
-            .catch(function(err) {
-                document.getElementById('audio-support-status').innerHTML = 
-                    '<p style="color: red;">❌ Microphone access denied. Please allow microphone access in your browser settings.</p>';
-            });
-    }
-    </script>
-    """, unsafe_allow_html=True)
-    
 # Function to check if database is properly set up
 def check_database_setup():
     """Check if the database is properly set up and try to fix if needed."""
@@ -1401,9 +1269,6 @@ app_mode = st.sidebar.selectbox(
     app_mode_options
 )
 
-# Near the top of your app's main flow
-if "Pronunciation Practice" in app_mode_options:
-    handle_audio_data()
 
 # Add gamification info to the sidebar
 try:
@@ -2387,15 +2252,6 @@ elif app_mode == "Pronunciation Practice":
     style_title("🎤 Pronunciation Practice")
     st.markdown("Practice your pronunciation and get instant feedback on your speaking skills.")
     
-    # Check audio permissions
-    check_audio_permissions()
-    
-    # Create audio recorder component
-    create_audio_recorder_component()
-    
-    # Handle audio data
-    handle_audio_data()
-
     # Session management
     col1, col2 = st.columns(2)
     with col1:

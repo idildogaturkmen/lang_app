@@ -360,114 +360,45 @@ class SimplePronunciationPractice:
                 st.rerun()
     
     def _add_js_recorder(self):
-        """Add JavaScript-based audio recorder"""
-        # Generate a unique key for this recorder
-        recorder_id = f"recorder_{int(time.time())}"
+        """Add a simple file uploader for audio recording"""
+        st.markdown("### Record Your Pronunciation")
+        st.markdown("""
+        To practice pronunciation:
+        1. Use your device's voice recorder app to record yourself saying the word
+        2. Save the recording and upload it below
+        3. Click 'Process Recording' to see your score
+        """)
         
-        # JavaScript code for audio recording
-        js_code = f"""
-        <script>
-        // Audio recording variables
-        let mediaRecorder;
-        let audioChunks = [];
-        let isRecording = false;
+        # Add a file uploader for audio
+        uploaded_file = st.file_uploader(
+            "Upload your pronunciation recording (WAV, MP3, etc.)", 
+            type=["wav", "mp3", "ogg", "m4a"],
+            key=f"audio_upload_{int(time.time())}"
+        )
         
-        // Elements
-        const recordButton = document.getElementById('record-button-{recorder_id}');
-        const recordStatus = document.getElementById('record-status-{recorder_id}');
+        # Process the uploaded file
+        if uploaded_file is not None:
+            # Read the file
+            audio_bytes = uploaded_file.read()
+            
+            # Store in session state
+            st.session_state.audio_data = audio_bytes
+            st.session_state.audio_data_received = True
+            
+            # If we're in a practice session, store the current word ID
+            if 'current_practice_index' in st.session_state and 'practice_words' in st.session_state:
+                current_index = st.session_state.current_practice_index
+                if current_index < len(st.session_state.practice_words):
+                    current_word = st.session_state.practice_words[current_index]
+                    st.session_state.current_recording_word = current_word.get('id')
+            
+            # Display the audio player
+            st.audio(audio_bytes)
+            
+            # Add a button to process the recording
+            if st.button("Process Recording", type="primary"):
+                st.experimental_rerun()
         
-        // Start/stop recording
-        function toggleRecording() {{
-            if (!isRecording) {{
-                startRecording();
-            }} else {{
-                stopRecording();
-            }}
-        }}
-        
-        // Start recording
-        async function startRecording() {{
-            try {{
-                const stream = await navigator.mediaDevices.getUserMedia({{ audio: true }});
-                mediaRecorder = new MediaRecorder(stream);
-                audioChunks = [];
-                
-                mediaRecorder.addEventListener('dataavailable', event => {{
-                    audioChunks.push(event.data);
-                }});
-                
-                mediaRecorder.addEventListener('stop', () => {{
-                    const audioBlob = new Blob(audioChunks, {{ type: 'audio/wav' }});
-                    const reader = new FileReader();
-                    
-                    reader.onloadend = function() {{
-                        const base64data = reader.result.split(',')[1];
-                        
-                        // Log for debugging
-                        console.log("Audio recording complete, sending data to Streamlit");
-                        
-                        // Create data object
-                        const data = {{
-                            audio_data: base64data,
-                            word_id: '{st.session_state.current_practice_index if "current_practice_index" in st.session_state else 0}'
-                        }};
-                        
-                        // Encode data to base64 and add to URL hash
-                        const jsonData = JSON.stringify(data);
-                        const encodedData = btoa(encodeURIComponent(jsonData));
-                        window.location.hash = 'audiodata=' + encodedData;
-                        
-                        // Force reload to process new data
-                        setTimeout(() => {{
-                            window.location.reload();
-                        }}, 100);
-                    }};
-                    
-                    reader.readAsDataURL(audioBlob);
-                }});
-                
-                mediaRecorder.start();
-                isRecording = true;
-                recordButton.textContent = '⏹️ Stop Recording';
-                recordButton.style.backgroundColor = '#FF4B4B';
-                recordStatus.textContent = '🔴 Recording in progress...';
-            }} catch (err) {{
-                console.error('Error accessing microphone:', err);
-                recordStatus.textContent = '❌ Error: ' + err.message;
-            }}
-        }}
-        
-        // Stop recording
-        function stopRecording() {{
-            if (mediaRecorder && isRecording) {{
-                mediaRecorder.stop();
-                isRecording = false;
-                recordButton.textContent = '🎙️ Record';
-                recordButton.style.backgroundColor = '#1679AB';
-                recordStatus.textContent = '✅ Recording complete!';
-                
-                // Stop all audio tracks
-                mediaRecorder.stream.getAudioTracks().forEach(track => track.stop());
-            }}
-        }}
-        </script>
-        
-        <div style="display: flex; flex-direction: column; align-items: center; margin: 20px 0;">
-            <button id="record-button-{recorder_id}" 
-                    style="background-color: #1679AB; color: white; border: none; padding: 10px 20px; 
-                        border-radius: 8px; cursor: pointer; font-weight: bold;" 
-                    onclick="toggleRecording()">
-                🎙️ Record
-            </button>
-            <p id="record-status-{recorder_id}" style="margin-top: 10px; font-style: italic;">
-                Click the button above to start recording
-            </p>
-        </div>
-        """
-        
-        # Add the JavaScript code
-        st.markdown(js_code, unsafe_allow_html=True)
-    
     def _evaluate_pronunciation(self, audio_data, target_word, language_code):
         """Evaluate pronunciation using speech recognition"""
         if not HAS_SR:
