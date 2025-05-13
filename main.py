@@ -21,6 +21,7 @@ import random
 from collections import defaultdict
 import io
 from vocam_ui import apply_custom_css
+from streamlit.components.v1 import components
 
 # First, display Python version for debugging
 st.set_page_config(
@@ -30,7 +31,38 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+def handle_audio_data():
+    """Handle audio data from JavaScript recorder"""
+    # Create a component to receive data from JavaScript
+    component_value = components.declare_component(
+        "audio_recorder_component",
+        render_func=lambda: ""  # Empty render function
+    )
+    
+    # Check if there's data from the component
+    if component_value:
+        try:
+            # Parse the data
+            data = json.loads(component_value)
+            
+            # Extract the audio data
+            audio_data_base64 = data.get('audio_data')
+            
+            # Convert base64 to bytes
+            audio_bytes = base64.b64decode(audio_data_base64)
+            
+            # Store the audio data in session state
+            st.session_state.audio_data = audio_bytes
+            st.session_state.audio_data_received = True
+            
+            # Store the word ID
+            word_id = data.get('word_id')
+            if word_id:
+                st.session_state.current_recording_word = word_id
+        except Exception as e:
+            print(f"Error processing audio data: {e}")
 
+            
 try:
     from cloud_detector import detect_streamlit_cloud
     is_cloud = detect_streamlit_cloud()

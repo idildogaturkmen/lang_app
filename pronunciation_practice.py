@@ -141,7 +141,7 @@ def create_pronunciation_practice(text_to_speech_func=None, get_audio_html_func=
 
 class SimplePronunciationPractice:
     """
-    Simplified implementation of pronunciation practice using self-assessment
+    Implementation of pronunciation practice with AI feedback
     """
     
     def __init__(self, text_to_speech_func, get_audio_html_func, translate_text_func):
@@ -176,28 +176,43 @@ class SimplePronunciationPractice:
             # Show pronunciation tips
             self._show_pronunciation_tips(word)
             
-            # Simple self-assessment version
-            st.markdown("### Record Your Pronunciation")
-            st.markdown("Record yourself saying the word using your device's voice recorder app, then rate your pronunciation:")
+            # Add JavaScript-based audio recorder
+            self._add_js_recorder()
             
-            # Create a simple rating system
-            rating = st.select_slider(
-                "How well did you pronounce the word?",
-                options=["Poor", "Fair", "Good", "Very Good", "Excellent"],
-                value="Good"
-            )
-            
-            # Calculate score based on rating
-            score_map = {
-                "Poor": 20,
-                "Fair": 40,
-                "Good": 60,
-                "Very Good": 80,
-                "Excellent": 95
-            }
-            
-            # Show feedback based on self-rating
-            self._show_simple_feedback(translated_word, language_code, score_map.get(rating, 60))
+            # Calculate score based on speech recognition or self-assessment
+            if HAS_SR and 'audio_data' in st.session_state:
+                # Process audio with speech recognition
+                similarity_score = self._evaluate_pronunciation(
+                    audio_data=st.session_state.audio_data,
+                    target_word=translated_word,
+                    language_code=language_code
+                )
+                
+                # Show feedback based on AI assessment
+                self._show_simple_feedback(translated_word, language_code, similarity_score)
+            else:
+                # Fall back to self-assessment if no audio or speech recognition
+                st.markdown("### Rate Your Pronunciation")
+                st.markdown("After practicing, rate how well you pronounced the word:")
+                
+                # Create a simple rating system
+                rating = st.select_slider(
+                    "How well did you pronounce the word?",
+                    options=["Poor", "Fair", "Good", "Very Good", "Excellent"],
+                    value="Good"
+                )
+                
+                # Calculate score based on rating
+                score_map = {
+                    "Poor": 20,
+                    "Fair": 40,
+                    "Good": 60,
+                    "Very Good": 80,
+                    "Excellent": 95
+                }
+                
+                # Show feedback based on self-rating
+                self._show_simple_feedback(translated_word, language_code, score_map.get(rating, 60))
     
     def render_practice_session(self, vocabulary, language_code):
         """Render pronunciation practice session"""
@@ -237,46 +252,75 @@ class SimplePronunciationPractice:
             with st.expander("Pronunciation Guide", expanded=True):
                 self._show_pronunciation_tips(current_word)
             
-            # Self-assessment without audio recording
-            st.markdown("### Practice Your Pronunciation")
-            st.markdown("""
-            1. Listen to the correct pronunciation above
-            2. Practice saying the word aloud several times
-            3. Rate how well you pronounced the word
-            """)
+            # Add JavaScript-based audio recorder
+            st.markdown("### Record Your Pronunciation")
+            st.markdown("Click the button below to record your pronunciation:")
             
-            # Simple self-assessment
-            rating = st.select_slider(
-                "How well did you pronounce the word?",
-                options=["Poor", "Fair", "Good", "Very Good", "Excellent"],
-                value="Good"
-            )
+            # Add recorder
+            self._add_js_recorder()
             
-            # Calculate score based on rating
-            score_map = {
-                "Poor": 20,
-                "Fair": 40,
-                "Good": 60,
-                "Very Good": 80,
-                "Excellent": 95
-            }
-            score = score_map.get(rating, 60)
-            
-            # Show feedback
-            self._show_simple_feedback(
-                current_word.get('word_translated', ''), 
-                language_code, 
-                score
-            )
-            
-            # Submit button
-            if st.button("Submit and Continue", type="primary"):
-                # Store score
-                if 'practice_scores' not in st.session_state:
-                    st.session_state.practice_scores = []
-                st.session_state.practice_scores.append(score)
-                st.session_state.current_practice_index += 1
-                st.rerun()
+            # Check if audio data is available
+            if 'audio_data' in st.session_state and st.session_state.get('current_recording_word') == current_word.get('id'):
+                # Display recorded audio
+                st.audio(st.session_state.audio_data, format="audio/wav")
+                
+                # Calculate score based on speech recognition or self-assessment
+                if HAS_SR:
+                    # Process audio with speech recognition
+                    similarity_score = self._evaluate_pronunciation(
+                        audio_data=st.session_state.audio_data,
+                        target_word=current_word.get('word_translated', ''),
+                        language_code=language_code
+                    )
+                else:
+                    # Fall back to self-assessment
+                    rating = st.select_slider(
+                        "How well did you pronounce the word?",
+                        options=["Poor", "Fair", "Good", "Very Good", "Excellent"],
+                        value="Good"
+                    )
+                    
+                    # Calculate score based on rating
+                    score_map = {
+                        "Poor": 20,
+                        "Fair": 40,
+                        "Good": 60,
+                        "Very Good": 80,
+                        "Excellent": 95
+                    }
+                    similarity_score = score_map.get(rating, 60)
+                
+                # Show feedback
+                self._show_simple_feedback(
+                    current_word.get('word_translated', ''), 
+                    language_code, 
+                    similarity_score
+                )
+                
+                # Submit button
+                if st.button("Submit and Continue", type="primary"):
+                    # Store score
+                    if 'practice_scores' not in st.session_state:
+                        st.session_state.practice_scores = []
+                    st.session_state.practice_scores.append(similarity_score)
+                    
+                    # Clear audio data for next word
+                    if 'audio_data' in st.session_state:
+                        del st.session_state.audio_data
+                    if 'current_recording_word' in st.session_state:
+                        del st.session_state.current_recording_word
+                    
+                    # Move to next word
+                    st.session_state.current_practice_index += 1
+                    st.rerun()
+            else:
+                # Display instructions
+                st.markdown("""
+                1. Listen to the correct pronunciation above
+                2. Click the 'Record' button and say the word
+                3. Click 'Stop' when you're done
+                4. Listen to your recording and see the AI feedback
+                """)
             
             # Example in context
             example = self._get_example_sentence(
@@ -306,7 +350,195 @@ class SimplePronunciationPractice:
                 st.session_state.practice_words = random.sample(filtered_vocab, practice_size)
                 st.session_state.current_practice_index = 0
                 st.session_state.practice_scores = []
+                
+                # Clear audio data
+                if 'audio_data' in st.session_state:
+                    del st.session_state.audio_data
+                if 'current_recording_word' in st.session_state:
+                    del st.session_state.current_recording_word
+                
                 st.rerun()
+    
+    def _add_js_recorder(self):
+        """Add JavaScript-based audio recorder"""
+        # Generate a unique key for this recorder
+        recorder_id = f"recorder_{int(time.time())}"
+        
+        # JavaScript code for audio recording
+        js_code = f"""
+        <script>
+        // Audio recording variables
+        let mediaRecorder;
+        let audioChunks = [];
+        let isRecording = false;
+        
+        // Elements
+        const recordButton = document.getElementById('record-button-{recorder_id}');
+        const recordStatus = document.getElementById('record-status-{recorder_id}');
+        
+        // Start/stop recording
+        function toggleRecording() {{
+            if (!isRecording) {{
+                startRecording();
+            }} else {{
+                stopRecording();
+            }}
+        }}
+        
+        // Start recording
+        async function startRecording() {{
+            try {{
+                const stream = await navigator.mediaDevices.getUserMedia({{ audio: true }});
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+                
+                mediaRecorder.addEventListener('dataavailable', event => {{
+                    audioChunks.push(event.data);
+                }});
+                
+                mediaRecorder.addEventListener('stop', () => {{
+                    const audioBlob = new Blob(audioChunks, {{ type: 'audio/wav' }});
+                    const reader = new FileReader();
+                    
+                    reader.onloadend = function() {{
+                        const base64data = reader.result.split(',')[1];
+                        
+                        // Send data to Streamlit
+                        const data = {{
+                            audio_data: base64data,
+                            word_id: '{st.session_state.current_practice_index if "current_practice_index" in st.session_state else 0}'
+                        }};
+                        
+                        // Use Streamlit's custom component API to send data
+                        window.parent.postMessage({{
+                            type: 'streamlit:setComponentValue',
+                            value: JSON.stringify(data)
+                        }}, '*');
+                        
+                        // Trigger rerun
+                        window.parent.postMessage({{
+                            type: 'streamlit:componentRerun',
+                            value: JSON.stringify(data)
+                        }}, '*');
+                    }};
+                    
+                    reader.readAsDataURL(audioBlob);
+                }});
+                
+                mediaRecorder.start();
+                isRecording = true;
+                recordButton.textContent = '⏹️ Stop Recording';
+                recordButton.style.backgroundColor = '#FF4B4B';
+                recordStatus.textContent = '🔴 Recording in progress...';
+            }} catch (err) {{
+                console.error('Error accessing microphone:', err);
+                recordStatus.textContent = '❌ Error: ' + err.message;
+            }}
+        }}
+        
+        // Stop recording
+        function stopRecording() {{
+            if (mediaRecorder && isRecording) {{
+                mediaRecorder.stop();
+                isRecording = false;
+                recordButton.textContent = '🎙️ Record';
+                recordButton.style.backgroundColor = '#1679AB';
+                recordStatus.textContent = '✅ Recording complete!';
+                
+                // Stop all audio tracks
+                mediaRecorder.stream.getAudioTracks().forEach(track => track.stop());
+            }}
+        }}
+        </script>
+        
+        <div style="display: flex; flex-direction: column; align-items: center; margin: 20px 0;">
+            <button id="record-button-{recorder_id}" 
+                    style="background-color: #1679AB; color: white; border: none; padding: 10px 20px; 
+                           border-radius: 8px; cursor: pointer; font-weight: bold;" 
+                    onclick="toggleRecording()">
+                🎙️ Record
+            </button>
+            <p id="record-status-{recorder_id}" style="margin-top: 10px; font-style: italic;">
+                Click the button above to start recording
+            </p>
+        </div>
+        """
+        
+        # Add the JavaScript code
+        st.markdown(js_code, unsafe_allow_html=True)
+        
+        # Add a component to receive data from JavaScript
+        if st.session_state.get('audio_data_received'):
+            # Process the received data
+            if 'current_practice_words' in st.session_state and 'current_practice_index' in st.session_state:
+                current_word = st.session_state.practice_words[st.session_state.current_practice_index]
+                st.session_state.current_recording_word = current_word.get('id')
+            
+            # Clear the flag
+            st.session_state.audio_data_received = False
+    
+    def _evaluate_pronunciation(self, audio_data, target_word, language_code):
+        """Evaluate pronunciation using speech recognition"""
+        if not HAS_SR:
+            # If speech recognition is not available, return a default score
+            return 60
+        
+        try:
+            # Prepare the audio data
+            audio_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+            audio_file.write(audio_data)
+            audio_file.close()
+            
+            # Use speech recognition to transcribe
+            with sr.AudioFile(audio_file.name) as source:
+                audio = self.recognizer.record(source)
+                
+                # Get recognition language code
+                rec_lang = RECOGNITION_LANGUAGES.get(language_code, "en-US")
+                
+                # Recognize speech
+                recognized_text = self.recognizer.recognize_google(audio, language=rec_lang)
+                
+                # Calculate similarity using Levenshtein distance if available
+                if HAS_LEVENSHTEIN:
+                    # Clean up text for comparison
+                    target_cleaned = self._clean_text_for_comparison(target_word)
+                    recognized_cleaned = self._clean_text_for_comparison(recognized_text)
+                    
+                    # Calculate Levenshtein distance
+                    distance = Levenshtein.distance(target_cleaned, recognized_cleaned)
+                    max_len = max(len(target_cleaned), len(recognized_cleaned))
+                    
+                    # Convert to similarity percentage
+                    similarity = max(0, 100 - (distance / max_len * 100))
+                    
+                    # Normalize score (70-100 range to avoid too harsh scoring)
+                    normalized_score = 70 + similarity * 0.3
+                    
+                    return min(100, normalized_score)
+                else:
+                    # Simple exact match if Levenshtein not available
+                    if recognized_text.lower() == target_word.lower():
+                        return 95
+                    elif target_word.lower() in recognized_text.lower():
+                        return 80
+                    else:
+                        return 60
+                
+        except Exception as e:
+            print(f"Error in speech recognition: {str(e)}")
+            # Return a default score if there's an error
+            return 60
+        finally:
+            # Clean up the temporary file
+            try:
+                os.unlink(audio_file.name)
+            except:
+                pass
+    
+    def _clean_text_for_comparison(self, text):
+        """Clean text for comparison by removing punctuation and lowercasing"""
+        return re.sub(r'[^\w\s]', '', text.lower()).strip()
     
     def _show_pronunciation_tips(self, word):
         """Show pronunciation tips for a word"""
@@ -335,7 +567,7 @@ class SimplePronunciationPractice:
         st.markdown("### Pronunciation Feedback")
         
         # Display score
-        st.markdown(f"**Pronunciation accuracy: {similarity_score}%**")
+        st.markdown(f"**Pronunciation accuracy: {similarity_score:.0f}%**")
         st.progress(similarity_score / 100.0)
         
         # Feedback based on score
