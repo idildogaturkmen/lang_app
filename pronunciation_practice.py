@@ -141,7 +141,7 @@ def create_pronunciation_practice(text_to_speech_func=None, get_audio_html_func=
 
 class SimplePronunciationPractice:
     """
-    Simplified implementation of pronunciation practice using Streamlit's native audio recorder
+    Implementation of pronunciation practice using Streamlit's audio_recorder
     """
     
     def __init__(self, text_to_speech_func, get_audio_html_func, translate_text_func):
@@ -176,23 +176,22 @@ class SimplePronunciationPractice:
             # Show pronunciation tips
             self._show_pronunciation_tips(word)
             
-            # Native Streamlit audio recorder
+            # Audio recording with Streamlit's native audio recorder
             st.markdown("### Record Your Pronunciation")
+            st.markdown("Click the microphone icon below to start recording, and click again to stop:")
             
-            # Use Streamlit's native audio recorder
-            audio_bytes = st.audio_recorder(
-                text="Click to record your pronunciation",
-                neutral_color="#1679AB",
-                recording_color="#FF4B4B",
-                stop_recording_color="#FFC107",
+            # Use Streamlit's audio recorder
+            recorded_audio = st.audio_recorder(
+                pause_threshold=2.0,  # Pause after 2 seconds of silence
                 sample_rate=44100
             )
             
-            if audio_bytes:
-                st.audio(audio_bytes, format="audio/wav")
-                st.success("Recording successful!")
+            if recorded_audio is not None:
+                # Display the recorded audio
+                st.audio(recorded_audio, format="audio/wav")
+                st.success("Recording complete! Listen to your pronunciation and compare.")
                 
-                # Simple self-assessment
+                # Rate your pronunciation
                 rating = st.select_slider(
                     "How well did you pronounce the word?",
                     options=["Poor", "Fair", "Good", "Very Good", "Excellent"],
@@ -251,54 +250,56 @@ class SimplePronunciationPractice:
             
             # Native Streamlit audio recorder
             st.markdown("### Record Your Pronunciation")
-            st.markdown("Click the microphone to start recording your pronunciation of the word.")
+            st.markdown("Click the microphone icon below to start recording, and click again to stop:")
             
-            # Use Streamlit's native audio recorder
-            audio_bytes = st.audio_recorder(
-                text="Click to record your pronunciation",
-                neutral_color="#1679AB",
-                recording_color="#FF4B4B",
-                stop_recording_color="#FFC107",
+            # Use Streamlit's audio recorder
+            recorded_audio = st.audio_recorder(
+                pause_threshold=2.0,
                 sample_rate=44100
             )
             
-            if audio_bytes:
-                st.audio(audio_bytes, format="audio/wav")
-                st.success("Recording successful!")
-                
-                # Simple self-assessment
-                rating = st.select_slider(
-                    "How well did you pronounce the word?",
-                    options=["Poor", "Fair", "Good", "Very Good", "Excellent"],
-                    value="Good"
-                )
-                
-                # Calculate score based on rating
-                score_map = {
-                    "Poor": 20,
-                    "Fair": 40,
-                    "Good": 60,
-                    "Very Good": 80,
-                    "Excellent": 95
-                }
-                score = score_map.get(rating, 60)
-                
-                # Show feedback
-                self._show_simple_feedback(
-                    current_word.get('word_translated', ''), 
-                    language_code, 
-                    score
-                )
-                
-                # Store score
-                if 'practice_scores' not in st.session_state:
-                    st.session_state.practice_scores = []
-                st.session_state.practice_scores.append(score)
-                
-                # Next word
-                if st.button("Next Word", type="primary"):
-                    st.session_state.current_practice_index += 1
-                    st.rerun()
+            # Container for analysis
+            analysis_container = st.container()
+            
+            if recorded_audio is not None:
+                with analysis_container:
+                    # Play back the recording
+                    st.audio(recorded_audio, format="audio/wav")
+                    st.success("Recording complete! Listen to your pronunciation and compare.")
+                    
+                    # Simple self-assessment
+                    rating = st.select_slider(
+                        "How well did you pronounce the word?",
+                        options=["Poor", "Fair", "Good", "Very Good", "Excellent"],
+                        value="Good"
+                    )
+                    
+                    # Calculate score based on rating
+                    score_map = {
+                        "Poor": 20,
+                        "Fair": 40,
+                        "Good": 60,
+                        "Very Good": 80,
+                        "Excellent": 95
+                    }
+                    score = score_map.get(rating, 60)
+                    
+                    # Show feedback
+                    self._show_simple_feedback(
+                        current_word.get('word_translated', ''), 
+                        language_code, 
+                        score
+                    )
+                    
+                    # Store score
+                    if 'practice_scores' not in st.session_state:
+                        st.session_state.practice_scores = []
+                    
+                    # Only append if submitting
+                    if st.button("Submit and Continue"):
+                        st.session_state.practice_scores.append(score)
+                        st.session_state.current_practice_index += 1
+                        st.rerun()
             
             # Example in context
             example = self._get_example_sentence(
@@ -329,8 +330,8 @@ class SimplePronunciationPractice:
                 st.session_state.current_practice_index = 0
                 st.session_state.practice_scores = []
                 st.rerun()
-    
-    # All other methods remain the same
+
+    # Keep all the other methods the same
     def _show_simple_feedback(self, target_word, language_code, similarity_score):
         """Show simplified pronunciation feedback"""
         st.markdown("### Pronunciation Feedback")
