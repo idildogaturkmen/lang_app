@@ -1147,7 +1147,7 @@ if 'offline_mode' not in st.session_state:
     if st.session_state.offline_mode:
         warning_message("Google Vision API is not available. Running in offline mode with limited detection.")
 
-        
+
 # Function to start or end a learning session
 def manage_session(action):
     """Start or end learning session with improved error handling."""
@@ -1484,7 +1484,7 @@ if app_mode == "Camera Mode":
     # Process image if available
     if image is not None:
     # Show original image
-        st.image(image, caption="Original Image", use_column_width=True)
+        st.image(image, caption="Original Image", use_container_width=True)
         
         # Always apply enhancement for object detection
         if detection_type == "Objects":
@@ -1522,7 +1522,7 @@ if app_mode == "Camera Mode":
                     style_section_title("✨ Detected Objects")
                     
                     # Display image with detection boxes
-                    st.image(result_image, caption="Detected Objects", use_column_width=True)
+                    st.image(result_image, caption="Detected Objects", use_container_width=True)
                     
                     # Display selection prompt
                     st.write("Select objects to save to your vocabulary:")
