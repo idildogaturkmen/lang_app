@@ -1518,7 +1518,7 @@ if app_mode == "Camera Mode":
                 spinner_container.empty()
                 
                 # Display results
-                if detections:
+                if detections: 
                     style_section_title("✨ Detected Objects")
                     
                     # Display image with detection boxes
