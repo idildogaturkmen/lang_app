@@ -25,6 +25,7 @@ from streamlit.components.v1 import components
 from google.cloud import vision
 import hashlib
 from functools import lru_cache
+import inspect
 
 # First, display Python version for debugging
 st.set_page_config(
@@ -321,6 +322,20 @@ QUESTION_TYPES = [
     "multiple_choice_category",  # Choose words from same category
     "audio_recognition"          # Hear word, select correct option
 ]
+
+# Add near the top of your file, after imports
+def safe_button(label, **kwargs):
+    """Safe wrapper for st.button that removes problematic parameters"""
+    # Remove problematic parameters if present
+    if 'use_column_width' in kwargs:
+        del kwargs['use_column_width']
+        print(f"Removed use_column_width from button: {label}")
+    if 'type' in kwargs and kwargs['type'] == 'primary':
+        del kwargs['type']
+        print(f"Removed type=primary from button: {label}")
+    
+    # Use the cleaned kwargs
+    return st.button(label, **kwargs)
 
 
 def get_object_category(label):
@@ -981,6 +996,17 @@ def prepare_vocabulary_for_diverse_questions(vocabulary, languages):
 
 if 'db_checked' not in st.session_state:
     st.session_state.db_checked = check_database_setup()
+
+def debug_button(label, **kwargs):
+    """Debug wrapper that shows what parameters are being passed to a button"""
+    print(f"Button debug - Label: {label}, Kwargs: {kwargs}")
+    # Get the caller info
+    caller = inspect.getframeinfo(inspect.currentframe().f_back)
+    print(f"Called from: {caller.filename}, line {caller.lineno}")
+    # Safe version that removes problematic parameters
+    safe_kwargs = {k: v for k, v in kwargs.items() 
+                  if k not in ['use_column_width', 'use_container_width']}
+    return st.button(label, **safe_kwargs)
 
 # Initialize database
 @st.cache_resource
