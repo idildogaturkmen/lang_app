@@ -22,6 +22,9 @@ from collections import defaultdict
 import io
 from vocam_ui import apply_custom_css
 from streamlit.components.v1 import components
+from google.cloud import vision
+import hashlib
+from functools import lru_cache
 
 # First, display Python version for debugging
 st.set_page_config(
@@ -289,33 +292,132 @@ def get_object_category(label):
             return category
     return "other"
 
+# Add this to optimize API usage and reduce costs
+@lru_cache(maxsize=100)
+def cached_vision_detection(image_hash, confidence_threshold):
+    """Cache detection results based on image hash to avoid redundant API calls."""
+    # This is a placeholder - the actual implementation would be tied to your caching mechanism
+    # Return None to indicate cache miss
+    return None
+
+def get_image_hash(image):
+    """Create a hash of an image for caching purposes."""
+    img_byte_arr = io.BytesIO()
+    image.save(img_byte_arr, format='JPEG', quality=70)  # Lower quality for hash stability
+    return hashlib.md5(img_byte_arr.getvalue()).hexdigest()
+
+# Add rate limiting to avoid excessive API calls
+last_api_call = 0
+MIN_API_CALL_INTERVAL = 0.5  # seconds
+
+def rate_limited_detection(image, confidence_threshold=0.5, iou_threshold=0.45):
+    """Rate-limited version of detect_objects to avoid excessive API calls."""
+    global last_api_call
+    
+    # Check cache first
+    image_hash = get_image_hash(image)
+    cached_result = cached_vision_detection(image_hash, confidence_threshold)
+    if cached_result:
+        return cached_result
+    
+    # Rate limiting
+    current_time = time.time()
+    time_since_last_call = current_time - last_api_call
+    if time_since_last_call < MIN_API_CALL_INTERVAL:
+        time.sleep(MIN_API_CALL_INTERVAL - time_since_last_call)
+    
+    # Make the API call
+    result = detect_objects(image, confidence_threshold, iou_threshold)
+    last_api_call = time.time()
+    
+    return result
+
 # Function to detect objects in image
 def detect_objects(image, confidence_threshold=0.5, iou_threshold=0.45):
+    """Detect objects using Google Cloud Vision API."""
     try:
-        model = load_model()
+        # Load the Vision client
+        client = load_vision_client()
         
-        # Pass IOU threshold to the model
-        model.conf = confidence_threshold
-        model.iou = iou_threshold
+        # Convert PIL image to bytes
+        img_byte_arr = io.BytesIO()
+        image.save(img_byte_arr, format='JPEG')
+        content = img_byte_arr.getvalue()
         
-        # Run inference
-        results = model(image)
+        # Create vision image object
+        vision_image = vision.Image(content=content)
         
-        # Filter by confidence
+        # Use both object localization (for bounding boxes) and label detection
+        object_response = client.object_localization(image=vision_image)
+        label_response = client.label_detection(image=vision_image, max_results=15)
+        
+        # Process object detection results
         detections = []
-        for detection in results.xyxy[0]:
-            xmin, ymin, xmax, ymax, confidence, class_idx = detection
-            if confidence > confidence_threshold:
-                label = results.names[int(class_idx)]
+        result_image = np.array(image.copy())
+        height, width = result_image.shape[:2]
+        
+        # Process localized objects (these have bounding boxes)
+        if object_response.localized_object_annotations:
+            for object_annotation in object_response.localized_object_annotations:
+                # Only include if confidence is above threshold
+                if object_annotation.score >= confidence_threshold:
+                    # Get normalized bounding box vertices
+                    box = object_annotation.bounding_poly.normalized_vertices
+                    
+                    # Convert normalized coordinates to actual image coordinates
+                    xmin = box[0].x * width
+                    ymin = box[0].y * height
+                    xmax = box[2].x * width
+                    ymax = box[2].y * height
+                    
+                    # Add detection
+                    detections.append({
+                        'label': object_annotation.name.lower(),
+                        'confidence': float(object_annotation.score),
+                        'bbox': [float(xmin), float(ymin), float(xmax), float(ymax)]
+                    })
+                    
+                    # Draw bounding box on the image
+                    cv2.rectangle(
+                        result_image, 
+                        (int(xmin), int(ymin)), 
+                        (int(xmax), int(ymax)), 
+                        (0, 255, 0), 
+                        2
+                    )
+                    # Add label text
+                    cv2.putText(
+                        result_image,
+                        f"{object_annotation.name} {object_annotation.score:.2f}",
+                        (int(xmin), int(ymin - 10)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (0, 255, 0),
+                        2
+                    )
+        
+        # For general labels (without specific bounding boxes)
+        # We'll include them as general scene labels if no specific objects were detected
+        if len(detections) == 0 and label_response.label_annotations:
+            # First check if any of the labels are relevant object categories
+            relevant_objects = [
+                label for label in label_response.label_annotations
+                if label.score >= confidence_threshold and
+                get_object_category(label.description.lower()) != "other"
+            ]
+            
+            for label in relevant_objects:
+                # Create a full-image detection
                 detections.append({
-                    'label': label,
-                    'confidence': float(confidence),
-                    'bbox': [float(xmin), float(ymin), float(xmax), float(ymax)]
+                    'label': label.description.lower(),
+                    'confidence': float(label.score),
+                    'bbox': [0, 0, width, height],  # Full image
+                    'is_general_label': True  # Mark this as a general scene label
                 })
         
-        return detections, results.render()[0]
+        return detections, result_image
     except Exception as e:
-        error_message(f"Database error: {e}")
+        error_message(f"Vision API error: {e}")
         dummy_image = np.array(image)
         return [], dummy_image
 
@@ -963,62 +1065,34 @@ def get_audio_html(audio_bytes):
     return audio_tag
 
 
-# Function to load YOLOv5 model
+# Function to load Google Vision model
 @st.cache_resource
-def load_model():
+def load_vision_client():
+    """Load and initialize the Google Cloud Vision client."""
     try:
-        # Use a larger model variant for better accuracy
-        model = torch.hub.load('ultralytics/yolov5', 'yolov5m', source='github')  # Using medium model for better accuracy
-        model.eval()
-        return model
+        # Create a client with the proper credentials
+        client = vision.ImageAnnotatorClient()
+        return client
     except Exception as e:
-        error_message(f"Error loading object detection model: {e}")
-        # Return a dummy model that won't cause NoneType errors
-        class DummyModel:
-            def __init__(self):
-                self.names = {0: 'unknown'}
-                
-            def __call__(self, image):
-                # Return a result object with the expected structure
-                class DummyResults:
-                    def __init__(self):
-                        self.xyxy = [[]]
-                        self.names = {0: 'unknown'}
-                    
-                    def render(self):
-                        # Return a copy of the input image as a numpy array
-                        if isinstance(image, np.ndarray):
-                            return [image.copy()]
-                        else:
-                            return [np.array(image)]
-                
-                return DummyResults()
-        
-        return DummyModel()
+        error_message(f"Error initializing Vision API client: {e}")
+        # Return a dummy client for graceful error handling
+        class DummyVisionClient:
+            def label_detection(self, *args, **kwargs):
+                return type('obj', (object,), {
+                    'label_annotations': []
+                })
+            def object_localization(self, *args, **kwargs):
+                return type('obj', (object,), {
+                    'localized_object_annotations': []
+                })
+        return DummyVisionClient()
 
 # Background worker function for object detection
 def detect_objects_worker(image, confidence_threshold, iou_threshold, task_id):
-    """Worker function to run object detection in background."""
+    """Worker function to run Google Vision API detection in background."""
     try:
-        model = load_model()
-        model.conf = confidence_threshold
-        model.iou = iou_threshold
-        
-        results = model(image)
-        
-        # Filter by confidence
-        detections = []
-        for detection in results.xyxy[0]:
-            xmin, ymin, xmax, ymax, confidence, class_idx = detection
-            if confidence > confidence_threshold:
-                label = results.names[int(class_idx)]
-                detections.append({
-                    'label': label,
-                    'confidence': float(confidence),
-                    'bbox': [float(xmin), float(ymin), float(xmax), float(ymax)]
-                })
-        
-        rendered_image = results.render()[0]
+        # Run detection using the Vision API
+        detections, rendered_image = detect_objects(image, confidence_threshold, iou_threshold)
         
         # Store results
         st.session_state.processing_results[task_id] = {
@@ -1035,6 +1109,45 @@ def detect_objects_worker(image, confidence_threshold, iou_threshold, task_id):
         }
         st.session_state.processing_complete = True
 
+def safe_vision_call(image, detect_func):
+    """Safely make a Vision API call with proper error handling."""
+    try:
+        return detect_func(image)
+    except Exception as e:
+        error_type = str(type(e).__name__)
+        
+        if "Quota" in str(e) or "Rate" in str(e):
+            error_message("API quota exceeded. Please try again later.")
+            return None, np.array(image)
+        elif "Permission" in str(e) or "credential" in str(e).lower():
+            error_message("API authentication error. Please check your Google Cloud credentials.")
+            return None, np.array(image)
+        elif "Network" in str(e) or "Timeout" in str(e):
+            error_message("Network error connecting to Google Cloud. Please check your connection.")
+            return None, np.array(image)
+        else:
+            error_message(f"Vision API error: {error_type}: {e}")
+            return None, np.array(image)
+
+def is_vision_api_available():
+    """Check if the Vision API is currently available."""
+    try:
+        client = load_vision_client()
+        # Make a minimal API call to test connectivity
+        dummy_response = client.label_detection(
+            image=vision.Image(content=b"\x00\x00\x00\x00\x00\x00\x00\x00")
+        )
+        return True
+    except Exception:
+        return False
+
+# At the top of your app, add this check and a flag for offline mode
+if 'offline_mode' not in st.session_state:
+    st.session_state.offline_mode = not is_vision_api_available()
+    if st.session_state.offline_mode:
+        warning_message("Google Vision API is not available. Running in offline mode with limited detection.")
+
+        
 # Function to start or end a learning session
 def manage_session(action):
     """Start or end learning session with improved error handling."""
@@ -1355,15 +1468,15 @@ if app_mode == "Camera Mode":
     # Detection settings for objects
     if detection_type == "Objects":
         confidence_threshold = st.slider(
-            "Detection Confidence Threshold", 
-            min_value=0.2, 
-            max_value=0.9, 
-            value=0.35,  # Optimized default threshold to balance precision and detection
-            step=0.05
-        )
+        "Detection Confidence Threshold", 
+        min_value=0.3, 
+        max_value=0.9, 
+        value=0.5,  # Vision API works well with higher thresholds
+        step=0.05
+    )
         
         # Set iou_threshold for optimal detection (balance between precision and maximum detection)
-        iou_threshold = 0.3  # Using a lower threshold to detect more objects while maintaining precision
+        iou_threshold = 0.45  # Using a lower threshold to detect more objects while maintaining precision
         
         # Auto-enhancement is always applied
         enhancement_type = "auto"
