@@ -1648,7 +1648,7 @@ if app_mode == "Camera Mode":
     # Process image if available
     if image is not None:
     # Show original image
-        st.image(image, caption="Original Image", use_column_width=True)
+        st.image(image, caption="Original Image")
         
         # Always apply enhancement for object detection
         if detection_type == "Objects":
@@ -1686,7 +1686,7 @@ if app_mode == "Camera Mode":
                     style_section_title("✨ Detected Objects")
                     
                     # Display image with detection boxes
-                    st.image(result_image, caption="Detected Objects", use_column_width=True)
+                    st.image(result_image, caption="Detected Objects")
                     
                     # Display selection prompt
                     st.write("Select objects to save to your vocabulary:")
@@ -1764,7 +1764,7 @@ if app_mode == "Camera Mode":
                                     st.markdown("---")  # Add separator
                     
                     # Add a save button with greater prominence
-                    if st.button("💾 Save Selected Objects to Vocabulary", use_column_width=True):
+                    if st.button("💾 Save Selected Objects to Vocabulary"):
                         # Auto-start session if needed
                         if st.session_state.session_id is None:
                             if manage_session("start"):
@@ -1831,12 +1831,10 @@ if app_mode == "Camera Mode":
                                 next_col1, next_col2 = st.columns(2)
                                 with next_col1:
                                     st.button("🎮 Go to Quiz Mode", key="goto_quiz", 
-                                            on_click=lambda: setattr(st.session_state, 'app_mode', 'Quiz Mode'),
-                                            use_column_width=True)
+                                            on_click=lambda: setattr(st.session_state, 'app_mode', 'Quiz Mode'))
                                 with next_col2:
                                     st.button("📚 View My Vocabulary", key="goto_vocab", 
-                                            on_click=lambda: setattr(st.session_state, 'app_mode', 'My Vocabulary'),
-                                            use_column_width=True)
+                                            on_click=lambda: setattr(st.session_state, 'app_mode', 'My Vocabulary'))
                                 # Give user a moment to see the success message
                                 time.sleep(1)
                                 st.rerun()
@@ -2075,7 +2073,7 @@ elif app_mode == "My Vocabulary":
         
         # Display as a dataframe
         if table_data:
-            st.dataframe(pd.DataFrame(table_data), use_column_width=True)
+            st.dataframe(pd.DataFrame(table_data))
             
             # Detailed view
             st.subheader("Word Details")
@@ -2127,7 +2125,7 @@ elif app_mode == "My Vocabulary":
                 if image_path and os.path.exists(image_path):
                     try:
                         image = Image.open(image_path)
-                        st.image(image, caption=f"Image for {word.get('word_original', '')}", use_column_width=True)
+                        st.image(image, caption=f"Image for {word.get('word_original', '')}")
                     except Exception as e:
                         error_message(f"Error loading image: {e}")
                 else:
@@ -2327,7 +2325,7 @@ elif app_mode == "Quiz Mode":
                         "Category": word.get('category', '')
                     })
                 
-                st.dataframe(pd.DataFrame(preview_data), use_column_width=True)
+                st.dataframe(pd.DataFrame(preview_data))
                 
                 if len(filtered_vocab) > 20:
                     st.markdown(f"*...and {len(filtered_vocab) - 20} more words*")

@@ -10,6 +10,7 @@ COLORS = {
 }
 
 def apply_custom_css():
+
     """Apply custom CSS for Vocam UI enhancements."""
     st.markdown("""
     <style>
@@ -57,6 +58,7 @@ def apply_custom_css():
             box-shadow: 0 4px 8px var(--shadow);
         }
         
+    
         div.stButton > button[data-baseweb="button"][kind="primary"] {
             background-color: var(--accent-light);
             color: var(--primary-dark);
