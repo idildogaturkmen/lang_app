@@ -11,6 +11,14 @@ import os
 import wave
 import re
 from datetime import datetime
+# Determine Streamlit version
+try:
+    import streamlit
+    STREAMLIT_VERSION = streamlit.__version__
+    print(f"Streamlit version: {STREAMLIT_VERSION}")
+except Exception as e:
+    STREAMLIT_VERSION = "unknown"
+    print(f"Error determining Streamlit version: {e}")
 
 # Try importing WebRTC with improved error handling
 try:
@@ -361,116 +369,83 @@ class SimplePronunciationPractice:
 
 
     def _add_js_recorder(self):
-        """Add Streamlit's native audio recorder"""
+        """Add audio recorder with version compatibility"""
         st.markdown("### Record Your Pronunciation")
-        st.markdown("""
-        1. Click the microphone button below to start recording
-        2. Say the word clearly
-        3. Click the button again to stop recording
-        """)
         
-        # Use Streamlit's built-in audio recorder
-        audio_bytes = st.audio_recorder(
-            key=f"audio_recorder_{int(time.time())}",
-            sample_rate=16000, 
-            pause_threshold=2.0
-        )
+        # Check if st.audio_recorder is available
+        has_audio_recorder = hasattr(st, 'audio_recorder')
         
-        # Process the recorded audio
-        if audio_bytes:
-            # Store in session state
-            st.session_state.audio_data = audio_bytes
-            st.session_state.audio_data_received = True
+        if has_audio_recorder:
+            # Use Streamlit's built-in audio recorder (newer versions)
+            st.markdown("""
+            1. Click the microphone button below to start recording
+            2. Say the word clearly
+            3. Click the button again to stop recording
+            """)
             
-            # If we're in a practice session, store the current word ID
-            if 'current_practice_index' in st.session_state and 'practice_words' in st.session_state:
-                current_index = st.session_state.current_practice_index
-                if current_index < len(st.session_state.practice_words):
-                    current_word = st.session_state.practice_words[current_index]
-                    st.session_state.current_recording_word = current_word.get('id')
+            # Use Streamlit's built-in audio recorder
+            audio_bytes = st.audio_recorder(
+                key=f"audio_recorder_{int(time.time())}",
+                sample_rate=16000
+            )
             
-            # Display the audio player
-            st.audio(audio_bytes, format="audio/wav")
-            
-            # Add a button to process the recording
-            if st.button("Evaluate Pronunciation", type="primary"):
-                st.experimental_rerun()
-        
-    def _evaluate_pronunciation(self, audio_data, target_word, language_code):
-        """Evaluate pronunciation using speech recognition"""
-        if not HAS_SR:
-            # If speech recognition is not available, return a default score
-            return 60
-        
-        try:
-            # Prepare the audio data
-            audio_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-            audio_file.write(audio_data)
-            audio_file.close()
-            
-            # Print debug info
-            print(f"Audio file created: {audio_file.name}, size: {len(audio_data)} bytes")
-            
-            # Use speech recognition to transcribe
-            with sr.AudioFile(audio_file.name) as source:
-                # Adjust for noise
-                self.recognizer.adjust_for_ambient_noise(source, duration=0.5)
-                # Record the file
-                audio = self.recognizer.record(source)
+            # Process the recorded audio
+            if audio_bytes:
+                # Store in session state
+                st.session_state.audio_data = audio_bytes
+                st.session_state.audio_data_received = True
                 
-                # Get recognition language code
-                rec_lang = RECOGNITION_LANGUAGES.get(language_code, "en-US")
+                # Display the audio player
+                st.audio(audio_bytes, format="audio/wav")
                 
-                try:
-                    # Recognize speech with Google's API
-                    recognized_text = self.recognizer.recognize_google(audio, language=rec_lang)
-                    print(f"Recognized text: '{recognized_text}'")
-                    print(f"Target word: '{target_word}'")
+                # Add a button to process the recording
+                if st.button("Evaluate Pronunciation", type="primary"):
+                    # If we're in a practice session, store the current word ID
+                    if 'current_practice_index' in st.session_state and 'practice_words' in st.session_state:
+                        current_index = st.session_state.current_practice_index
+                        if current_index < len(st.session_state.practice_words):
+                            current_word = st.session_state.practice_words[current_index]
+                            st.session_state.current_recording_word = current_word.get('id')
                     
-                    # Calculate similarity
-                    if HAS_LEVENSHTEIN:
-                        # Clean up text for comparison
-                        target_cleaned = self._clean_text_for_comparison(target_word)
-                        recognized_cleaned = self._clean_text_for_comparison(recognized_text)
-                        
-                        # Calculate Levenshtein distance
-                        distance = Levenshtein.distance(target_cleaned, recognized_cleaned)
-                        max_len = max(len(target_cleaned), len(recognized_cleaned))
-                        
-                        # Convert to similarity percentage
-                        similarity = max(0, 100 - (distance / max_len * 100))
-                        
-                        # Normalize score (70-100 range to avoid too harsh scoring)
-                        normalized_score = 70 + similarity * 0.3
-                        
-                        return min(100, normalized_score)
-                    else:
-                        # Simple exact match if Levenshtein not available
-                        if recognized_text.lower() == target_word.lower():
-                            return 95
-                        elif target_word.lower() in recognized_text.lower():
-                            return 80
-                        else:
-                            return 60
-                except sr.UnknownValueError:
-                    # Speech not understood
-                    print("Google Speech Recognition could not understand audio")
-                    return 40
-                except sr.RequestError as e:
-                    # API error
-                    print(f"Could not request results from Google Speech Recognition service; {e}")
-                    return 50
+                    st.experimental_rerun()
+        else:
+            # Fall back to file uploader for older Streamlit versions
+            st.markdown("""
+            To practice pronunciation:
+            1. Use your device's voice recorder app to record yourself saying the word
+            2. Save the recording and upload it below
+            3. Click 'Process Recording' to evaluate your pronunciation
+            """)
+            
+            # Add a file uploader for audio
+            uploaded_file = st.file_uploader(
+                "Upload your pronunciation recording (WAV, MP3, etc.)", 
+                type=["wav", "mp3", "ogg", "m4a"],
+                key=f"audio_upload_{int(time.time())}"
+            )
+            
+            # Process the uploaded file
+            if uploaded_file is not None:
+                # Read the file
+                audio_bytes = uploaded_file.read()
+                
+                # Store in session state
+                st.session_state.audio_data = audio_bytes
+                st.session_state.audio_data_received = True
+                
+                # Display the audio player
+                st.audio(audio_bytes)
+                
+                # Add a button to process the recording
+                if st.button("Process Recording", type="primary"):
+                    # If we're in a practice session, store the current word ID
+                    if 'current_practice_index' in st.session_state and 'practice_words' in st.session_state:
+                        current_index = st.session_state.current_practice_index
+                        if current_index < len(st.session_state.practice_words):
+                            current_word = st.session_state.practice_words[current_index]
+                            st.session_state.current_recording_word = current_word.get('id')
                     
-        except Exception as e:
-            print(f"Error in speech recognition: {str(e)}")
-            # Return a default score if there's an error
-            return 60
-        finally:
-            # Clean up the temporary file
-            try:
-                os.unlink(audio_file.name)
-            except Exception as e:
-                print(f"Error deleting temporary file: {e}")
+                    st.experimental_rerun()
 
 
     def _clean_text_for_comparison(self, text):

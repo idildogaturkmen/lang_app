@@ -12,3 +12,4 @@ rich==13.7.0
 streamlit-webrtc==0.47.1
 av
 SpeechRecognition>=3.8.0
+python-Levenshtein
