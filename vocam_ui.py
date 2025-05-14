@@ -163,15 +163,6 @@ def apply_custom_css():
         /* Rest of the CSS remains unchanged... */
     """, unsafe_allow_html=True)
 
-    # Add this CSS to make all buttons full width
-    st.markdown("""
-    <style>
-    div.stButton > button {
-        width: 100%;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
 
 # UI Helper Functions
 def show_loading_spinner(text="Processing your image..."):
