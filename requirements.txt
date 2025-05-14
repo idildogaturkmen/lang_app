@@ -13,3 +13,4 @@ streamlit-webrtc==0.47.1
 av
 SpeechRecognition>=3.8.0
 python-Levenshtein
+google-cloud-vision==3.4.0

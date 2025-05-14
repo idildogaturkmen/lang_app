@@ -214,6 +214,45 @@ except ImportError as e:
         def end_session(self, session_id, words_studied, words_learned):
             return True
 
+# Add this near the top of your app after imports
+st.sidebar.markdown("### Vision API Debug")
+
+# Add diagnostic button
+if st.sidebar.button("Test Vision API"):
+    try:
+        from google.oauth2 import service_account
+        from google.cloud import vision
+        import io
+        from PIL import Image
+        
+        # Create a minimal test image
+        test_img = Image.new('RGB', (10, 10), color=(73, 109, 137))
+        img_bytes = io.BytesIO()
+        test_img.save(img_bytes, format='PNG')
+        content = img_bytes.getvalue()
+        
+        # Create credentials directly from secrets
+        credentials_info = dict(st.secrets["gcp_service_account"])
+        credentials = service_account.Credentials.from_service_account_info(credentials_info)
+        
+        # Create client and test
+        client = vision.ImageAnnotatorClient(credentials=credentials)
+        vision_image = vision.Image(content=content)
+        response = client.label_detection(image=vision_image, max_results=1)
+        
+        # Check response
+        if response.label_annotations:
+            st.sidebar.success(f"✅ API works! Detected: {response.label_annotations[0].description}")
+        else:
+            st.sidebar.warning("⚠️ API connected but returned no results")
+            
+    except Exception as e:
+        st.sidebar.error(f"❌ API test failed: {type(e).__name__}")
+        
+        # Detailed error info in expander
+        with st.sidebar.expander("Error Details"):
+            st.code(str(e))
+
 # Helper function to convert AttrDict to a regular dict recursively
 def convert_to_dict(obj):
     if isinstance(obj, dict):
@@ -334,60 +373,48 @@ def rate_limited_detection(image, confidence_threshold=0.5, iou_threshold=0.45):
 
 # Function to detect objects in image
 def detect_objects(image, confidence_threshold=0.5, iou_threshold=0.45):
-    """Detect objects using Google Cloud Vision API."""
-
-
-    # Debug information
-    is_cloud = os.environ.get('IS_STREAMLIT_CLOUD', 'false').lower() == 'true'
-    has_credentials = 'GOOGLE_APPLICATION_CREDENTIALS' in os.environ
-    credentials_path = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS', 'Not set')
-    
-    # Log debug info to a special div that only appears in cloud deployments
-    if is_cloud:
-        st.markdown(f"""
-        <div style="display:none" id="debug-info">
-        Cloud environment: {is_cloud}<br>
-        Has credentials: {has_credentials}<br>
-        Credentials path: {credentials_path}<br>
-        </div>
-        """, unsafe_allow_html=True)
-
+    """Detect objects using Google Cloud Vision API with direct authentication."""
     try:
-        # Attempt to print credential info safely (no actual keys)
-        if 'gcp_service_account' in st.secrets:
-            st.sidebar.success("✅ GCP credentials found in st.secrets")
-        else:
-            st.sidebar.error("❌ No GCP credentials in st.secrets")
-
-        # Load the Vision client
-        client = load_vision_client()
+        # IMPORTANT: Get credentials directly from secrets without writing to file
+        from google.oauth2 import service_account
+        import io
+        from google.cloud import vision
+        
+        # Create credentials object directly from dictionary
+        credentials_info = dict(st.secrets["gcp_service_account"])
+        credentials = service_account.Credentials.from_service_account_info(credentials_info)
+        
+        # Create vision client with explicit credentials
+        client = vision.ImageAnnotatorClient(credentials=credentials)
+        
+        # Log success to sidebar for debugging
+        st.sidebar.success("✅ Vision client initialized")
         
         # Convert PIL image to bytes
         img_byte_arr = io.BytesIO()
         image.save(img_byte_arr, format='JPEG')
         content = img_byte_arr.getvalue()
         
-        # Create vision image object
+        # Create vision image
         vision_image = vision.Image(content=content)
         
-        # Use both object localization (for bounding boxes) and label detection
+        # Perform detection
         object_response = client.object_localization(image=vision_image)
         label_response = client.label_detection(image=vision_image, max_results=15)
         
-        # Process object detection results
+        # Process results (your existing processing code)
         detections = []
         result_image = np.array(image.copy())
         height, width = result_image.shape[:2]
         
-        # Process localized objects (these have bounding boxes)
+        # Process localized objects
         if object_response.localized_object_annotations:
             for object_annotation in object_response.localized_object_annotations:
-                # Only include if confidence is above threshold
                 if object_annotation.score >= confidence_threshold:
-                    # Get normalized bounding box vertices
+                    # Get bounding box
                     box = object_annotation.bounding_poly.normalized_vertices
                     
-                    # Convert normalized coordinates to actual image coordinates
+                    # Convert to image coordinates
                     xmin = box[0].x * width
                     ymin = box[0].y * height
                     xmax = box[2].x * width
@@ -400,47 +427,44 @@ def detect_objects(image, confidence_threshold=0.5, iou_threshold=0.45):
                         'bbox': [float(xmin), float(ymin), float(xmax), float(ymax)]
                     })
                     
-                    # Draw bounding box on the image
-                    cv2.rectangle(
-                        result_image, 
-                        (int(xmin), int(ymin)), 
-                        (int(xmax), int(ymax)), 
-                        (0, 255, 0), 
-                        2
-                    )
-                    # Add label text
-                    cv2.putText(
-                        result_image,
-                        f"{object_annotation.name} {object_annotation.score:.2f}",
-                        (int(xmin), int(ymin - 10)),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5,
-                        (0, 255, 0),
-                        2
-                    )
+                    # Draw on image
+                    cv2.rectangle(result_image, 
+                                 (int(xmin), int(ymin)), 
+                                 (int(xmax), int(ymax)), 
+                                 (0, 255, 0), 2)
+                    cv2.putText(result_image,
+                               f"{object_annotation.name} {object_annotation.score:.2f}",
+                               (int(xmin), int(ymin - 10)),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
         
-        # For general labels (without specific bounding boxes)
-        # We'll include them as general scene labels if no specific objects were detected
+        # Process general labels if no objects detected
         if len(detections) == 0 and label_response.label_annotations:
-            # First check if any of the labels are relevant object categories
-            relevant_objects = [
-                label for label in label_response.label_annotations
-                if label.score >= confidence_threshold and
-                get_object_category(label.description.lower()) != "other"
-            ]
-            
-            for label in relevant_objects:
-                # Create a full-image detection
-                detections.append({
-                    'label': label.description.lower(),
-                    'confidence': float(label.score),
-                    'bbox': [0, 0, width, height],  # Full image
-                    'is_general_label': True  # Mark this as a general scene label
-                })
+            for label in label_response.label_annotations:
+                if label.score >= confidence_threshold:
+                    detections.append({
+                        'label': label.description.lower(),
+                        'confidence': float(label.score),
+                        'bbox': [0, 0, width, height],
+                        'is_general_label': True
+                    })
         
         return detections, result_image
+        
     except Exception as e:
-        error_message(f"Vision API error: {e}")
+        # Improved error handling with detailed information
+        st.sidebar.error(f"Vision API error: {str(e)}")
+        
+        # Add detailed error information in an expander
+        with st.sidebar.expander("Error Details"):
+            st.code(str(e))
+            
+            # Check if error is auth-related
+            if "auth" in str(e).lower() or "credential" in str(e).lower():
+                st.info("This appears to be an authentication issue. Check your credentials.")
+            elif "permission" in str(e).lower():
+                st.info("This appears to be a permissions issue. Make sure the API is enabled.")
+            
+        # Return empty result
         dummy_image = np.array(image)
         return [], dummy_image
 
@@ -1022,6 +1046,15 @@ if 'audio_data_received' not in st.session_state:
     st.session_state.audio_data_received = False
 if 'current_recording_word' not in st.session_state:
     st.session_state.current_recording_word = None
+
+# Add this to sidebar
+if 'use_vision_api' not in st.session_state:
+    st.session_state.use_vision_api = True
+    
+st.session_state.use_vision_api = st.sidebar.checkbox(
+    "Use Vision API", 
+    value=st.session_state.use_vision_api
+)
 
 
 @st.cache_resource
