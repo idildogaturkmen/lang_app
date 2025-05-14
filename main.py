@@ -1069,13 +1069,34 @@ gamification.initialize_state()
 
 # Function to translate text
 def translate_text(text, target_language):
+    """Translate text with multiple fallback options."""
     try:
-        translate_client = translate.Client()
-        result = translate_client.translate(text, target_language=target_language)
-        return result["translatedText"]
-    except Exception as e:
-        error_message(f"Translation error: {e}")
-        return text
+        # First try: Google Cloud Translation API
+        from google.cloud import translate_v2 as translate
+        try:
+            # Get credentials directly from secrets
+            from google.oauth2 import service_account
+            credentials_info = dict(st.secrets["gcp_service_account"])
+            credentials = service_account.Credentials.from_service_account_info(credentials_info)
+            
+            translate_client = translate.Client(credentials=credentials)
+            result = translate_client.translate(text, target_language=target_language)
+            return result["translatedText"]
+        except Exception as e:
+            print(f"Google Translate API error: {e}")
+            raise e  # Pass to next fallback
+
+    except Exception:
+        # Second try: deep-translator library (doesn't require API key)
+        try:
+            from deep_translator import GoogleTranslator
+            translator = GoogleTranslator(source='en', target=target_language)
+            return translator.translate(text)
+        except Exception as e:
+            print(f"Deep translator error: {e}")
+            
+            # Last resort fallback
+            return f"[Translation to {target_language}]"
 
 # Background worker function for translation
 def translate_worker(texts, target_language, task_id):
@@ -1743,7 +1764,7 @@ if app_mode == "Camera Mode":
                                     st.markdown("---")  # Add separator
                     
                     # Add a save button with greater prominence
-                    if st.button("💾 Save Selected Objects to Vocabulary", type="primary", use_column_width=True):
+                    if st.button("💾 Save Selected Objects to Vocabulary", use_column_width=True):
                         # Auto-start session if needed
                         if st.session_state.session_id is None:
                             if manage_session("start"):
@@ -1854,7 +1875,7 @@ if app_mode == "Camera Mode":
                         st.markdown(get_audio_html(audio_bytes), unsafe_allow_html=True)
                     
                     # Save button for manual selection
-                    if st.button("Save to Vocabulary", type="primary"):
+                    if st.button("Save to Vocabulary"):
                         # Auto-start session if needed
                         if st.session_state.session_id is None:
                             if manage_session("start"):
@@ -2291,7 +2312,7 @@ elif app_mode == "Quiz Mode":
             
             # Start quiz button with dynamic label
             start_label = "Start Quiz" if len(filtered_vocab) >= 4 else f"Need {4-len(filtered_vocab)} More Word(s)"
-            if st.button(start_label, type="primary", disabled=len(filtered_vocab) < 4):
+            if st.button(start_label, disabled=len(filtered_vocab) < 4):
                 if quiz_system.start_new_quiz(filtered_vocab, languages, num_questions, manage_session):
                     st.rerun()
             
@@ -2553,7 +2574,7 @@ elif app_mode == "Pronunciation Practice":
                 
                 # Start a new practice session button
                 if 'practice_words' not in st.session_state:
-                    if st.button("Start Practice Session", type="primary"):
+                    if st.button("Start Practice Session"):
                         try:
                             # Import standard library random (not numpy)
                             import random

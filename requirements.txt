@@ -14,3 +14,5 @@ av
 SpeechRecognition>=3.8.0
 python-Levenshtein
 google-cloud-vision==3.4.0
+google-cloud-translate>=2.0.0
+google-auth>=2.3.3
