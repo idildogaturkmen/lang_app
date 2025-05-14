@@ -164,6 +164,16 @@ class SimplePronunciationPractice:
             translated_word = word.get('word_translated', '')
             language_code = word.get('language_translated', 'en')
             
+            # Add a debug section (only visible in development)
+            if os.environ.get('STREAMLIT_DEBUG', '').lower() == 'true':
+                st.write("Debug Info:")
+                st.write({
+                    "has_sr": HAS_SR,
+                    "has_levenshtein": HAS_LEVENSHTEIN,
+                    "audio_data_exists": 'audio_data' in st.session_state,
+                    "language_code": language_code
+                })
+            
             # Display the word to practice
             st.subheader(f"Practice: {translated_word}")
             
@@ -176,11 +186,11 @@ class SimplePronunciationPractice:
             # Show pronunciation tips
             self._show_pronunciation_tips(word)
             
-            # Add JavaScript-based audio recorder
+            # Add built-in audio recorder
             self._add_js_recorder()
             
             # Calculate score based on speech recognition or self-assessment
-            if HAS_SR and 'audio_data' in st.session_state:
+            if HAS_SR and 'audio_data' in st.session_state and st.session_state.audio_data:
                 # Process audio with speech recognition
                 similarity_score = self._evaluate_pronunciation(
                     audio_data=st.session_state.audio_data,
@@ -190,8 +200,8 @@ class SimplePronunciationPractice:
                 
                 # Show feedback based on AI assessment
                 self._show_simple_feedback(translated_word, language_code, similarity_score)
-            else:
-                # Fall back to self-assessment if no audio or speech recognition
+            elif 'audio_data' in st.session_state and st.session_state.audio_data:
+                # Fall back to self-assessment if no speech recognition
                 st.markdown("### Rate Your Pronunciation")
                 st.markdown("After practicing, rate how well you pronounced the word:")
                 
@@ -252,26 +262,24 @@ class SimplePronunciationPractice:
             with st.expander("Pronunciation Guide", expanded=True):
                 self._show_pronunciation_tips(current_word)
             
-            # Add JavaScript-based audio recorder
-            st.markdown("### Record Your Pronunciation")
-            st.markdown("Click the button below to record your pronunciation:")
-            
             # Add recorder
             self._add_js_recorder()
             
             # Check if audio data is available
-            if 'audio_data' in st.session_state and st.session_state.get('current_recording_word') == current_word.get('id'):
-                # Display recorded audio
-                st.audio(st.session_state.audio_data, format="audio/wav")
+            has_audio = 'audio_data' in st.session_state and st.session_state.audio_data
+            
+            if has_audio:
+                st.subheader("Your Recording")
                 
                 # Calculate score based on speech recognition or self-assessment
                 if HAS_SR:
-                    # Process audio with speech recognition
-                    similarity_score = self._evaluate_pronunciation(
-                        audio_data=st.session_state.audio_data,
-                        target_word=current_word.get('word_translated', ''),
-                        language_code=language_code
-                    )
+                    with st.spinner("Analyzing your pronunciation..."):
+                        # Process audio with speech recognition
+                        similarity_score = self._evaluate_pronunciation(
+                            audio_data=st.session_state.audio_data,
+                            target_word=current_word.get('word_translated', ''),
+                            language_code=language_code
+                        )
                 else:
                     # Fall back to self-assessment
                     rating = st.select_slider(
@@ -313,15 +321,7 @@ class SimplePronunciationPractice:
                     # Move to next word
                     st.session_state.current_practice_index += 1
                     st.rerun()
-            else:
-                # Display instructions
-                st.markdown("""
-                1. Listen to the correct pronunciation above
-                2. Click the 'Record' button and say the word
-                3. Click 'Stop' when you're done
-                4. Listen to your recording and see the AI feedback
-                """)
-            
+                    
             # Example in context
             example = self._get_example_sentence(
                 current_word.get('word_original', ''), 
@@ -358,29 +358,26 @@ class SimplePronunciationPractice:
                     del st.session_state.current_recording_word
                 
                 st.rerun()
-    
+
+
     def _add_js_recorder(self):
-        """Add a simple file uploader for audio recording"""
+        """Add Streamlit's native audio recorder"""
         st.markdown("### Record Your Pronunciation")
         st.markdown("""
-        To practice pronunciation:
-        1. Use your device's voice recorder app to record yourself saying the word
-        2. Save the recording and upload it below
-        3. Click 'Process Recording' to see your score
+        1. Click the microphone button below to start recording
+        2. Say the word clearly
+        3. Click the button again to stop recording
         """)
         
-        # Add a file uploader for audio
-        uploaded_file = st.file_uploader(
-            "Upload your pronunciation recording (WAV, MP3, etc.)", 
-            type=["wav", "mp3", "ogg", "m4a"],
-            key=f"audio_upload_{int(time.time())}"
+        # Use Streamlit's built-in audio recorder
+        audio_bytes = st.audio_recorder(
+            key=f"audio_recorder_{int(time.time())}",
+            sample_rate=16000, 
+            pause_threshold=2.0
         )
         
-        # Process the uploaded file
-        if uploaded_file is not None:
-            # Read the file
-            audio_bytes = uploaded_file.read()
-            
+        # Process the recorded audio
+        if audio_bytes:
             # Store in session state
             st.session_state.audio_data = audio_bytes
             st.session_state.audio_data_received = True
@@ -393,10 +390,10 @@ class SimplePronunciationPractice:
                     st.session_state.current_recording_word = current_word.get('id')
             
             # Display the audio player
-            st.audio(audio_bytes)
+            st.audio(audio_bytes, format="audio/wav")
             
             # Add a button to process the recording
-            if st.button("Process Recording", type="primary"):
+            if st.button("Evaluate Pronunciation", type="primary"):
                 st.experimental_rerun()
         
     def _evaluate_pronunciation(self, audio_data, target_word, language_code):
@@ -411,42 +408,59 @@ class SimplePronunciationPractice:
             audio_file.write(audio_data)
             audio_file.close()
             
+            # Print debug info
+            print(f"Audio file created: {audio_file.name}, size: {len(audio_data)} bytes")
+            
             # Use speech recognition to transcribe
             with sr.AudioFile(audio_file.name) as source:
+                # Adjust for noise
+                self.recognizer.adjust_for_ambient_noise(source, duration=0.5)
+                # Record the file
                 audio = self.recognizer.record(source)
                 
                 # Get recognition language code
                 rec_lang = RECOGNITION_LANGUAGES.get(language_code, "en-US")
                 
-                # Recognize speech
-                recognized_text = self.recognizer.recognize_google(audio, language=rec_lang)
-                
-                # Calculate similarity using Levenshtein distance if available
-                if HAS_LEVENSHTEIN:
-                    # Clean up text for comparison
-                    target_cleaned = self._clean_text_for_comparison(target_word)
-                    recognized_cleaned = self._clean_text_for_comparison(recognized_text)
+                try:
+                    # Recognize speech with Google's API
+                    recognized_text = self.recognizer.recognize_google(audio, language=rec_lang)
+                    print(f"Recognized text: '{recognized_text}'")
+                    print(f"Target word: '{target_word}'")
                     
-                    # Calculate Levenshtein distance
-                    distance = Levenshtein.distance(target_cleaned, recognized_cleaned)
-                    max_len = max(len(target_cleaned), len(recognized_cleaned))
-                    
-                    # Convert to similarity percentage
-                    similarity = max(0, 100 - (distance / max_len * 100))
-                    
-                    # Normalize score (70-100 range to avoid too harsh scoring)
-                    normalized_score = 70 + similarity * 0.3
-                    
-                    return min(100, normalized_score)
-                else:
-                    # Simple exact match if Levenshtein not available
-                    if recognized_text.lower() == target_word.lower():
-                        return 95
-                    elif target_word.lower() in recognized_text.lower():
-                        return 80
+                    # Calculate similarity
+                    if HAS_LEVENSHTEIN:
+                        # Clean up text for comparison
+                        target_cleaned = self._clean_text_for_comparison(target_word)
+                        recognized_cleaned = self._clean_text_for_comparison(recognized_text)
+                        
+                        # Calculate Levenshtein distance
+                        distance = Levenshtein.distance(target_cleaned, recognized_cleaned)
+                        max_len = max(len(target_cleaned), len(recognized_cleaned))
+                        
+                        # Convert to similarity percentage
+                        similarity = max(0, 100 - (distance / max_len * 100))
+                        
+                        # Normalize score (70-100 range to avoid too harsh scoring)
+                        normalized_score = 70 + similarity * 0.3
+                        
+                        return min(100, normalized_score)
                     else:
-                        return 60
-                
+                        # Simple exact match if Levenshtein not available
+                        if recognized_text.lower() == target_word.lower():
+                            return 95
+                        elif target_word.lower() in recognized_text.lower():
+                            return 80
+                        else:
+                            return 60
+                except sr.UnknownValueError:
+                    # Speech not understood
+                    print("Google Speech Recognition could not understand audio")
+                    return 40
+                except sr.RequestError as e:
+                    # API error
+                    print(f"Could not request results from Google Speech Recognition service; {e}")
+                    return 50
+                    
         except Exception as e:
             print(f"Error in speech recognition: {str(e)}")
             # Return a default score if there's an error
@@ -455,9 +469,10 @@ class SimplePronunciationPractice:
             # Clean up the temporary file
             try:
                 os.unlink(audio_file.name)
-            except:
-                pass
-    
+            except Exception as e:
+                print(f"Error deleting temporary file: {e}")
+
+
     def _clean_text_for_comparison(self, text):
         """Clean text for comparison by removing punctuation and lowercasing"""
         return re.sub(r'[^\w\s]', '', text.lower()).strip()
