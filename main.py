@@ -335,7 +335,30 @@ def rate_limited_detection(image, confidence_threshold=0.5, iou_threshold=0.45):
 # Function to detect objects in image
 def detect_objects(image, confidence_threshold=0.5, iou_threshold=0.45):
     """Detect objects using Google Cloud Vision API."""
+
+
+    # Debug information
+    is_cloud = os.environ.get('IS_STREAMLIT_CLOUD', 'false').lower() == 'true'
+    has_credentials = 'GOOGLE_APPLICATION_CREDENTIALS' in os.environ
+    credentials_path = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS', 'Not set')
+    
+    # Log debug info to a special div that only appears in cloud deployments
+    if is_cloud:
+        st.markdown(f"""
+        <div style="display:none" id="debug-info">
+        Cloud environment: {is_cloud}<br>
+        Has credentials: {has_credentials}<br>
+        Credentials path: {credentials_path}<br>
+        </div>
+        """, unsafe_allow_html=True)
+
     try:
+        # Attempt to print credential info safely (no actual keys)
+        if 'gcp_service_account' in st.secrets:
+            st.sidebar.success("✅ GCP credentials found in st.secrets")
+        else:
+            st.sidebar.error("❌ No GCP credentials in st.secrets")
+
         # Load the Vision client
         client = load_vision_client()
         
@@ -1068,24 +1091,111 @@ def get_audio_html(audio_bytes):
 # Function to load Google Vision model
 @st.cache_resource
 def load_vision_client():
-    """Load and initialize the Google Cloud Vision client."""
+    """Load and initialize the Google Cloud Vision client with fallback options."""
     try:
+        # Test if credentials are working
+        credentials_path = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS', None)
+        if not credentials_path or not os.path.exists(credentials_path):
+            st.warning("⚠️ Google Cloud credentials not found. Some features may be limited.")
+            raise ValueError("Credentials not found")
+            
         # Create a client with the proper credentials
         client = vision.ImageAnnotatorClient()
+        
+        # Test with a minimal request
+        dummy_image = vision.Image(content=b'\x00\x00\x00')
+        try:
+            # Just testing connection, will fail with empty image but that's expected
+            client.label_detection(image=dummy_image)
+        except Exception as e:
+            # If error message indicates invalid image, credentials are working
+            if "Invalid image" in str(e):
+                pass  # This is expected, credentials are working
+            else:
+                # Re-raise if it's a different error
+                raise
+                
         return client
     except Exception as e:
-        error_message(f"Error initializing Vision API client: {e}")
-        # Return a dummy client for graceful error handling
-        class DummyVisionClient:
-            def label_detection(self, *args, **kwargs):
-                return type('obj', (object,), {
-                    'label_annotations': []
-                })
-            def object_localization(self, *args, **kwargs):
-                return type('obj', (object,), {
-                    'localized_object_annotations': []
-                })
-        return DummyVisionClient()
+        if "streamlit" in __name__:  # Only show warning in Streamlit context
+            st.warning(f"⚠️ Vision API unavailable: {str(e)}. Using fallback detection.")
+        
+        # Return a dummy client that uses the YOLO fallback
+        class FallbackVisionClient:
+            def __init__(self):
+                try:
+                    # Try to load YOLO as fallback
+                    self.yolo_model = torch.hub.load('ultralytics/yolov5', 'yolov5m', source='github')
+                    self.yolo_model.eval()
+                    self.has_yolo = True
+                except Exception:
+                    self.has_yolo = False
+                    
+            def label_detection(self, image):
+                if self.has_yolo:
+                    # Use YOLO for fallback detection
+                    pil_image = Image.open(io.BytesIO(image.content))
+                    results = self.yolo_model(pil_image)
+                    
+                    # Convert YOLO results to Vision API-like format
+                    labels = []
+                    for i, (xmin, ymin, xmax, ymax, conf, cls) in enumerate(results.xyxy[0]):
+                        label_name = results.names[int(cls)]
+                        labels.append(type('obj', (object,), {
+                            'description': label_name,
+                            'score': float(conf)
+                        }))
+                    
+                    return type('obj', (object,), {
+                        'label_annotations': labels
+                    })
+                else:
+                    # Return empty results if no fallback available
+                    return type('obj', (object,), {
+                        'label_annotations': []
+                    })
+                    
+            def object_localization(self, image):
+                if self.has_yolo:
+                    # Use YOLO for fallback detection with bounding boxes
+                    pil_image = Image.open(io.BytesIO(image.content))
+                    results = self.yolo_model(pil_image)
+                    
+                    # Convert YOLO results to Vision API-like format
+                    objects = []
+                    for i, (xmin, ymin, xmax, ymax, conf, cls) in enumerate(results.xyxy[0]):
+                        label_name = results.names[int(cls)]
+                        
+                        # Create vertices for bounding box
+                        vertices = []
+                        img_width, img_height = pil_image.size
+                        vertices.append(type('obj', (object,), {'x': float(xmin)/img_width, 'y': float(ymin)/img_height}))
+                        vertices.append(type('obj', (object,), {'x': float(xmax)/img_width, 'y': float(ymin)/img_height}))
+                        vertices.append(type('obj', (object,), {'x': float(xmax)/img_width, 'y': float(ymax)/img_height}))
+                        vertices.append(type('obj', (object,), {'x': float(xmin)/img_width, 'y': float(ymax)/img_height}))
+                        
+                        # Create bounding poly
+                        bounding_poly = type('obj', (object,), {
+                            'normalized_vertices': vertices
+                        })
+                        
+                        # Create object annotation
+                        objects.append(type('obj', (object,), {
+                            'name': label_name,
+                            'score': float(conf),
+                            'bounding_poly': bounding_poly
+                        }))
+                    
+                    return type('obj', (object,), {
+                        'localized_object_annotations': objects
+                    })
+                else:
+                    # Return empty results if no fallback available
+                    return type('obj', (object,), {
+                        'localized_object_annotations': []
+                    })
+        
+        return FallbackVisionClient()
 
 # Background worker function for object detection
 def detect_objects_worker(image, confidence_threshold, iou_threshold, task_id):
