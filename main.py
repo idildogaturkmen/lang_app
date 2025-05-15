@@ -1843,24 +1843,27 @@ if app_mode == "Camera Mode":
                             st.markdown("### What would you like to do next?")
                             next_col1, next_col2, next_col3 = st.columns(3)
                             
+                            # Define navigation callback functions
+                            def go_to_quiz_mode():
+                                st.session_state.words_just_saved = False  # Reset the saved state
+                                st.session_state.app_mode = "Quiz Mode"
+
+                            def go_to_vocabulary():
+                                st.session_state.words_just_saved = False  # Reset the saved state
+                                st.session_state.app_mode = "My Vocabulary"
+
+                            def continue_capturing():
+                                st.session_state.words_just_saved = False
+                                st.session_state.detection_checkboxes = {}  # Clear checkboxes
+
                             with next_col1:
-                                if st.button("🎮 Go to Quiz Mode", key="goto_quiz"):
-                                    st.session_state.words_just_saved = False  # Reset the saved state
-                                    st.session_state.app_mode = "Quiz Mode"
-                                    st.rerun()
+                                st.button("🎮 Go to Quiz Mode", key="goto_quiz", on_click=go_to_quiz_mode)
                                     
                             with next_col2:
-                                if st.button("📚 View My Vocabulary", key="goto_vocab"):
-                                    st.session_state.words_just_saved = False  # Reset the saved state
-                                    st.session_state.app_mode = "My Vocabulary"
-                                    st.rerun()
+                                st.button("📚 View My Vocabulary", key="goto_vocab", on_click=go_to_vocabulary)
                                     
                             with next_col3:
-                                if st.button("📸 Continue Capturing", key="continue_capture"):
-                                    # Reset saved state but stay in camera mode
-                                    st.session_state.words_just_saved = False
-                                    st.session_state.detection_checkboxes = {}  # Clear checkboxes
-                                    st.rerun()
+                                st.button("📸 Continue Capturing", key="continue_capture", on_click=continue_capturing)
                     
                 else:
                     info_message("No objects detected. Try another image or adjust the confidence threshold.")
