@@ -215,44 +215,6 @@ except ImportError as e:
         def end_session(self, session_id, words_studied, words_learned):
             return True
 
-# Add this near the top of your app after imports
-st.sidebar.markdown("### Vision API Debug")
-
-# Add diagnostic button
-if st.sidebar.button("Test Vision API"):
-    try:
-        from google.oauth2 import service_account
-        from google.cloud import vision
-        import io
-        from PIL import Image
-        
-        # Create a minimal test image
-        test_img = Image.new('RGB', (10, 10), color=(73, 109, 137))
-        img_bytes = io.BytesIO()
-        test_img.save(img_bytes, format='PNG')
-        content = img_bytes.getvalue()
-        
-        # Create credentials directly from secrets
-        credentials_info = dict(st.secrets["gcp_service_account"])
-        credentials = service_account.Credentials.from_service_account_info(credentials_info)
-        
-        # Create client and test
-        client = vision.ImageAnnotatorClient(credentials=credentials)
-        vision_image = vision.Image(content=content)
-        response = client.label_detection(image=vision_image, max_results=1)
-        
-        # Check response
-        if response.label_annotations:
-            st.sidebar.success(f"✅ API works! Detected: {response.label_annotations[0].description}")
-        else:
-            st.sidebar.warning("⚠️ API connected but returned no results")
-            
-    except Exception as e:
-        st.sidebar.error(f"❌ API test failed: {type(e).__name__}")
-        
-        # Detailed error info in expander
-        with st.sidebar.expander("Error Details"):
-            st.code(str(e))
 
 # Helper function to convert AttrDict to a regular dict recursively
 def convert_to_dict(obj):
