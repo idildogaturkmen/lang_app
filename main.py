@@ -555,7 +555,7 @@ def get_example_sentence(word, target_language):
     return example_generator.get_example_sentence(word, target_language, category)
         
 def test_example_sentences():
-    """Test function to verify example sentence generation for person words."""
+    """Test function to verify example sentence generation for 'person'."""
     if st.sidebar.checkbox("Test Example Sentences", value=False):
         st.sidebar.markdown("### Example Sentence Test")
         
@@ -566,7 +566,19 @@ def test_example_sentences():
             example = get_example_sentence(word, test_lang)
             st.sidebar.markdown(f"**{word}**: {example['english']}")
             st.sidebar.markdown(f"*Source: {example['source']}*")
+            
+            # Verify no dangerous patterns for person
+            if word == "person":
+                has_issues = False
+                for bad_pattern in ["useful", "need", "on the table", "kitchen"]:
+                    if bad_pattern in example['english'].lower():
+                        st.sidebar.error(f"⚠️ Contains bad pattern: '{bad_pattern}'")
+                        has_issues = True
+                if not has_issues:
+                    st.sidebar.success("✅ Example is safe")
+                    
             st.sidebar.markdown("---")
+
 
 # Function to get pronunciation guide
 def get_pronunciation_guide(word, language_code):

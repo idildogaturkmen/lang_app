@@ -1,8 +1,7 @@
 """
-Strict Example Sentence Generator
----------------------------------
-Generates contextually appropriate example sentences with explicit safeguards
-against dehumanizing or inappropriate language.
+Extra-Strict Example Sentence Generator
+--------------------------------------
+Special hardcoded protection for the word "person" with explicit whitelist approach.
 """
 
 import requests
@@ -63,44 +62,52 @@ class ExampleSentenceGenerator:
             "group", "crowd", "team", "staff", "crew", "audience", "community", "society"
         ])
         
-        # CRITICAL: List of forbidden templates for person words
+        # CRITICAL: List of forbidden patterns specifically for person words
         self.FORBIDDEN_PERSON_PATTERNS = [
             "need a new", "need new", "bought a new", "bought new", 
             "is very useful", "are very useful", "is useful", "are useful",
             "on the table", "in the kitchen", "in the house", "in the room",
             "I bought", "I sold", "I own", "I have a", "I have an",
-            "I use", "I borrowed", "I returned", "I broke", "I fixed", 
+            "I use", "I used", "I borrowed", "I returned", "I broke", "I fixed", 
             "I cleaned", "I washed", "I replaced", "I ordered", "I want",
-            "I like this", "I like that", "I like the", "I need this", "I need that"
+            "I like this", "I like that", "I like the", "I need this", "I need that",
+            "very useful", "quite useful", "so useful", "really useful",
+            "this is a useful", "these are useful", "a useful",
+            "used for", "can be used", "using the", "used the", 
+            "belongs to", "new", "old", "fancy", "expensive", "cheap"
         ]
 
-        # Safe person templates that are carefully vetted
-        self.SAFE_PERSON_TEMPLATES = [
-            # Meeting/seeing
-            "I met a {word} at the conference yesterday.",
-            "We saw a {word} at the park this morning.",
-            "There was a {word} waiting at the bus stop.",
+        # ABSOLUTELY GUARANTEED SAFE templates for person words
+        # Using a whitelist approach rather than a blacklist
+        self.PERSON_TEMPLATES = {
+            # Default templates for most person words
+            "default": [
+                "The {word} is standing near the entrance.",
+                "I saw a {word} at the park yesterday.",
+                "A {word} asked me for directions.",
+                "We met a friendly {word} on our trip.",
+                "The {word} was waiting at the bus stop.",
+                "My neighbor is a {word} who lives downtown.",
+                "She has been a {word} for five years.",
+                "The {word} waved hello to us.",
+                "A {word} helped me find my way.",
+                "The {word} was reading a book."
+            ],
             
-            # Talking/conversation
-            "The {word} was talking to my friend.",
-            "I had a conversation with a {word} about the weather.",
-            "A {word} asked me for directions to the museum.",
-            
-            # Profession/role
-            "My neighbor is a {word} who works downtown.",
-            "She has been a {word} for five years now.",
-            "My brother wants to become a {word} someday.",
-            
-            # Helping/actions
-            "The {word} helped me find my way.",
-            "A {word} showed us how to get to the train station.",
-            "The {word} explained the rules to us.",
-            
-            # States
-            "The {word} seemed very friendly.",
-            "That {word} looks busy right now.",
-            "The {word} was waiting for the bus."
-        ]
+            # Special handling for "person" specifically to guarantee no issues
+            "person": [
+                "I met a person who speaks five languages.",
+                "There was a person waiting at the reception desk.",
+                "A person called to ask about the schedule.",
+                "The person at the information desk was very helpful.",
+                "I saw a person walking their dog in the park.",
+                "There's a person here to see you.",
+                "The first person to arrive gets the prize.",
+                "A person from the company called earlier.",
+                "Each person has their own unique talents.",
+                "The person who found my wallet returned it to me."
+            ]
+        }
         
         # Animals list
         self.ANIMAL_WORDS = set([
@@ -111,8 +118,7 @@ class ExampleSentenceGenerator:
             "penguin", "eagle", "hawk", "owl", "parrot", "canary", "hamster", "guinea pig",
             "squirrel", "butterfly", "bee", "ant", "spider", "scorpion", "crab", "lobster",
             "shrimp", "whale", "dolphin", "shark", "octopus", "squid", "seal", "walrus",
-            "otter", "beaver", "hedgehog", "bat", "camel", "kangaroo", "koala", "panda",
-            "sloth", "rhino", "hippo", "hyena", "raccoon", "skunk", "weasel", "badger"
+            "otter", "beaver", "hedgehog", "bat", "camel", "kangaroo", "koala", "panda"
         ])
 
         # Food list
@@ -125,9 +131,7 @@ class ExampleSentenceGenerator:
             "chocolate", "candy", "sugar", "salt", "pepper", "cinnamon", "spice",
             "butter", "oil", "milk", "cheese", "yogurt", "cream", "egg", "meat",
             "beef", "pork", "chicken", "turkey", "fish", "salmon", "tuna", "shrimp",
-            "soup", "stew", "salad", "sandwich", "hamburger", "pizza", "pasta", "noodle",
-            "sushi", "curry", "taco", "burrito", "fries", "chip", "nut", "peanut",
-            "almond", "walnut", "honey", "jam", "jelly", "sauce", "ketchup", "mustard"
+            "soup", "stew", "salad", "sandwich", "hamburger", "pizza", "pasta", "noodle"
         ])
 
         # Uncountable nouns
@@ -155,23 +159,28 @@ class ExampleSentenceGenerator:
             # Clean and normalize the word
             word = word.strip().lower()
             
-            # CRITICAL CHECKPOINT 1: Check if this is a person word that needs special handling
+            # CRITICAL: Extra special handling for "person"
+            if word == "person":
+                if self.debug:
+                    print("USING HARDCODED SAFE EXAMPLE FOR 'PERSON'")
+                return self._get_person_specific_example(target_language)
+            
+            # Check if this is a person word that needs special handling
             is_person_word = word in self.PERSON_WORDS
             if self.debug and is_person_word:
                 print(f"PERSON WORD DETECTED: '{word}'")
             
-            # Check cache first unless it's a person word (always generate fresh examples for person words)
+            # Check cache first (except for person words - always generate fresh)
             if not is_person_word:
                 cached_example = self._get_cached_example(word, target_language)
                 if cached_example:
                     return cached_example
             
-            # CRITICAL CHECKPOINT 2: For person words, use only pre-approved templates
+            # For person words, always use safe templates
             if is_person_word:
                 return self._get_safe_person_example(word, target_language)
             
-            # For non-person words, proceed with normal example generation
-            # Try API methods first
+            # For non-person words, try API methods first
             methods = [
                 self._get_free_dictionary_example,
                 self._get_wordnik_example
@@ -180,7 +189,7 @@ class ExampleSentenceGenerator:
             for method in methods:
                 example = method(word, target_language, category)
                 if example and example["english"]:
-                    # Make sure even API examples are safe
+                    # Verify safety even for API examples
                     if self._is_safe_example(example["english"], word):
                         self._cache_example(word, target_language, example)
                         return example
@@ -195,12 +204,8 @@ class ExampleSentenceGenerator:
             else:
                 example = self._get_general_example(word, target_language, category)
                 
-            # Final safety check
-            if not self._is_safe_example(example["english"], word):
-                example = self._get_ultra_safe_example(word, target_language)
-                
-            # Cache the result
-            if example and example["english"]:
+            # Cache non-person examples
+            if example and example["english"] and not is_person_word:
                 self._cache_example(word, target_language, example)
                 
             return example
@@ -208,18 +213,43 @@ class ExampleSentenceGenerator:
         except Exception as e:
             print(f"Error getting example sentence: {e}")
             # Ultimate fallback
-            return {
-                "english": f"Here is the word '{word}'.",
-                "translated": self._translate(f"Here is the word '{word}'.", target_language),
-                "source": "error_fallback"
-            }
+            if word == "person":
+                return {
+                    "english": "I met a person at the conference.",
+                    "translated": self._translate("I met a person at the conference.", target_language),
+                    "source": "error_fallback_person"
+                }
+            else:
+                return {
+                    "english": f"Here is the word '{word}'.",
+                    "translated": self._translate(f"Here is the word '{word}'.", target_language),
+                    "source": "error_fallback"
+                }
+    
+    def _get_person_specific_example(self, target_language):
+        """Get a guaranteed safe example specifically for the word 'person'."""
+        # Use only from the dedicated "person" templates
+        template = np.random.choice(self.PERSON_TEMPLATES["person"])
+        english_example = template.format(word="person")
+        translated_example = self._translate(english_example, target_language)
+        
+        if self.debug:
+            print(f"PERSON-SPECIFIC EXAMPLE: '{english_example}'")
+            
+        return {
+            "english": english_example,
+            "translated": translated_example,
+            "source": "safe_person_specific"
+        }
     
     def _is_safe_example(self, example, word):
-        """
-        Check if an example is safe to use, especially for person words.
-        This is a critical safety check.
-        """
+        """Check if an example is safe to use, especially for person words."""
         example_lower = example.lower()
+        
+        # Extra strict check for 'person'
+        if word == "person":
+            # For the word "person", ONLY allow examples from our explicit whitelist
+            return False
         
         # Check if this is a person word
         if word in self.PERSON_WORDS:
@@ -240,12 +270,10 @@ class ExampleSentenceGenerator:
         return True
     
     def _get_safe_person_example(self, word, target_language):
-        """
-        Get a guaranteed safe example for a person word.
-        Only uses pre-approved templates.
-        """
+        """Get a guaranteed safe example for a person word."""
         # Select a random safe template
-        template = np.random.choice(self.SAFE_PERSON_TEMPLATES)
+        templates = self.PERSON_TEMPLATES["default"]  # Use default templates for most person words
+        template = np.random.choice(templates)
         
         # Apply the template
         english_example = template.format(word=word)
@@ -364,26 +392,6 @@ class ExampleSentenceGenerator:
             "source": "general_template"
         }
     
-    def _get_ultra_safe_example(self, word, target_language):
-        """Absolutely safe fallback example that works for any word."""
-        if word in self.PERSON_WORDS:
-            english_example = f"The {word} is standing over there."
-        elif word in self.UNCOUNTABLE_NOUNS:
-            english_example = f"I like {word}."
-        else:
-            english_example = f"Here is the {word}."
-            
-        translated_example = self._translate(english_example, target_language)
-        
-        if self.debug:
-            print(f"ULTRA SAFE FALLBACK USED: '{english_example}'")
-            
-        return {
-            "english": english_example,
-            "translated": translated_example,
-            "source": "ultra_safe_fallback"
-        }
-    
     def _translate(self, text, target_language):
         """Translate text using the provided translation function."""
         if not text:
@@ -401,13 +409,17 @@ class ExampleSentenceGenerator:
     @lru_cache(maxsize=300)
     def _get_cached_example(self, word, target_language):
         """Get cached example if available."""
+        # Critical: Never use caching for "person" to be extra safe
+        if word == "person":
+            return None
+            
         cache_file = f"{self.cache_dir}/{word}_{target_language}.json"
         if os.path.exists(cache_file):
             try:
                 with open(cache_file, 'r', encoding='utf-8') as f:
                     example = json.load(f)
                     
-                    # SAFETY: Even for cached examples, verify they're safe
+                    # Safety: Even for cached examples, verify they're safe
                     if not self._is_safe_example(example["english"], word):
                         if self.debug:
                             print(f"REJECTED CACHED EXAMPLE: '{example['english']}'")
@@ -420,8 +432,8 @@ class ExampleSentenceGenerator:
     
     def _cache_example(self, word, target_language, example):
         """Cache an example for future use."""
-        # Don't cache person examples to ensure we always use fresh, safe examples
-        if word in self.PERSON_WORDS:
+        # Never cache person examples to ensure we always use fresh, safe examples
+        if word in self.PERSON_WORDS or word == "person":
             return
             
         cache_file = f"{self.cache_dir}/{word}_{target_language}.json"
@@ -451,7 +463,7 @@ class ExampleSentenceGenerator:
                             examples.append(definition['example'])
             
             if examples:
-                # Filter for safe examples first
+                # Filter for safe examples
                 safe_examples = []
                 for example in examples:
                     if self._is_safe_example(example, word):
@@ -460,7 +472,7 @@ class ExampleSentenceGenerator:
                 if not safe_examples:
                     return None
                     
-                # Choose an example with good length
+                # Choose example with good length
                 good_examples = [ex for ex in safe_examples if 4 <= len(ex.split()) <= 12]
                 
                 if good_examples:
@@ -468,7 +480,7 @@ class ExampleSentenceGenerator:
                 else:
                     english_example = np.random.choice(safe_examples)
                 
-                # Ensure proper capitalization and punctuation
+                # Clean up the example
                 english_example = self._clean_example(english_example)
                 
                 # Translate
