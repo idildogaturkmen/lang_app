@@ -231,16 +231,20 @@ def apply_custom_css():
             margin-bottom: 10px;
         }
         
-        /* Spinner and loading animations */
+        /* Better loading spinner - make it clearly visible but not intrusive */
         .loading-container {
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
+            background-color: rgba(255, 255, 255, 0.95);
             padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            margin: 20px 0;
             text-align: center;
         }
-        
+
         .loading-spinner {
             border: 5px solid #f3f3f3;
             border-top: 5px solid var(--primary-medium);
@@ -250,12 +254,19 @@ def apply_custom_css():
             animation: spin 1.5s linear infinite;
             margin-bottom: 15px;
         }
-        
+
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
-        
+
+        /* Separator between input and results */
+        .result-separator {
+            border-top: 2px solid var(--accent-light);
+            margin: 20px 0;
+            width: 100%;
+        }
+                
         .scroll-indicator {
             margin-top: 15px;
             color: var(--primary-medium);

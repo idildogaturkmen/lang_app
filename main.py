@@ -1650,112 +1650,111 @@ if app_mode == "Camera Mode":
         else:
             image_for_detection = image
         
-        # Process based on detection type
-        # Around line 1379-1393, after the loading spinner is shown but before detections are processed, 
-# add this code:
+       
 
-# Process based on detection type
+        # Process based on detection type
         if detection_type == "Objects":
-            # Create container for loading spinner
-            spinner_container = st.container()
-            with spinner_container:
+            # Use a placeholder for the spinner that we can clear later
+            spinner_placeholder = st.empty()
+            with spinner_placeholder.container():
                 show_loading_spinner("Detecting objects... This may take a few seconds.")
-                
-            # Add visual separator for mobile
-            add_result_separator()
             
-            with st.spinner("Detecting objects..."):
-                # ADD THIS LINE TO FIX THE ERROR:
+            # Add visual separator for mobile
+            separator_placeholder = st.empty()
+            separator_placeholder.markdown('<div class="result-separator"></div>', unsafe_allow_html=True)
+            
+            # Perform the detection while showing a native spinner
+            with st.spinner("Processing..."):
                 detections, result_image = detect_objects(image_for_detection, confidence_threshold, iou_threshold)
+            
+            # Clear the spinner and separator completely
+            spinner_placeholder.empty()
+            separator_placeholder.empty()
+            
+            # Display results
+            if detections:
+                style_section_title("✨ Detected Objects")
                 
-                # Display results
-                # Clear the spinner once processing is done
-                spinner_container.empty()
+                # Display image with detection boxes
+                st.image(result_image, caption="Detected Objects")
+                    
+                # Display selection prompt
+                st.write("Select objects to save to your vocabulary:")
+                    
+                # Group detections by category
+                categorized_detections = {}
+                for i, detection in enumerate(detections):
+                    label = detection['label']
+                    category = get_object_category(label)
+                    
+                    if category not in categorized_detections:
+                        categorized_detections[category] = []
+                    
+                    categorized_detections[category].append((i, detection))
                 
-                # Display results
-                if detections: 
-                    style_section_title("✨ Detected Objects")
-                    
-                    # Display image with detection boxes
-                    st.image(result_image, caption="Detected Objects")
-                    
-                    # Display selection prompt
-                    st.write("Select objects to save to your vocabulary:")
-                    
-                    # Group detections by category
-                    categorized_detections = {}
-                    for i, detection in enumerate(detections):
-                        label = detection['label']
-                        category = get_object_category(label)
-                        
-                        if category not in categorized_detections:
-                            categorized_detections[category] = []
-                        
-                        categorized_detections[category].append((i, detection))
-                    
-                    # Display objects by category in expandable sections
-                    for category, category_detections in categorized_detections.items():
-                        with st.expander(f"{category.title()} ({len(category_detections)} items)", expanded=True):
-                            # Process each detection in this category
-                            for i, detection in category_detections:
-                                label = detection['label']
-                                confidence = detection['confidence']
-                                checkbox_key = f"detect_{i}"
+                # Display objects by category in expandable sections
+                for category, category_detections in categorized_detections.items():
+                    with st.expander(f"{category.title()} ({len(category_detections)} items)", expanded=True):
+                        # Process each detection in this category
+                        for i, detection in category_detections:
+                            label = detection['label']
+                            confidence = detection['confidence']
+                            checkbox_key = f"detect_{i}"
+                            
+                            # Translate the label
+                            translated_label = translate_text(label, st.session_state.target_language)
+                            
+                            # Create a container for this object
+                            with st.container():
+                                # Display the object info
+                                st.markdown(f"**{label}** ({confidence:.2f})")
+                                st.markdown(f"→ **{translated_label}**")
                                 
-                                # Translate the label
-                                translated_label = translate_text(label, st.session_state.target_language)
+                                # Create columns for audio, example, checkbox
+                                col1, col2, col3 = st.columns([2, 2, 1])
                                 
-                                # Create a container for this object
-                                with st.container():
-                                    # Display the object info
-                                    st.markdown(f"**{label}** ({confidence:.2f})")
-                                    st.markdown(f"→ **{translated_label}**")
+                                with col1:
+                                    # Generate audio for the translated word
+                                    audio_bytes = text_to_speech(translated_label, st.session_state.target_language)
+                                    if audio_bytes:
+                                        st.markdown(get_audio_html(audio_bytes), unsafe_allow_html=True)
                                     
-                                    # Create columns for audio, example, checkbox
-                                    col1, col2, col3 = st.columns([2, 2, 1])
+                                    # Add pronunciation helpers
+                                    pronunciation_tips = get_pronunciation_guide(translated_label, st.session_state.target_language)
+                                    if pronunciation_tips:
+                                        st.markdown("**Pronunciation Tips:**")
+                                        for tip in pronunciation_tips:
+                                            st.markdown(f"- {tip}")
+                                
+                                with col2:
+                                    # Add example sentence directly (no nested expander)
+                                    example = get_example_sentence(label, st.session_state.target_language)
+                                    st.markdown("**Example:**")
+                                    st.markdown(f"EN: {example['english']}")
                                     
-                                    with col1:
-                                        # Generate audio for the translated word
-                                        audio_bytes = text_to_speech(translated_label, st.session_state.target_language)
-                                        if audio_bytes:
-                                            st.markdown(get_audio_html(audio_bytes), unsafe_allow_html=True)
+                                    # Only display translated example if available
+                                    if example['translated']:
+                                        source = example.get('source', 'unknown')
+                                        source_name = source.replace('_', ' ').replace('api', 'API').title()
+                                        st.markdown(f"{selected_language}: {example['translated']}")
+                                        st.markdown(f"<small><i>Source: {source_name}</i></small>", unsafe_allow_html=True)
                                         
-                                        # Add pronunciation helpers
-                                        pronunciation_tips = get_pronunciation_guide(translated_label, st.session_state.target_language)
-                                        if pronunciation_tips:
-                                            st.markdown("**Pronunciation Tips:**")
-                                            for tip in pronunciation_tips:
-                                                st.markdown(f"- {tip}")
-                                    
-                                    with col2:
-                                        # Add example sentence directly (no nested expander)
-                                        example = get_example_sentence(label, st.session_state.target_language)
-                                        st.markdown("**Example:**")
-                                        st.markdown(f"EN: {example['english']}")
-                                        
-                                        # Only display translated example if available
-                                        if example['translated']:
-                                            source = example.get('source', 'unknown')
-                                            source_name = source.replace('_', ' ').replace('api', 'API').title()
-                                            st.markdown(f"{selected_language}: {example['translated']}")
-                                            st.markdown(f"<small><i>Source: {source_name}</i></small>", unsafe_allow_html=True)
-                                            
-                                            # Only generate audio if there's text to speak
-                                            example_audio = text_to_speech(example['translated'], st.session_state.target_language)
-                                            if example_audio:
-                                                st.markdown(get_audio_html(example_audio), unsafe_allow_html=True)
-                                        else:
-                                            st.markdown("*Translation not available. Please install deep-translator package.*")
-                                    
-                                    with col3:
-                                        # Add checkbox for this object
-                                        st.session_state.detection_checkboxes[checkbox_key] = st.checkbox(
-                                            "Save", 
-                                            value=True,
-                                            key=checkbox_key
-                                        )
-                                    
-                                    st.markdown("---")  # Add separator
+                                        # Only generate audio if there's text to speak
+                                        example_audio = text_to_speech(example['translated'], st.session_state.target_language)
+                                        if example_audio:
+                                            st.markdown(get_audio_html(example_audio), unsafe_allow_html=True)
+                                    else:
+                                        st.markdown("*Translation not available. Please install deep-translator package.*")
+                                
+                                with col3:
+                                    # Add checkbox for this object
+                                    st.session_state.detection_checkboxes[checkbox_key] = st.checkbox(
+                                        "Save", 
+                                        value=True,
+                                        key=checkbox_key
+                                    )
+                                
+                                st.markdown("---")  # Add separator
                     
                     # Add a save button with greater prominence
                     if 'words_just_saved' not in st.session_state:
