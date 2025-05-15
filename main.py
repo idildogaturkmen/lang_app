@@ -1857,34 +1857,34 @@ if app_mode == "Camera Mode":
                             def go_to_quiz_mode():
                                 st.session_state.words_just_saved = False  # Reset the saved state
                                 st.session_state.app_mode = "Quiz Mode"
-                                st.rerun()  # Force Streamlit to rerun with the new app_mode
+                                # Remove the st.rerun() call
 
                             def go_to_vocabulary():
                                 st.session_state.words_just_saved = False  # Reset the saved state
                                 st.session_state.app_mode = "My Vocabulary"
-                                st.rerun()  # Force Streamlit to rerun with the new app_mode
+                                # Remove the st.rerun() call
 
                             def continue_capturing():
                                 st.session_state.words_just_saved = False
                                 st.session_state.detection_checkboxes = {}  # Clear checkboxes
-                                st.rerun()  # Force Streamlit to rerun
-                                
+                                # Remove the st.rerun() call
+
+
                             with next_col1:
-                                st.button("🎮 Go to Quiz Mode", key="goto_quiz", on_click=go_to_quiz_mode)
+                                if st.button("🎮 Go to Quiz Mode", key="goto_quiz", on_click=go_to_quiz_mode):
+                                    pass  # The on_click handles the state change
                                     
                             with next_col2:
-                                st.button("📚 View My Vocabulary", key="goto_vocab", on_click=go_to_vocabulary)
+                                if st.button("📚 View My Vocabulary", key="goto_vocab", on_click=go_to_vocabulary):
+                                    pass  # The on_click handles the state change
                                     
                             with next_col3:
-                                st.button("📸 Continue Capturing", key="continue_capture", on_click=continue_capturing)
+                                if st.button("📸 Continue Capturing", key="continue_capture", on_click=continue_capturing):
+                                    pass  # The on_click handles the state change
                     
                 else:
                     info_message("No objects detected. Try another image or adjust the confidence threshold.")
-                    
-                    # Add manual selection option
-                    if st.button("Enable Manual Selection"):
-                        st.session_state.manual_mode = True
-                        st.rerun()
+                
             
             # Add manual selection UI if enabled
             if st.session_state.manual_mode:
