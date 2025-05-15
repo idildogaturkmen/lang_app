@@ -1016,6 +1016,8 @@ if 'use_vision_api' not in st.session_state:
     st.session_state.use_vision_api = True
 # Always force it to be True
 st.session_state.use_vision_api = True
+if 'app_mode' not in st.session_state:
+    st.session_state.app_mode = "Camera Mode"
 
 
 @st.cache_resource
@@ -1508,11 +1510,20 @@ def check_answer(selected_index):
 # Main sidebar for navigation
 st.sidebar.title("🌍 Vocam")
 app_mode_options = ["Camera Mode", "My Vocabulary", "Quiz Mode", "Statistics", "My Progress", "Pronunciation Practice"]
+if 'app_mode' in st.session_state:
+    # Use the session state value as the default index for the selectbox
+    default_index = app_mode_options.index(st.session_state.app_mode) if st.session_state.app_mode in app_mode_options else 0
+else:
+    default_index = 0
+
 app_mode = st.sidebar.selectbox(
     "Choose a mode",
-    app_mode_options
+    app_mode_options,
+    index=default_index
 )
 
+# Update session state with the current selection (might be from selectbox or previous setting)
+st.session_state.app_mode = app_mode
 
 # Add gamification info to the sidebar
 try:
@@ -1846,15 +1857,18 @@ if app_mode == "Camera Mode":
                             def go_to_quiz_mode():
                                 st.session_state.words_just_saved = False  # Reset the saved state
                                 st.session_state.app_mode = "Quiz Mode"
+                                st.rerun()  # Force Streamlit to rerun with the new app_mode
 
                             def go_to_vocabulary():
                                 st.session_state.words_just_saved = False  # Reset the saved state
                                 st.session_state.app_mode = "My Vocabulary"
+                                st.rerun()  # Force Streamlit to rerun with the new app_mode
 
                             def continue_capturing():
                                 st.session_state.words_just_saved = False
                                 st.session_state.detection_checkboxes = {}  # Clear checkboxes
-
+                                st.rerun()  # Force Streamlit to rerun
+                                
                             with next_col1:
                                 st.button("🎮 Go to Quiz Mode", key="goto_quiz", on_click=go_to_quiz_mode)
                                     
