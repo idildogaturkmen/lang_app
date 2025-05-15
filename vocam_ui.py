@@ -10,7 +10,6 @@ COLORS = {
 }
 
 def apply_custom_css():
-
     """Apply custom CSS for Vocam UI enhancements."""
     st.markdown("""
     <style>
@@ -50,6 +49,12 @@ def apply_custom_css():
             font-weight: 500;
             box-shadow: 0 2px 4px var(--shadow);
             transition: all 0.3s;
+            width: 100%; /* Make buttons full width of their container */
+            min-height: 38px; /* Consistent height */
+            text-align: center;
+            display: flex;
+            justify-content: center;
+            align-items: center;
         }
         
         div.stButton > button:hover {
@@ -58,6 +63,31 @@ def apply_custom_css():
             box-shadow: 0 4px 8px var(--shadow);
         }
         
+        /* Fix session buttons spacing */
+        [data-testid="column"] > div.stButton,
+        [data-testid="column"] div.element-container {
+            margin-bottom: 0 !important;
+        }
+        
+        /* Make tab content consistent height */
+        .stTabs [data-baseweb="tab-panel"] {
+            min-height: 250px; /* Adjust based on your needs */
+        }
+        
+        /* Fix camera/upload tabs */
+        button[role="tab"] {
+            font-weight: bold !important;
+        }
+        
+        /* More specific selectors for camera input to prevent jumping */
+        [data-testid="stCameraInput"] {
+            margin-bottom: 1rem !important;
+        }
+        
+        /* Consistent height for file uploader */
+        [data-testid="stFileUploader"] {
+            margin-bottom: 1rem !important;
+        }
     
         div.stButton > button[data-baseweb="button"][kind="primary"] {
             background-color: var(--accent-light);
@@ -67,6 +97,14 @@ def apply_custom_css():
         
         div.stButton > button[data-baseweb="button"][kind="primary"]:hover {
             background-color: var(--accent-lighter);
+        }
+        
+        /* Info box styling for consistency */
+        .info-box {
+            background-color: #e6f7ff;
+            border-left: 5px solid #1890ff;
+            padding: 10px;
+            border-radius: 5px;
         }
         
         /* Sidebar styling - FIXED with ROUNDED CORNERS */
@@ -160,7 +198,123 @@ def apply_custom_css():
             background-color: #ffffff !important;
         }
         
-        /* Rest of the CSS remains unchanged... */
+        /* Message box styling */
+        .success-box {
+            background-color: #f0fff4;
+            border-left: 5px solid #68d391;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+        }
+        
+        .info-box {
+            background-color: #e6f7ff;
+            border-left: 5px solid #1890ff;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+        }
+        
+        .warning-box {
+            background-color: #fff9e6;
+            border-left: 5px solid #ffc53d;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+        }
+        
+        .error-box {
+            background-color: #fff2f0;
+            border-left: 5px solid #ff4d4f;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+        }
+        
+        /* Spinner and loading animations */
+        .loading-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            text-align: center;
+        }
+        
+        .loading-spinner {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid var(--primary-medium);
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1.5s linear infinite;
+            margin-bottom: 15px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .scroll-indicator {
+            margin-top: 15px;
+            color: var(--primary-medium);
+            font-weight: bold;
+            animation: pulse 2s infinite;
+            display: none;
+        }
+        
+        @media (max-width: 768px) {
+            .scroll-indicator {
+                display: block;
+            }
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 0.6; }
+            50% { opacity: 1; }
+            100% { opacity: 0.6; }
+        }
+        
+        /* Card styling */
+        .vocam-card {
+            background-color: white;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        
+        .vocam-card-accent {
+            background-color: #f0feff;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            border-left: 5px solid var(--accent-light);
+        }
+        
+        .word-card {
+            background-color: #f0feff;
+            border-radius: 10px;
+            padding: 10px 15px;
+            margin-bottom: 10px;
+            border-left: 4px solid var(--primary-medium);
+        }
+        
+        .word-card h3 {
+            color: var(--primary-dark);
+            margin-top: 0;
+            margin-bottom: 5px;
+        }
+        
+        .result-container {
+            border-top: 3px solid #f0f2f6;
+            margin: 20px 0;
+            padding-top: 10px;
+            width: 100%;
+        }
+    </style>
     """, unsafe_allow_html=True)
 
 

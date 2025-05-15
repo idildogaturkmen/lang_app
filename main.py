@@ -1563,32 +1563,58 @@ if app_mode == "Camera Mode":
     info_message("Take a photo or upload an image to identify objects and learn new vocabulary.")
     
     # Session management
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.session_state.session_id is None:
-            if st.button("Start Learning Session"):
-                if manage_session("start"):
-                    st.rerun()
-        else:
-            info_message(f"Session in progress - Words learned: {st.session_state.words_learned}")
-    with col2:
-        if st.session_state.session_id is not None:
-            if st.button("End Session"):
-                if manage_session("end"):
-                    st.rerun()
+    session_container = st.container()
+    with session_container:
+        col1, col2 = st.columns(2)
+        with col1:
+            # Always create a placeholder for the start button
+            start_button_placeholder = st.empty()
+            
+            # Conditionally show the button or message
+            if st.session_state.session_id is None:
+                if start_button_placeholder.button("Start Learning Session", key="start_session_btn"):
+                    if manage_session("start"):
+                        st.rerun()
+            else:
+                # Show session info in the same place
+                start_button_placeholder.markdown(
+                    f'<div class="info-box" style="margin: 0.5rem 0; height: 38px; display: flex; align-items: center;">'
+                    f'Session in progress - Words: {st.session_state.words_learned}'
+                    f'</div>', 
+                    unsafe_allow_html=True
+                )
+        
+        with col2:
+            # Always create a placeholder for the end button
+            end_button_placeholder = st.empty()
+            
+            # Only show the end button when a session is active
+            if st.session_state.session_id is not None:
+                if end_button_placeholder.button("End Session", key="end_session_btn"):
+                    if manage_session("end"):
+                        st.rerun()
+            else:
+                # Empty space with same height to maintain layout
+                end_button_placeholder.markdown(
+                    '<div style="height: 38px;"></div>', 
+                    unsafe_allow_html=True
+                )
     
     # Image input options
-    image_source = st.radio("Select image source:", ["Upload Image", "Take a Photo"])
-    
+    image_tab1, image_tab2 = st.tabs(["📷 Take a Photo", "📁 Upload Image"])
+
     image = None
-    if image_source == "Upload Image":
-        uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
-        if uploaded_file is not None:
-            image = Image.open(uploaded_file)
-    else:  # Take a Photo
-        picture = st.camera_input("Take a picture")
+    # First tab: Camera
+    with image_tab1:
+        picture = st.camera_input("Take a picture", key="camera_input")
         if picture is not None:
             image = Image.open(picture)
+
+    # Second tab: Upload
+    with image_tab2:
+        uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"], key="file_uploader")
+        if uploaded_file is not None:
+            image = Image.open(uploaded_file)
     
     # Detection options
     detection_type = st.radio(
