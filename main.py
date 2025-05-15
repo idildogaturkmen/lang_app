@@ -1883,7 +1883,7 @@ if app_mode == "Camera Mode":
                                     pass  # The on_click handles the state change
                     
                 else:
-                    info_message("No objects detected. Try another image or adjust the confidence threshold.")
+                    pass
                 
             
             # Add manual selection UI if enabled
