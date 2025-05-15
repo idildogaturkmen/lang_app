@@ -547,19 +547,7 @@ def get_example_sentence(word, target_language):
     # Call the generator with the category hint
     return example_generator.get_example_sentence(word, target_language, category)
         
-def test_example_sentences():
-    """Test function to verify example sentence generation for person words."""
-    if st.sidebar.checkbox("Test Example Sentences", value=False):
-        st.sidebar.markdown("### Example Sentence Test")
-        
-        test_words = ["person", "doctor", "table", "car", "water", "dog"]
-        test_lang = "es"  # Spanish
-        
-        for word in test_words:
-            example = get_example_sentence(word, test_lang)
-            st.sidebar.markdown(f"**{word}**: {example['english']}")
-            st.sidebar.markdown(f"*Source: {example['source']}*")
-            st.sidebar.markdown("---")
+
 
 # Function to get pronunciation guide
 def get_pronunciation_guide(word, language_code):
@@ -2607,5 +2595,4 @@ else:
     st.sidebar.warning("No active session")
     st.sidebar.markdown("*Start a session in Camera Mode to track progress*")
 
-test_example_sentences()
 add_footer()
