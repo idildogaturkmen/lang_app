@@ -26,8 +26,16 @@ from google.cloud import vision
 import hashlib
 from functools import lru_cache
 import inspect
+from example_sentences import ExampleSentenceGenerator
 
-# First, display Python version for debugging
+@st.cache_resource
+def get_example_generator():
+    """Initialize and cache the example sentence generator."""
+    return ExampleSentenceGenerator(translate_func=translate_text)
+
+example_generator = get_example_generator()
+
+# First, display Python version for
 st.set_page_config(
     page_title="Vocam",
     page_icon="🌍",
@@ -364,9 +372,6 @@ def detect_objects(image, confidence_threshold=0.5, iou_threshold=0.45):
         # Create vision client with explicit credentials
         client = vision.ImageAnnotatorClient(credentials=credentials)
         
-        # Log success to sidebar for debugging
-        st.sidebar.success("✅ Vision client initialized")
-        
         # Convert PIL image to bytes
         img_byte_arr = io.BytesIO()
         image.save(img_byte_arr, format='JPEG')
@@ -538,38 +543,16 @@ def detect_text_in_image(image):
 # Function to get example sentence
 # If deep-translator isn't available, we can use Google Translate API directly
 def get_example_sentence(word, target_language):
-    """Generate an example sentence using the word."""
-    try:
-        # Simple English templates
-        templates = [
-            f"The {word} is on the table.",
-            f"I like this {word} very much.",
-            f"Can you see the {word}?",
-            f"This {word} is very useful.",
-            f"I need a new {word}."
-        ]
-        
-        # Select a random template
-        example = np.random.choice(templates)
-        
-        # Try to translate using the Google Translate API
-        try:
-            translate_client = translate.Client()
-            result = translate_client.translate(example, target_language=target_language)
-            translated_example = result.get("translatedText", "")
-        except Exception:
-            translated_example = ""
-        
-        return {
-            "english": example,
-            "translated": translated_example
-        }
-    except Exception:
-        # Return English example but empty translation
-        return {
-            "english": f"The {word} is on the table.",
-            "translated": ""
-        }
+    """Generate an example sentence using the word via the example generator."""
+    # Try to determine category from OBJECT_CATEGORIES
+    category = None
+    for cat_name, items in OBJECT_CATEGORIES.items():
+        if word.lower() in [item.lower() for item in items]:
+            category = cat_name
+            break
+    
+    # Call the generator with the category hint
+    return example_generator.get_example_sentence(word, target_language, category)
         
 # Function to get pronunciation guide
 def get_pronunciation_guide(word, language_code):
@@ -1724,7 +1707,10 @@ if app_mode == "Camera Mode":
                                         
                                         # Only display translated example if available
                                         if example['translated']:
+                                            source = example.get('source', 'unknown')
+                                            source_name = source.replace('_', ' ').replace('api', 'API').title()
                                             st.markdown(f"{selected_language}: {example['translated']}")
+                                            st.markdown(f"<small><i>Source: {source_name}</i></small>", unsafe_allow_html=True)
                                             
                                             # Only generate audio if there's text to speak
                                             example_audio = text_to_speech(example['translated'], st.session_state.target_language)
@@ -2142,20 +2128,20 @@ elif app_mode == "My Vocabulary":
 
                         
                 # Add example sentence directly (no expander)
-                st.markdown("**Example in context:**")
                 example = get_example_sentence(word.get('word_original', ''), word.get('language_translated', ''))
+                st.markdown(f"**Example in context:**")
                 st.markdown(f"**English:** {example['english']}")
-                
-                # Only show translated example if available
+
                 if example['translated']:
+                    source = example.get('source', 'unknown')
+                    source_name = source.replace('_', ' ').replace('api', 'API').title()
                     st.markdown(f"**{lang_name}:** {example['translated']}")
+                    st.markdown(f"<small><i>Source: {source_name}</i></small>", unsafe_allow_html=True)
                     
                     # Only generate audio if there's text to speak
                     example_audio = text_to_speech(example['translated'], word.get('language_translated', ''))
                     if example_audio:
                         st.markdown(get_audio_html(example_audio), unsafe_allow_html=True)
-                else:
-                    st.markdown("*Translation not available. Please install deep-translator package.*")
 
         else:
             warning_message("There was an issue with the vocabulary data format.")
