@@ -28,45 +28,6 @@ from functools import lru_cache
 import inspect
 from example_sentences import ExampleSentenceGenerator
 
-# Function to translate text
-def translate_text(text, target_language):
-    """Translate text with multiple fallback options."""
-    try:
-        # First try: Google Cloud Translation API
-        from google.cloud import translate_v2 as translate
-        try:
-            # Get credentials directly from secrets
-            from google.oauth2 import service_account
-            credentials_info = dict(st.secrets["gcp_service_account"])
-            credentials = service_account.Credentials.from_service_account_info(credentials_info)
-            
-            translate_client = translate.Client(credentials=credentials)
-            result = translate_client.translate(text, target_language=target_language)
-            return result["translatedText"]
-        except Exception as e:
-            print(f"Google Translate API error: {e}")
-            raise e  # Pass to next fallback
-
-    except Exception:
-        # Second try: deep-translator library (doesn't require API key)
-        try:
-            from deep_translator import GoogleTranslator
-            translator = GoogleTranslator(source='en', target=target_language)
-            return translator.translate(text)
-        except Exception as e:
-            print(f"Deep translator error: {e}")
-            
-            # Last resort fallback
-            return f"[Translation to {target_language}]"
-
-
-@st.cache_resource
-def get_example_generator():
-    """Initialize and cache the example sentence generator."""
-    return ExampleSentenceGenerator(translate_func=translate_text, debug=True)
-
-example_generator = get_example_generator()
-
 # First, display Python version for
 st.set_page_config(
     page_title="Vocam",
@@ -587,7 +548,7 @@ def get_example_sentence(word, target_language):
     return example_generator.get_example_sentence(word, target_language, category)
         
 def test_example_sentences():
-    """Test function to verify example sentence generation for 'person'."""
+    """Test function to verify example sentence generation for person words."""
     if st.sidebar.checkbox("Test Example Sentences", value=False):
         st.sidebar.markdown("### Example Sentence Test")
         
@@ -598,19 +559,7 @@ def test_example_sentences():
             example = get_example_sentence(word, test_lang)
             st.sidebar.markdown(f"**{word}**: {example['english']}")
             st.sidebar.markdown(f"*Source: {example['source']}*")
-            
-            # Verify no dangerous patterns for person
-            if word == "person":
-                has_issues = False
-                for bad_pattern in ["useful", "need", "on the table", "kitchen"]:
-                    if bad_pattern in example['english'].lower():
-                        st.sidebar.error(f"⚠️ Contains bad pattern: '{bad_pattern}'")
-                        has_issues = True
-                if not has_issues:
-                    st.sidebar.success("✅ Example is safe")
-                    
             st.sidebar.markdown("---")
-
 
 # Function to get pronunciation guide
 def get_pronunciation_guide(word, language_code):
@@ -1091,6 +1040,36 @@ gamification = get_gamification()
 gamification.initialize_state()
 
 
+# Function to translate text
+def translate_text(text, target_language):
+    """Translate text with multiple fallback options."""
+    try:
+        # First try: Google Cloud Translation API
+        from google.cloud import translate_v2 as translate
+        try:
+            # Get credentials directly from secrets
+            from google.oauth2 import service_account
+            credentials_info = dict(st.secrets["gcp_service_account"])
+            credentials = service_account.Credentials.from_service_account_info(credentials_info)
+            
+            translate_client = translate.Client(credentials=credentials)
+            result = translate_client.translate(text, target_language=target_language)
+            return result["translatedText"]
+        except Exception as e:
+            print(f"Google Translate API error: {e}")
+            raise e  # Pass to next fallback
+
+    except Exception:
+        # Second try: deep-translator library (doesn't require API key)
+        try:
+            from deep_translator import GoogleTranslator
+            translator = GoogleTranslator(source='en', target=target_language)
+            return translator.translate(text)
+        except Exception as e:
+            print(f"Deep translator error: {e}")
+            
+            # Last resort fallback
+            return f"[Translation to {target_language}]"
 
 # Background worker function for translation
 def translate_worker(texts, target_language, task_id):
@@ -1113,6 +1092,13 @@ def translate_worker(texts, target_language, task_id):
         st.session_state.processing_results[task_id] = {
             'error': str(e)
         }
+
+@st.cache_resource
+def get_example_generator():
+    """Initialize and cache the example sentence generator."""
+    return ExampleSentenceGenerator(translate_func=translate_text, debug=True)
+
+example_generator = get_example_generator()
 
 # Function for text-to-speech
 def text_to_speech(text, lang):
