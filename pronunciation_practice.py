@@ -164,6 +164,37 @@ class SimplePronunciationPractice:
             self.recognizer = sr.Recognizer()
             self.recognizer.energy_threshold = 300  # Lower threshold to detect speech
     
+    def _add_real_time_recorder(self):
+        """Add a real-time audio recorder with Streamlit's native microphone input"""
+        import io
+        import time
+        
+        st.markdown("### 🎙️ Record Your Pronunciation")
+        st.markdown("Click the microphone, say the word clearly, then click stop.")
+        
+        # Use Streamlit's native microphone input (available in versions 1.18.0+)
+        audio_bytes = st.microphone_input("Record your pronunciation", key=f"mic_{int(time.time())}")
+        
+        # Process the recorded audio
+        if audio_bytes is not None:
+            # Display the audio playback
+            st.audio(audio_bytes)
+            
+            # Store in session state for analysis
+            st.session_state.audio_data = audio_bytes
+            st.session_state.audio_data_received = True
+            
+            # If we're in a practice session, store the current word ID
+            if 'current_practice_index' in st.session_state and 'practice_words' in st.session_state:
+                current_index = st.session_state.current_practice_index
+                if current_index < len(st.session_state.practice_words):
+                    current_word = st.session_state.practice_words[current_index]
+                    st.session_state.current_recording_word = current_word.get('id')
+            
+            # Add a button to process the recording
+            if st.button("Analyze My Pronunciation", type="primary", key="analyze_recording"):
+                st.rerun()
+
     def render_practice_ui(self, word):
         """Render pronunciation practice UI for a word"""
         with st.expander("🎤 Practice Pronunciation"):
@@ -449,52 +480,58 @@ class SimplePronunciationPractice:
 
 
     def _add_js_recorder(self):
-        """Add a simple file uploader for audio recording"""
-        st.markdown("### Record Your Pronunciation")
-        st.markdown("""
-        To practice pronunciation:
-        1. Use your device's voice recorder app to record yourself saying the word
-        2. Save the recording and upload it below
-        3. Click 'Process Recording' when ready to evaluate
-        """)
-        
-        # Create columns for better layout
-        col1, col2 = st.columns([3, 1])
-        
-        with col1:
-            # Add a file uploader for audio
-            uploaded_file = st.file_uploader(
-                "Upload your pronunciation recording (WAV, MP3, etc.)", 
-                type=["wav", "mp3", "ogg", "m4a"],
-                key=f"audio_upload_{int(time.time())}"
-            )
-        
-        # Process the uploaded file
-        if uploaded_file is not None:
-            # Read the file
-            audio_bytes = uploaded_file.read()
+        """Add audio recording functionality with a fallback option"""
+        # Check if we can use the native Streamlit microphone input (Streamlit 1.18.0+)
+        try:
+            # Try to use the microphone input
+            self._add_real_time_recorder()
+        except (AttributeError, ImportError):
+            # Fallback to file upload if microphone input is not available
+            st.markdown("### Record Your Pronunciation")
+            st.markdown("""
+            To practice pronunciation:
+            1. Use your device's voice recorder app to record yourself saying the word
+            2. Save the recording and upload it below
+            3. Click 'Process Recording' when ready to evaluate
+            """)
             
-            # Store in session state
-            st.session_state.audio_data = audio_bytes
-            st.session_state.audio_data_received = True
+            # Create columns for better layout
+            col1, col2 = st.columns([3, 1])
             
-            # If we're in a practice session, store the current word ID
-            if 'current_practice_index' in st.session_state and 'practice_words' in st.session_state:
-                current_index = st.session_state.current_practice_index
-                if current_index < len(st.session_state.practice_words):
-                    current_word = st.session_state.practice_words[current_index]
-                    st.session_state.current_recording_word = current_word.get('id')
+            with col1:
+                # Add a file uploader for audio
+                uploaded_file = st.file_uploader(
+                    "Upload your pronunciation recording (WAV, MP3, etc.)", 
+                    type=["wav", "mp3", "ogg", "m4a"],
+                    key=f"audio_upload_{int(time.time())}"
+                )
             
-            # Display a success message
-            st.success("✅ Recording uploaded successfully!")
-            
-            # Display the audio player
-            st.audio(audio_bytes)
-            
-            with col2:
-                # Add a button to process the recording
-                if st.button("Process Recording", type="primary", key="process_recording"):
-                    st.experimental_rerun()
+            # Process the uploaded file
+            if uploaded_file is not None:
+                # Read the file
+                audio_bytes = uploaded_file.read()
+                
+                # Store in session state
+                st.session_state.audio_data = audio_bytes
+                st.session_state.audio_data_received = True
+                
+                # If we're in a practice session, store the current word ID
+                if 'current_practice_index' in st.session_state and 'practice_words' in st.session_state:
+                    current_index = st.session_state.current_practice_index
+                    if current_index < len(st.session_state.practice_words):
+                        current_word = st.session_state.practice_words[current_index]
+                        st.session_state.current_recording_word = current_word.get('id')
+                
+                # Display a success message
+                st.success("✅ Recording uploaded successfully!")
+                
+                # Display the audio player
+                st.audio(audio_bytes)
+                
+                with col2:
+                    # Add a button to process the recording
+                    if st.button("Process Recording", type="primary", key="process_recording"):
+                        st.rerun()
 
 
     def _clean_text_for_comparison(self, text):
