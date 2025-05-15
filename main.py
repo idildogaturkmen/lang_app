@@ -28,6 +28,38 @@ from functools import lru_cache
 import inspect
 from example_sentences import ExampleSentenceGenerator
 
+# Function to translate text
+def translate_text(text, target_language):
+    """Translate text with multiple fallback options."""
+    try:
+        # First try: Google Cloud Translation API
+        from google.cloud import translate_v2 as translate
+        try:
+            # Get credentials directly from secrets
+            from google.oauth2 import service_account
+            credentials_info = dict(st.secrets["gcp_service_account"])
+            credentials = service_account.Credentials.from_service_account_info(credentials_info)
+            
+            translate_client = translate.Client(credentials=credentials)
+            result = translate_client.translate(text, target_language=target_language)
+            return result["translatedText"]
+        except Exception as e:
+            print(f"Google Translate API error: {e}")
+            raise e  # Pass to next fallback
+
+    except Exception:
+        # Second try: deep-translator library (doesn't require API key)
+        try:
+            from deep_translator import GoogleTranslator
+            translator = GoogleTranslator(source='en', target=target_language)
+            return translator.translate(text)
+        except Exception as e:
+            print(f"Deep translator error: {e}")
+            
+            # Last resort fallback
+            return f"[Translation to {target_language}]"
+
+
 @st.cache_resource
 def get_example_generator():
     """Initialize and cache the example sentence generator."""
@@ -1059,36 +1091,6 @@ gamification = get_gamification()
 gamification.initialize_state()
 
 
-# Function to translate text
-def translate_text(text, target_language):
-    """Translate text with multiple fallback options."""
-    try:
-        # First try: Google Cloud Translation API
-        from google.cloud import translate_v2 as translate
-        try:
-            # Get credentials directly from secrets
-            from google.oauth2 import service_account
-            credentials_info = dict(st.secrets["gcp_service_account"])
-            credentials = service_account.Credentials.from_service_account_info(credentials_info)
-            
-            translate_client = translate.Client(credentials=credentials)
-            result = translate_client.translate(text, target_language=target_language)
-            return result["translatedText"]
-        except Exception as e:
-            print(f"Google Translate API error: {e}")
-            raise e  # Pass to next fallback
-
-    except Exception:
-        # Second try: deep-translator library (doesn't require API key)
-        try:
-            from deep_translator import GoogleTranslator
-            translator = GoogleTranslator(source='en', target=target_language)
-            return translator.translate(text)
-        except Exception as e:
-            print(f"Deep translator error: {e}")
-            
-            # Last resort fallback
-            return f"[Translation to {target_language}]"
 
 # Background worker function for translation
 def translate_worker(texts, target_language, task_id):
