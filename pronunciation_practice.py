@@ -194,7 +194,85 @@ class SimplePronunciationPractice:
             # Add a button to process the recording
             if st.button("Analyze My Pronunciation", type="primary", key="analyze_recording"):
                 st.rerun()
-
+    def _add_webrtc_recorder(self):
+        """Add WebRTC-based real-time audio recorder"""
+        from streamlit_webrtc import webrtc_streamer, WebRtcMode, ClientSettings
+        import av
+        import queue
+        import threading
+        
+        st.markdown("### 🎙️ Real-Time Recording")
+        st.markdown("Click 'START' below, say the word clearly, then click 'STOP'.")
+        
+        # Create queues for audio processing
+        audio_queue = queue.Queue()
+        status_indicator = st.empty()
+        
+        def audio_frame_callback(frame):
+            """Process incoming audio frames"""
+            sound = frame.to_ndarray()
+            audio_queue.put(sound)
+            return frame
+        
+        # Configure WebRTC
+        webrtc_ctx = webrtc_streamer(
+            key="pronunciation-recorder",
+            mode=WebRtcMode.SENDONLY,
+            audio_frame_callback=audio_frame_callback,
+            rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
+            media_stream_constraints={"video": False, "audio": True},
+            client_settings=ClientSettings(
+                rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
+                media_stream_constraints={"video": False, "audio": True},
+            ),
+        )
+        
+        if webrtc_ctx.state.playing:
+            status_indicator.info("Recording... Speak the word clearly.")
+        
+        if webrtc_ctx.state.playing:
+            # If audio is being recorded, add a button to stop and analyze
+            if st.button("Stop and Analyze Pronunciation", type="primary"):
+                # Process the recorded audio in the queue
+                frames = []
+                try:
+                    while not audio_queue.empty():
+                        frames.append(audio_queue.get(timeout=1))
+                except queue.Empty:
+                    pass
+                    
+                if frames:
+                    # Convert audio frames to a single buffer
+                    import numpy as np
+                    import io
+                    import wave
+                    import soundfile as sf
+                    
+                    # Combine all frames
+                    audio_data = np.concatenate(frames, axis=0)
+                    
+                    # Save to a WAV file in memory
+                    virtual_file = io.BytesIO()
+                    sf.write(virtual_file, audio_data, 48000, format='WAV')
+                    virtual_file.seek(0)
+                    
+                    # Store in session state
+                    st.session_state.audio_data = virtual_file.read()
+                    st.session_state.audio_data_received = True
+                    
+                    # Display success
+                    status_indicator.success("Recording processed! Analyzing pronunciation...")
+                    st.audio(st.session_state.audio_data)
+                    
+                    # Force a rerun to trigger analysis
+                    st.rerun()
+                else:
+                    status_indicator.error("No audio recorded. Please try again.")
+        
+        # Display instructions if not recording
+        if not webrtc_ctx.state.playing and not st.session_state.get('audio_data_received', False):
+            st.info("Click START above to begin recording.")
+            
     def render_practice_ui(self, word):
         """Render pronunciation practice UI for a word"""
         with st.expander("🎤 Practice Pronunciation"):
