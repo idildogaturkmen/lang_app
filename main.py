@@ -1034,15 +1034,10 @@ if 'audio_data_received' not in st.session_state:
     st.session_state.audio_data_received = False
 if 'current_recording_word' not in st.session_state:
     st.session_state.current_recording_word = None
-
-# Add this to sidebar
 if 'use_vision_api' not in st.session_state:
     st.session_state.use_vision_api = True
-    
-st.session_state.use_vision_api = st.sidebar.checkbox(
-    "Use Vision API", 
-    value=st.session_state.use_vision_api
-)
+# Always force it to be True
+st.session_state.use_vision_api = True
 
 
 @st.cache_resource
@@ -1635,10 +1630,7 @@ if app_mode == "Camera Mode":
     
     # Process image if available
     if image is not None:
-    # Show original image
-        st.image(image, caption="Original Image")
-        
-        # Always apply enhancement for object detection
+    # Always apply enhancement for object detection
         if detection_type == "Objects":
             with st.spinner("Enhancing image for better detection..."):
                 enhanced_image = enhance_image(image, enhancement_type)
