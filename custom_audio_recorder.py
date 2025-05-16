@@ -1,4 +1,4 @@
-# Create a new file custom_audio_recorder.py in your project directory
+# custom_audio_recorder.py
 
 import os
 import streamlit.components.v1 as components
@@ -168,16 +168,19 @@ with open(HTML_FILE, "w") as f:
 </html>
     """)
 
+# Create a very simple global counter to make each component unique
+_recorder_counter = 0
+
 # Create the custom component function
 def audio_recorder():
     """Custom audio recorder component with JavaScript"""
-    # Use a timestamp to ensure unique component on each call
-    # This is a workaround for not having the key parameter
-    timestamp = int(time.time() * 1000)
-    component_name = f"custom_audio_recorder_{timestamp}"
+    global _recorder_counter
     
     try:
-        # Get the component value - WITHOUT using the key parameter
+        # Increment the counter
+        _recorder_counter += 1
+        
+        # Get the component value - DO NOT USE THE KEY PARAMETER AT ALL
         component_value = components.html(
             open(HTML_FILE, "r").read(),
             height=200

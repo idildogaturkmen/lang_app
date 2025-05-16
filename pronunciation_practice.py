@@ -185,15 +185,30 @@ class SimplePronunciationPractice:
             self.recognizer = sr.Recognizer()
             self.recognizer.energy_threshold = 300  # Lower threshold to detect speech
         
-        # Try to import custom recorder
+        # Try to import custom recorder - with more robust error handling
         try:
-            from custom_audio_recorder import audio_recorder
-            self.custom_recorder = audio_recorder
-            self.has_custom_recorder = True
-            print("Custom audio recorder loaded successfully")
-        except ImportError:
+            import importlib.util
+            # Check if the custom_audio_recorder.py file exists
+            module_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "custom_audio_recorder.py")
+            if os.path.exists(module_path):
+                # Dynamically import the module from the file path
+                spec = importlib.util.spec_from_file_location("custom_audio_recorder", module_path)
+                custom_recorder_module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(custom_recorder_module)
+                
+                # Get the audio_recorder function
+                self.custom_recorder = custom_recorder_module.audio_recorder
+                self.has_custom_recorder = True
+                print("Custom audio recorder loaded successfully")
+            else:
+                # Fallback to normal import if the file is not found at the expected path
+                from custom_audio_recorder import audio_recorder
+                self.custom_recorder = audio_recorder
+                self.has_custom_recorder = True
+                print("Custom audio recorder loaded via import")
+        except Exception as e:
+            print(f"Custom audio recorder not available: {e}")
             self.has_custom_recorder = False
-            print("Custom audio recorder not available")
     
     def _get_streamlit_version(self):
         """Get the current Streamlit version with safer error handling"""
@@ -253,7 +268,8 @@ class SimplePronunciationPractice:
     def _add_custom_recorder(self):
         """Add the custom JavaScript-based audio recorder"""
         try:
-            st.markdown("### 🎙️ Record Your Pronunciation")
+            # Only show a single header - moved outside the method
+            # st.markdown("### 🎙️ Record Your Pronunciation")
             
             # Use our custom recorder component
             audio_bytes = self.custom_recorder()
@@ -269,8 +285,9 @@ class SimplePronunciationPractice:
                 # Update current recording word if in practice session
                 self._update_current_recording_word()
                 
-                # Add a button to analyze the pronunciation
-                if st.button("✨ Analyze My Pronunciation", type="primary", key=f"analyze_custom_{int(time.time())}"):
+                # We're not using keys for buttons anymore - use timestamp in function
+                timestamp = int(time.time())
+                if st.button("✨ Analyze My Pronunciation"):
                     st.rerun()
             else:
                 st.info("Use the recorder above to practice your pronunciation")
@@ -403,9 +420,8 @@ class SimplePronunciationPractice:
     
     def _add_upload_recorder(self):
         """Add file upload as a fallback recording method"""
-        st.markdown("### Record Your Pronunciation")
+        st.markdown("To practice pronunciation:")
         st.markdown("""
-        To practice pronunciation:
         1. Use your device's voice recorder app to record yourself saying the word
         2. Save the recording and upload it below
         3. Click 'Process Recording' to evaluate
@@ -415,11 +431,11 @@ class SimplePronunciationPractice:
         col1, col2 = st.columns([3, 1])
         
         with col1:
-            # Add a file uploader for audio
+            # Add a file uploader for audio - with unique ID based on time
+            timestamp = int(time.time())
             uploaded_file = st.file_uploader(
                 "Upload your pronunciation recording (WAV, MP3, etc.)", 
-                type=["wav", "mp3", "ogg", "m4a"],
-                key=f"audio_upload_{int(time.time())}"
+                type=["wav", "mp3", "ogg", "m4a"]
             )
         
         # Process the uploaded file
@@ -441,8 +457,8 @@ class SimplePronunciationPractice:
             st.audio(audio_bytes)
             
             with col2:
-                # Add a button to process the recording
-                if st.button("Process Recording", type="primary", key="process_recording"):
+                # Add a button to process the recording - without key
+                if st.button("Process Recording"):
                     st.rerun()
     
     def _update_current_recording_word(self):
@@ -473,8 +489,25 @@ class SimplePronunciationPractice:
             # Show pronunciation tips
             self._show_pronunciation_tips(word)
             
-            # Add the recording section - ONE title handled inside this method
-            self._add_audio_recorder()
+            # Single heading for recording section
+            st.markdown("### 🎙️ Record Your Pronunciation")
+            
+            # Add the appropriate audio recorder - HEADING IS MOVED HERE
+            if self.has_custom_recorder:
+                self._add_custom_recorder()
+            else:
+                # Show recording instructions
+                st.markdown("Record yourself saying the word above:")
+                
+                # Try WebRTC first, then fall back to file upload
+                try:
+                    if HAS_WEBRTC:
+                        self._add_webrtc_recorder()
+                    else:
+                        self._add_upload_recorder()
+                except Exception as e:
+                    st.error(f"Error with recorder: {e}")
+                    self._add_upload_recorder()
             
             # Calculate score based on speech recognition or self-assessment
             if HAS_SR and 'audio_data' in st.session_state and st.session_state.audio_data:

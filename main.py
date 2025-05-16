@@ -216,6 +216,15 @@ except ImportError as e:
         def end_session(self, session_id, words_studied, words_learned):
             return True
 
+# Import custom audio recorder
+try:
+    from custom_audio_recorder import audio_recorder
+    has_custom_recorder = True
+    print("Custom audio recorder imported successfully")
+except ImportError as e:
+    has_custom_recorder = False
+    print(f"Custom audio recorder not available: {e}")
+
 
 # Helper function to convert AttrDict to a regular dict recursively
 def convert_to_dict(obj):
@@ -285,20 +294,6 @@ QUESTION_TYPES = [
     "multiple_choice_category",  # Choose words from same category
     "audio_recognition"          # Hear word, select correct option
 ]
-
-# Add near the top of your file, after imports
-def safe_button(label, **kwargs):
-    """Safe wrapper for st.button that removes problematic parameters"""
-    # Remove problematic parameters if present
-    if 'use_column_width' in kwargs:
-        del kwargs['use_column_width']
-        print(f"Removed use_column_width from button: {label}")
-    if 'type' in kwargs and kwargs['type'] == 'primary':
-        del kwargs['type']
-        print(f"Removed type=primary from button: {label}")
-    
-    # Use the cleaned kwargs
-    return st.button(label, **kwargs)
 
 
 def get_object_category(label):
@@ -938,15 +933,51 @@ if 'db_checked' not in st.session_state:
     st.session_state.db_checked = check_database_setup()
 
 def debug_button(label, **kwargs):
-    """Debug wrapper that shows what parameters are being passed to a button"""
-    print(f"Button debug - Label: {label}, Kwargs: {kwargs}")
+    """Debug wrapper that shows what parameters are being passed to a button and ensures uniqueness"""
+    import inspect
+    import time
+    
     # Get the caller info
     caller = inspect.getframeinfo(inspect.currentframe().f_back)
-    print(f"Called from: {caller.filename}, line {caller.lineno}")
-    # Safe version that removes problematic parameters
-    safe_kwargs = {k: v for k, v in kwargs.items() 
-                  if k not in ['use_column_width', 'use_container_width']}
-    return st.button(label, **safe_kwargs)
+    
+    # Create a unique key based on the calling file, line number, and timestamp
+    if 'key' not in kwargs:
+        caller_id = f"{caller.filename.split('/')[-1]}_{caller.lineno}"
+        timestamp = int(time.time() * 1000) % 10000  # Use last 4 digits of timestamp for readability
+        unique_key = f"{label.replace(' ', '_')}_{caller_id}_{timestamp}"
+        kwargs['key'] = unique_key
+    
+    # For debugging, uncomment this line to see what keys are being generated
+    # print(f"Button: {label}, Key: {kwargs['key']}")
+    
+    # Remove any problematic parameters if present
+    if 'use_column_width' in kwargs:
+        del kwargs['use_column_width']
+    if 'type' in kwargs and kwargs['type'] == 'primary':
+        del kwargs['type']
+    
+    # Use the cleaned kwargs
+    return st.button(label, **kwargs)
+
+def safe_button(label, **kwargs):
+    """Safe wrapper for st.button that ensures uniqueness and removes problematic parameters"""
+    import time
+    
+    # Generate a unique key if none provided
+    if 'key' not in kwargs:
+        # Create unique key based on label and timestamp
+        timestamp = int(time.time() * 1000) % 10000  # Use last 4 digits of timestamp for readability
+        unique_key = f"{label.replace(' ', '_')}_{timestamp}"
+        kwargs['key'] = unique_key
+    
+    # Remove problematic parameters if present
+    if 'use_column_width' in kwargs:
+        del kwargs['use_column_width']
+    if 'type' in kwargs and kwargs['type'] == 'primary':
+        del kwargs['type']
+    
+    # Use the cleaned kwargs
+    return st.button(label, **kwargs)
 
 # Initialize database
 @st.cache_resource
@@ -1775,7 +1806,7 @@ if app_mode == "Camera Mode":
 
                     # Add a save button with greater prominence
                     if not st.session_state.words_just_saved:
-                        if st.button("💾 Save Selected Objects to Vocabulary"):
+                        if safe_button("💾 Save Selected Objects to Vocabulary", key=f"save_objects_{int(time.time())}"):
                             # Auto-start session if needed
                             if st.session_state.session_id is None:
                                 if manage_session("start"):
@@ -1871,7 +1902,7 @@ if app_mode == "Camera Mode":
 
 
                             with next_col1:
-                                if st.button("🎮 Go to Quiz Mode", key="goto_quiz", on_click=go_to_quiz_mode):
+                                if safe_button("🎮 Go to Quiz Mode", key=f"goto_quiz_{int(time.time())}", on_click=go_to_quiz_mode):
                                     pass  # The on_click handles the state change
                                     
                             with next_col2:
@@ -2180,6 +2211,11 @@ elif app_mode == "My Vocabulary":
                                 translate_text_func=translate_text
                             )
                             print("Successfully initialized pronunciation practice module")
+
+                            # If you've imported the custom recorder, make it available to the module
+                            if has_custom_recorder:
+                                st.session_state.pronunciation_practice.custom_recorder = audio_recorder
+                                st.session_state.pronunciation_practice.has_custom_recorder = True
                         
                         # Now use the initialized module
                         st.session_state.pronunciation_practice.render_practice_ui(word)
