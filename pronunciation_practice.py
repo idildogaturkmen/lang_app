@@ -154,13 +154,6 @@ Enhanced pronunciation practice implementation with multi-layered recording appr
 3. File upload fallback
 """
 
-"""
-Enhanced pronunciation practice implementation with multi-layered recording approach:
-1. Streamlit's native microphone input
-2. WebRTC-based recording
-3. File upload fallback
-"""
-
 class SimplePronunciationPractice:
     """
     Implementation of pronunciation practice with AI feedback
@@ -281,15 +274,21 @@ class SimplePronunciationPractice:
         if not HAS_WEBRTC:
             raise ImportError("streamlit-webrtc is not installed")
             
-        st.markdown("### 🎙️ Real-Time Recording")
-        st.markdown("Click 'START' below, say the word clearly, then click 'STOP'.")
+        # Single clear title
+        st.markdown("### 🎙️ Record Your Pronunciation")
+        st.markdown("Click 'START' below, say the word clearly, then click 'STOP'. After stopping, press 'Process Recording'.")
         
         # Create an empty placeholder for status messages
         status_indicator = st.empty()
         
-        # Cache for audio frames
+        # Initialize audio frames in session state if not present
         if 'audio_frames' not in st.session_state:
             st.session_state.audio_frames = []
+        
+        # Debug information
+        debug_mode = False  # Set to True to show debugging information
+        if debug_mode:
+            st.write(f"Audio frames in session: {len(st.session_state.audio_frames)}")
         
         try:
             # Import required components
@@ -298,12 +297,18 @@ class SimplePronunciationPractice:
             
             def audio_frame_callback(frame):
                 """Process incoming audio frames"""
-                # Convert frame to numpy array and store in session state
-                sound = frame.to_ndarray()
-                st.session_state.audio_frames.append(sound)
+                try:
+                    # Convert frame to numpy array and store in session state
+                    sound = frame.to_ndarray()
+                    st.session_state.audio_frames.append(sound)
+                    if debug_mode and len(st.session_state.audio_frames) % 10 == 0:
+                        print(f"Added frame, total frames: {len(st.session_state.audio_frames)}")
+                except Exception as e:
+                    if debug_mode:
+                        print(f"Error in audio frame callback: {e}")
                 return frame
             
-            # Configure WebRTC
+            # Configure WebRTC with explicit settings
             webrtc_ctx = webrtc_streamer(
                 key="pronunciation-recorder",
                 mode=WebRtcMode.SENDONLY,
@@ -313,23 +318,31 @@ class SimplePronunciationPractice:
             )
             
             # Show different messages based on recording state
-            if webrtc_ctx.state.playing:
-                status_indicator.info("Recording... Speak the word clearly.")
-            else:
-                if len(st.session_state.audio_frames) > 0:
-                    status_indicator.success("Recording complete!")
-                else:
-                    status_indicator.info("Click START above to begin recording.")
+            has_frames = len(st.session_state.audio_frames) > 0
             
-            # Process button to convert frames to audio file
-            if not webrtc_ctx.state.playing and len(st.session_state.audio_frames) > 0:
-                if st.button("Process Recording", type="primary"):
+            if webrtc_ctx.state.playing:
+                status_indicator.info("✅ Recording... Speak the word clearly.")
+            else:
+                if has_frames:
+                    status_indicator.success("✅ Recording complete! Click 'Process Recording' below.")
+                else:
+                    status_indicator.info("ℹ️ Click START above to begin recording.")
+            
+            # Process button - only show when recording has stopped and we have frames
+            if not webrtc_ctx.state.playing and has_frames:
+                # Create a clearly visible button to process the recording
+                process_btn_container = st.container()
+                if process_btn_container.button("💾 Process Recording", type="primary", key="process_webrtc_recording"):
                     with st.spinner("Processing audio..."):
                         try:
                             # Process the collected audio frames
                             import numpy as np
                             import io
                             import wave
+                            
+                            # Show helpful message while processing
+                            process_status = st.empty()
+                            process_status.info(f"Processing {len(st.session_state.audio_frames)} audio frames...")
                             
                             # Combine all audio frames
                             all_audio = np.concatenate(st.session_state.audio_frames, axis=0)
@@ -356,14 +369,25 @@ class SimplePronunciationPractice:
                             # Clear the frames cache
                             st.session_state.audio_frames = []
                             
+                            # Update processing status
+                            process_status.success("✅ Audio processed successfully!")
+                            
                             # Play the processed audio
+                            st.subheader("Your Recording")
                             st.audio(audio_bytes)
                             
                             # Rerun to trigger analysis
                             st.rerun()
                         except Exception as e:
                             st.error(f"Error processing audio: {e}")
+                            if debug_mode:
+                                st.write(f"Error details: {type(e).__name__}, {str(e)}")
+            
+            return True  # Successfully used WebRTC recorder
+            
         except Exception as e:
+            if debug_mode:
+                st.error(f"WebRTC setup failed: {e}")
             raise Exception(f"WebRTC setup failed: {e}")
     
     def _add_upload_recorder(self):
@@ -438,7 +462,7 @@ class SimplePronunciationPractice:
             # Show pronunciation tips
             self._show_pronunciation_tips(word)
             
-            # Add the appropriate audio recorder
+            # Add the appropriate audio recorder - single recording section
             self._add_audio_recorder()
             
             # Calculate score based on speech recognition or self-assessment
@@ -514,9 +538,8 @@ class SimplePronunciationPractice:
             with st.expander("Pronunciation Guide", expanded=True):
                 self._show_pronunciation_tips(current_word)
             
-            # Add recorder with clear instructions
+            # Single clear recording prompt
             st.markdown("### 🎙️ Your turn - record your pronunciation")
-            st.markdown("Record yourself saying the word above, then analyze your pronunciation")
             
             # Add the appropriate audio recorder
             self._add_audio_recorder()
