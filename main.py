@@ -1766,6 +1766,12 @@ if app_mode == "Camera Mode":
                     
                     categorized_detections[category].append((i, detection))
                 
+                # Initialize save state variables BEFORE the loop
+                if 'words_just_saved' not in st.session_state:
+                    st.session_state.words_just_saved = False
+                    st.session_state.saved_count = 0
+                    st.session_state.saved_items = []
+
                 # Display objects by category in expandable sections
                 for category, category_detections in categorized_detections.items():
                     with st.expander(f"{category.title()} ({len(category_detections)} items)", expanded=True):
@@ -1836,74 +1842,74 @@ if app_mode == "Camera Mode":
                         st.session_state.saved_count = 0
                         st.session_state.saved_items = []
 
-                    # Create a separate container for the save button
-                    save_button_container = st.container()
+                save_button_container = st.container()
 
-                    with save_button_container:
-                        # Add a save button with greater prominence
-                        if not st.session_state.words_just_saved:
-                            if truly_safe_button("💾 Save Selected Objects to Vocabulary"):
-                                # Auto-start session if needed
-                                if st.session_state.session_id is None:
-                                    if manage_session("start"):
-                                        success_message("Created a new learning session!")
-                                    else:
-                                        error_message("Failed to create a session. Please check database connection.")
-                                        st.stop()
-                                
-                                # Count selected objects
-                                selected_objects = [i for i in range(len(detections)) 
-                                                if st.session_state.detection_checkboxes.get(f"detect_{i}", False)]
-                                
-                                if not selected_objects:
-                                    warning_message("No objects were selected to save. Please check at least one 'Save' box.")
+                # Now put the save button in this container, AFTER all categories
+                with save_button_container:
+                    # Add a save button with greater prominence
+                    if not st.session_state.words_just_saved:
+                        # Use truly_safe_button for guaranteed uniqueness
+                        if truly_safe_button("💾 Save Selected Objects to Vocabulary"):
+                            # Auto-start session if needed
+                            if st.session_state.session_id is None:
+                                if manage_session("start"):
+                                    success_message("Created a new learning session!")
                                 else:
-                                    # Save the selected objects
-                                    saved_count = 0
-                                    saved_items = []
-                                    
-                                    for i in selected_objects:
-                                        try:
-                                            detection = detections[i]
-                                            label = detection['label']
-                                            translated_label = translate_text(label, st.session_state.target_language)
-                                            
-                                            # Save the image
-                                            image_path = save_image(image, label)
-                                            
-                                            # Get object category
-                                            category = get_object_category(label)
-                                            
-                                            # Add to database using direct method
-                                            vocab_id = add_vocabulary_direct(
-                                                word_original=label,
-                                                word_translated=translated_label,
-                                                language_translated=st.session_state.target_language,
-                                                category=category,
-                                                image_path=image_path
-                                            )
-                                            
-                                            if vocab_id:
-                                                saved_count += 1
-                                                saved_items.append(f"{label} → {translated_label}")
-                                                # Update session stats
-                                                st.session_state.words_studied += 1
-                                                st.session_state.words_learned += 1
-                                            else:
-                                                error_message(f"Failed to save {label} to vocabulary.")
-                                        except Exception as e:
-                                            error_message(f"Error saving {label}: {str(e)}")
-                                    
-                                    if saved_count > 0:
-                                        # Store the saved state and items in session state
-                                        st.session_state.words_just_saved = True
-                                        st.session_state.saved_count = saved_count
-                                        st.session_state.saved_items = saved_items
-                                        st.rerun()  # Rerun once to update the UI
-                                    else:
-                                        error_message("Failed to save any words. Please check database connection.")
+                                    error_message("Failed to create a session. Please check database connection.")
+                                    st.stop()
+                            
+                            # Count selected objects
+                            selected_objects = [i for i in range(len(detections)) 
+                                            if st.session_state.detection_checkboxes.get(f"detect_{i}", False)]
+                            
+                            if not selected_objects:
+                                warning_message("No objects were selected to save. Please check at least one 'Save' box.")
+                            else:
+                                # Save the selected objects
+                                saved_count = 0
+                                saved_items = []
+                                
+                                for i in selected_objects:
+                                    try:
+                                        detection = detections[i]
+                                        label = detection['label']
+                                        translated_label = translate_text(label, st.session_state.target_language)
+                                        
+                                        # Save the image
+                                        image_path = save_image(image, label)
+                                        
+                                        # Get object category
+                                        category = get_object_category(label)
+                                        
+                                        # Add to database using direct method
+                                        vocab_id = add_vocabulary_direct(
+                                            word_original=label,
+                                            word_translated=translated_label,
+                                            language_translated=st.session_state.target_language,
+                                            category=category,
+                                            image_path=image_path
+                                        )
+                                        
+                                        if vocab_id:
+                                            saved_count += 1
+                                            saved_items.append(f"{label} → {translated_label}")
+                                            # Update session stats
+                                            st.session_state.words_studied += 1
+                                            st.session_state.words_learned += 1
+                                        else:
+                                            error_message(f"Failed to save {label} to vocabulary.")
+                                    except Exception as e:
+                                        error_message(f"Error saving {label}: {str(e)}")
+                                
+                                if saved_count > 0:
+                                    # Store the saved state and items in session state
+                                    st.session_state.words_just_saved = True
+                                    st.session_state.saved_count = saved_count
+                                    st.session_state.saved_items = saved_items
+                                    st.rerun()  # Rerun once to update the UI
+                                else:
+                                    error_message("Failed to save any words. Please check database connection.")
 
-                    
                     # Show success message and navigation AFTER saving (persists across reruns)
                     if st.session_state.words_just_saved:
                         # Create a container for the success message
@@ -1950,8 +1956,8 @@ if app_mode == "Camera Mode":
                                 if st.button("📸 Continue Capturing", key="continue_capture", on_click=continue_capturing):
                                     pass  # The on_click handles the state change
                     
-                else:
-                    pass
+                    else:
+                        pass
                 
             
             # Add manual selection UI if enabled
