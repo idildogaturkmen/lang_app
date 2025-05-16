@@ -154,6 +154,13 @@ Enhanced pronunciation practice implementation with multi-layered recording appr
 3. File upload fallback
 """
 
+"""
+Enhanced pronunciation practice implementation with multi-layered recording approach:
+1. Streamlit's native microphone input
+2. WebRTC-based recording
+3. File upload fallback
+"""
+
 class SimplePronunciationPractice:
     """
     Implementation of pronunciation practice with AI feedback
@@ -166,14 +173,20 @@ class SimplePronunciationPractice:
         self.translate_text = translate_text_func
         self.difficult_sounds = DIFFICULT_SOUNDS
         
-        # Determine Streamlit version to select appropriate recording method
-        self.streamlit_version = self._get_streamlit_version()
-        print(f"Detected Streamlit version: {self.streamlit_version}")
-        
         # Initialize speech recognition if available
         if HAS_SR:
             self.recognizer = sr.Recognizer()
             self.recognizer.energy_threshold = 300  # Lower threshold to detect speech
+        
+        # Try to import custom recorder
+        try:
+            from custom_audio_recorder import audio_recorder
+            self.custom_recorder = audio_recorder
+            self.has_custom_recorder = True
+            print("Custom audio recorder loaded successfully")
+        except ImportError:
+            self.has_custom_recorder = False
+            print("Custom audio recorder not available")
     
     def _get_streamlit_version(self):
         """Get the current Streamlit version with safer error handling"""
@@ -202,72 +215,59 @@ class SimplePronunciationPractice:
     
     def _add_audio_recorder(self):
         """Add the most appropriate audio recorder based on environment"""
-        # Create a container to display any errors
-        error_container = st.empty()
-        
-        try:
-            # Try using native Streamlit microphone (v1.18.0+)
-            if self.streamlit_version[0] > 1 or (self.streamlit_version[0] == 1 and self.streamlit_version[1] >= 18):
-                if self._add_native_recorder():
-                    return
+        # Always use the custom recorder if available
+        if self.has_custom_recorder:
+            self._add_custom_recorder()
+        else:
+            # Create a container to display any errors
+            error_container = st.empty()
             
-            # Fall back to WebRTC if available
-            if HAS_WEBRTC:
-                try:
-                    self._add_webrtc_recorder()
-                    return
-                except Exception as e:
-                    print(f"WebRTC recorder failed: {e}")
-                    # Continue to file upload fallback
-            
-            # Last resort: file upload (always works)
-            self._add_upload_recorder()
-            
-        except Exception as e:
-            # Clear any previous error
-            error_container.empty()
-            # Show the error and fall back to file upload
-            error_container.error(f"Error setting up audio recorder: {str(e)}")
-            # Always provide a fallback method
-            self._add_upload_recorder()
+            try:
+                # Fall back to WebRTC if available
+                if HAS_WEBRTC:
+                    try:
+                        self._add_webrtc_recorder()
+                    except Exception as e:
+                        print(f"WebRTC recorder failed: {e}")
+                        # Continue to file upload fallback
+                        self._add_upload_recorder()
+                else:
+                    # Last resort: file upload (always works)
+                    self._add_upload_recorder()
+                
+            except Exception as e:
+                # Clear any previous error
+                error_container.empty()
+                # Show the error and fall back to file upload
+                error_container.error(f"Error setting up audio recorder: {str(e)}")
+                # Always provide a fallback method
+                self._add_upload_recorder()
     
-    def _add_native_recorder(self):
-        """Add Streamlit's native microphone recorder (v1.18.0+)"""
-        try:
-            st.markdown("### 🎙️ Record Your Pronunciation")
-            st.markdown("Click the microphone, say the word clearly, then wait for processing.")
+    def _add_custom_recorder(self):
+        """Add the custom JavaScript-based audio recorder"""
+        st.markdown("### 🎙️ Record Your Pronunciation")
+        
+        # Use our custom recorder component
+        audio_bytes = self.custom_recorder()
+        
+        # If we have audio data, display it and prepare for analysis
+        if audio_bytes:
+            st.success("✅ Recording complete!")
             
-            # Generate a unique key for the microphone input
-            mic_key = f"mic_{int(time.time())}"
+            # Play the audio back
+            st.subheader("Your Recording")
+            st.audio(audio_bytes)
             
-            # Safer way to check if microphone_input exists
-            if not hasattr(st, 'microphone_input'):
-                raise AttributeError("Streamlit version doesn't support microphone_input")
+            # Update current recording word if in practice session
+            self._update_current_recording_word()
             
-            # Use Streamlit's native microphone input
-            audio_bytes = st.microphone_input("Record your pronunciation", key=mic_key)
+            # Add a button to analyze the pronunciation
+            if st.button("✨ Analyze My Pronunciation", type="primary", key="analyze_custom_recording"):
+                st.rerun()
+        else:
+            st.info("Use the recorder above to practice your pronunciation")
             
-            # Process the recorded audio
-            if audio_bytes is not None:
-                # Display the audio playback
-                st.audio(audio_bytes)
-                
-                # Store in session state for analysis
-                st.session_state.audio_data = audio_bytes
-                st.session_state.audio_data_received = True
-                
-                # Update current recording word if in a practice session
-                self._update_current_recording_word()
-                
-                # Add a button to process the recording
-                if st.button("Analyze My Pronunciation", type="primary", key="analyze_recording"):
-                    st.rerun()
-            
-            return True  # Successfully used native recorder
-        except (AttributeError, Exception) as e:
-            # If we get here, the native recorder didn't work
-            print(f"Native recorder unavailable: {e}")
-            return False
+        return True
     
     def _add_webrtc_recorder(self):
         """Add WebRTC-based real-time audio recorder"""
@@ -462,7 +462,7 @@ class SimplePronunciationPractice:
             # Show pronunciation tips
             self._show_pronunciation_tips(word)
             
-            # Add the appropriate audio recorder - single recording section
+            # Add the recording section - ONE title handled inside this method
             self._add_audio_recorder()
             
             # Calculate score based on speech recognition or self-assessment
@@ -538,18 +538,13 @@ class SimplePronunciationPractice:
             with st.expander("Pronunciation Guide", expanded=True):
                 self._show_pronunciation_tips(current_word)
             
-            # Single clear recording prompt
-            st.markdown("### 🎙️ Your turn - record your pronunciation")
-            
-            # Add the appropriate audio recorder
+            # Add the recording section - ONE title handled inside this method
             self._add_audio_recorder()
             
             # Check if audio data is available
             has_audio = 'audio_data' in st.session_state and st.session_state.audio_data
             
             if has_audio:
-                st.subheader("Your Recording")
-                
                 # Calculate score based on speech recognition or self-assessment
                 if HAS_SR:
                     with st.spinner("Analyzing your pronunciation..."):
