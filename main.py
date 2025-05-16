@@ -1968,8 +1968,8 @@ if app_mode == "Camera Mode":
                                 if st.button("📸 Continue Capturing", key=continue_key, on_click=continue_capturing):
                                     pass  # The on_click handles the state change
                     
-            else:
-                pass
+                    else:
+                        pass
                 
             
             # Add manual selection UI if enabled
