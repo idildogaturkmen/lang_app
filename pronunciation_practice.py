@@ -303,24 +303,35 @@ class SimplePronunciationPractice:
             audio_bytes = self.custom_recorder()
             
             # If we have audio data, display it and prepare for analysis
-            if audio_bytes:
+            if audio_bytes or st.session_state.get('recording_complete', False):
                 st.success("✅ Recording complete!")
                 
-                # Play the audio back
-                st.subheader("Your Recording")
-                st.audio(audio_bytes)
-                
-                # Update current recording word if in practice session
-                self._update_current_recording_word()
-                
-                # We're not using keys for buttons anymore - use timestamp in function
-                timestamp = int(time.time())
-                if st.button("✨ Analyze My Pronunciation"):
-                    st.rerun()
+                # If we have audio data in session state
+                if st.session_state.get('audio_data') is not None:
+                    # Play the audio back
+                    st.subheader("Your Recording")
+                    st.audio(st.session_state.audio_data)
+                    
+                    # Update current recording word if in practice session
+                    self._update_current_recording_word()
+                    
+                    # Process button (only show if not already processed)
+                    if not st.session_state.get('analysis_complete', False):
+                        if st.button("✨ Analyze My Pronunciation", key=f"analyze_btn_{int(time.time())}"):
+                            # Set flag that analysis is complete
+                            st.session_state.analysis_complete = True
+                            st.rerun()
+                    
+                    # If analysis complete flag is set, run the analysis
+                    if st.session_state.get('analysis_complete', False):
+                        st.session_state.analysis_complete = False  # Reset for next time
+                        return True  # Signal to run analysis
+                else:
+                    st.info("Use the recorder above to practice your pronunciation")
             else:
                 st.info("Use the recorder above to practice your pronunciation")
                 
-            return True
+            return False  # Don't run analysis yet
         except Exception as e:
             st.error(f"Error using custom recorder: {e}")
             return False

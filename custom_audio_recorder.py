@@ -316,11 +316,20 @@ with open(HTML_FILE, "w") as f:
         // Send data to Streamlit
         function sendToStreamlit(base64AudioData) {
             if (window.Streamlit) {
+                // First send processing state
                 window.Streamlit.setComponentValue({
-                    state: 'complete',
-                    data: base64AudioData,
-                    format: 'audio/wav'
+                    status: 'processing',
+                    data: null
                 });
+                
+                // Short delay then send complete data
+                setTimeout(() => {
+                    window.Streamlit.setComponentValue({
+                        status: 'complete',
+                        data: base64AudioData,
+                        format: 'audio/wav'
+                    });
+                }, 300);
             }
         }
         
@@ -338,41 +347,47 @@ _recorder_counter = 0
 
 # Create the custom component function
 def audio_recorder():
-    """Enhanced custom audio recorder component with real-time analysis"""
+    """Custom audio recorder component with JavaScript"""
     global _recorder_counter
     
     try:
         # Increment the counter
         _recorder_counter += 1
         
-        # Process the returned value with real-time analysis handling
+        # Add a debug message to see what's happening
+        debug_container = st.empty()
+        
+        # Get the component value - DO NOT USE THE KEY PARAMETER AT ALL
         component_value = components.html(
             open(HTML_FILE, "r").read(),
-            height=280  # Increased height for visualization
+            height=200
         )
         
         # Process the returned value
-        if component_value and isinstance(component_value, dict):
-            # Check if this is real-time analysis data
-            if component_value.get('state') == 'analyzing':
-                # Store real-time data in session state
-                st.session_state.audio_analysis = {
-                    'volume': component_value.get('volume', 0),
-                    'frequency_data': component_value.get('frequencyData', [])
-                }
-                return None
-                
-            # Check if we have complete data
-            elif component_value.get('state') == 'complete' and 'data' in component_value:
-                # Decode the base64 audio data
-                audio_bytes = base64.b64decode(component_value['data'])
-                
-                # Store in session state
-                st.session_state.audio_data = audio_bytes
-                st.session_state.audio_data_received = True
-                
-                # Return the audio bytes
-                return audio_bytes
+        if component_value and isinstance(component_value, dict) and 'data' in component_value:
+            # Show debug info
+            debug_container.info("Audio data received, processing...")
+            
+            # Decode the base64 audio data
+            audio_bytes = base64.b64decode(component_value['data'])
+            
+            # Store in session state
+            st.session_state.audio_data = audio_bytes
+            st.session_state.audio_data_received = True
+            
+            # Add a manual trigger for rerun to ensure the UI updates
+            st.session_state.recording_complete = True
+            
+            # Force a rerun
+            time.sleep(0.5)  # Short delay
+            st.experimental_rerun()
+            
+            # Return the audio bytes
+            return audio_bytes
+        
+        # Clear the processing message if no data received yet
+        if not component_value:
+            debug_container.empty()
         
         return None
     except Exception as e:
