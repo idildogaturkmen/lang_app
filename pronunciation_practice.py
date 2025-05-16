@@ -161,6 +161,13 @@ Enhanced pronunciation practice implementation with multi-layered recording appr
 3. File upload fallback
 """
 
+"""
+Enhanced pronunciation practice implementation with multi-layered recording approach:
+1. Streamlit's native microphone input
+2. WebRTC-based recording
+3. File upload fallback
+"""
+
 class SimplePronunciationPractice:
     """
     Implementation of pronunciation practice with AI feedback
@@ -245,29 +252,33 @@ class SimplePronunciationPractice:
     
     def _add_custom_recorder(self):
         """Add the custom JavaScript-based audio recorder"""
-        st.markdown("### 🎙️ Record Your Pronunciation")
-        
-        # Use our custom recorder component
-        audio_bytes = self.custom_recorder()
-        
-        # If we have audio data, display it and prepare for analysis
-        if audio_bytes:
-            st.success("✅ Recording complete!")
+        try:
+            st.markdown("### 🎙️ Record Your Pronunciation")
             
-            # Play the audio back
-            st.subheader("Your Recording")
-            st.audio(audio_bytes)
+            # Use our custom recorder component
+            audio_bytes = self.custom_recorder()
             
-            # Update current recording word if in practice session
-            self._update_current_recording_word()
-            
-            # Add a button to analyze the pronunciation
-            if st.button("✨ Analyze My Pronunciation", type="primary", key="analyze_custom_recording"):
-                st.rerun()
-        else:
-            st.info("Use the recorder above to practice your pronunciation")
-            
-        return True
+            # If we have audio data, display it and prepare for analysis
+            if audio_bytes:
+                st.success("✅ Recording complete!")
+                
+                # Play the audio back
+                st.subheader("Your Recording")
+                st.audio(audio_bytes)
+                
+                # Update current recording word if in practice session
+                self._update_current_recording_word()
+                
+                # Add a button to analyze the pronunciation
+                if st.button("✨ Analyze My Pronunciation", type="primary", key=f"analyze_custom_{int(time.time())}"):
+                    st.rerun()
+            else:
+                st.info("Use the recorder above to practice your pronunciation")
+                
+            return True
+        except Exception as e:
+            st.error(f"Error using custom recorder: {e}")
+            return False
     
     def _add_webrtc_recorder(self):
         """Add WebRTC-based real-time audio recorder"""

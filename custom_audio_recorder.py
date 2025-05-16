@@ -4,6 +4,7 @@ import os
 import streamlit.components.v1 as components
 import streamlit as st
 import base64
+import time
 
 # Define the component directory
 COMPONENT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "components")
@@ -170,23 +171,31 @@ with open(HTML_FILE, "w") as f:
 # Create the custom component function
 def audio_recorder():
     """Custom audio recorder component with JavaScript"""
-    # Get the component value
-    component_value = components.html(
-        open(HTML_FILE, "r").read(),
-        height=200,
-        key="custom_audio_recorder"
-    )
+    # Use a timestamp to ensure unique component on each call
+    # This is a workaround for not having the key parameter
+    timestamp = int(time.time() * 1000)
+    component_name = f"custom_audio_recorder_{timestamp}"
     
-    # Process the returned value
-    if component_value and 'data' in component_value:
-        # Decode the base64 audio data
-        audio_bytes = base64.b64decode(component_value['data'])
+    try:
+        # Get the component value - WITHOUT using the key parameter
+        component_value = components.html(
+            open(HTML_FILE, "r").read(),
+            height=200
+        )
         
-        # Store in session state
-        st.session_state.audio_data = audio_bytes
-        st.session_state.audio_data_received = True
+        # Process the returned value
+        if component_value and isinstance(component_value, dict) and 'data' in component_value:
+            # Decode the base64 audio data
+            audio_bytes = base64.b64decode(component_value['data'])
+            
+            # Store in session state
+            st.session_state.audio_data = audio_bytes
+            st.session_state.audio_data_received = True
+            
+            # Return the audio bytes
+            return audio_bytes
         
-        # Return the audio bytes
-        return audio_bytes
-    
-    return None
+        return None
+    except Exception as e:
+        st.error(f"Error in audio recorder component: {e}")
+        return None
