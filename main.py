@@ -1835,21 +1835,23 @@ if app_mode == "Camera Mode":
                                     )
                                 
                                 st.markdown("---")  # Add separator
-                    
-                    # Add a save button with greater prominence
-                    if 'words_just_saved' not in st.session_state:
-                        st.session_state.words_just_saved = False
-                        st.session_state.saved_count = 0
-                        st.session_state.saved_items = []
 
+                # This is the key change - create a dedicated container AFTER all categories
+                # and outside of any expander or loop
                 save_button_container = st.container()
 
-                # Now put the save button in this container, AFTER all categories
                 with save_button_container:
-                    # Add a save button with greater prominence
                     if not st.session_state.words_just_saved:
-                        # Use truly_safe_button for guaranteed uniqueness
-                        if truly_safe_button("💾 Save Selected Objects to Vocabulary"):
+                        # Create a completely unique key for this button
+                        timestamp = int(time.time() * 1000000)
+                        save_button_key = f"save_selected_objects_{timestamp}"
+                        
+                        # Use standard st.button with explicit key to avoid conflicts
+                        if st.button("💾 Save Selected Objects to Vocabulary", key=save_button_key):
+                            # Store information about button click for debugging
+                            st.session_state.save_button_clicked = True
+                            st.session_state.save_button_time = timestamp
+                            
                             # Auto-start session if needed
                             if st.session_state.session_id is None:
                                 if manage_session("start"):
@@ -1858,9 +1860,19 @@ if app_mode == "Camera Mode":
                                     error_message("Failed to create a session. Please check database connection.")
                                     st.stop()
                             
+                            # Add debug info
+                            with st.expander("Debug Info", expanded=False):
+                                st.write(f"Button clicked at: {timestamp}")
+                                st.write(f"Total checkboxes: {len(st.session_state.detection_checkboxes)}")
+                                st.write(f"Detections: {len(detections)}")
+                                for key, value in st.session_state.detection_checkboxes.items():
+                                    st.write(f"{key}: {value}")
+                            
                             # Count selected objects
-                            selected_objects = [i for i in range(len(detections)) 
-                                            if st.session_state.detection_checkboxes.get(f"detect_{i}", False)]
+                            selected_objects = []
+                            for i in range(len(detections)):
+                                if st.session_state.detection_checkboxes.get(f"detect_{i}", False):
+                                    selected_objects.append(i)
                             
                             if not selected_objects:
                                 warning_message("No objects were selected to save. Please check at least one 'Save' box.")
@@ -1931,33 +1943,33 @@ if app_mode == "Camera Mode":
                             def go_to_quiz_mode():
                                 st.session_state.words_just_saved = False  # Reset the saved state
                                 st.session_state.app_mode = "Quiz Mode"
-                                # Remove the st.rerun() call
 
                             def go_to_vocabulary():
                                 st.session_state.words_just_saved = False  # Reset the saved state
                                 st.session_state.app_mode = "My Vocabulary"
-                                # Remove the st.rerun() call
 
                             def continue_capturing():
                                 st.session_state.words_just_saved = False
                                 st.session_state.detection_checkboxes = {}  # Clear checkboxes
-                                # Remove the st.rerun() call
-
-
+                            
+                            # Each button needs a unique key
                             with next_col1:
-                                if safe_button("🎮 Go to Quiz Mode", key=f"goto_quiz_{int(time.time())}", on_click=go_to_quiz_mode):
+                                quiz_key = f"goto_quiz_{int(time.time() * 1000000)}"
+                                if st.button("🎮 Go to Quiz Mode", key=quiz_key, on_click=go_to_quiz_mode):
                                     pass  # The on_click handles the state change
-                                    
+                                
                             with next_col2:
-                                if st.button("📚 View My Vocabulary", key="goto_vocab", on_click=go_to_vocabulary):
+                                vocab_key = f"goto_vocab_{int(time.time() * 1000000)}"
+                                if st.button("📚 View My Vocabulary", key=vocab_key, on_click=go_to_vocabulary):
                                     pass  # The on_click handles the state change
-                                    
+                                
                             with next_col3:
-                                if st.button("📸 Continue Capturing", key="continue_capture", on_click=continue_capturing):
+                                continue_key = f"continue_capture_{int(time.time() * 1000000)}"
+                                if st.button("📸 Continue Capturing", key=continue_key, on_click=continue_capturing):
                                     pass  # The on_click handles the state change
                     
-                    else:
-                        pass
+            else:
+                pass
                 
             
             # Add manual selection UI if enabled
