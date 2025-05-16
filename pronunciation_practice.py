@@ -154,6 +154,13 @@ Enhanced pronunciation practice implementation with multi-layered recording appr
 3. File upload fallback
 """
 
+"""
+Enhanced pronunciation practice implementation with multi-layered recording approach:
+1. Streamlit's native microphone input
+2. WebRTC-based recording
+3. File upload fallback
+"""
+
 class SimplePronunciationPractice:
     """
     Implementation of pronunciation practice with AI feedback
@@ -176,65 +183,104 @@ class SimplePronunciationPractice:
             self.recognizer.energy_threshold = 300  # Lower threshold to detect speech
     
     def _get_streamlit_version(self):
-        """Get the current Streamlit version"""
+        """Get the current Streamlit version with safer error handling"""
         try:
-            import streamlit
-            version = streamlit.__version__
+            import streamlit as st
+            # Try to get version from module directly
+            if hasattr(st, '__version__'):
+                version = st.__version__
+            else:
+                # Fallback: import main module to check version
+                import streamlit
+                version = getattr(streamlit, '__version__', "0.0.0")
+                
             # Parse version string to get major and minor version numbers
             version_parts = version.split('.')
             if len(version_parts) >= 2:
-                major, minor = int(version_parts[0]), int(version_parts[1])
-                return (major, minor)
+                try:
+                    major, minor = int(version_parts[0]), int(version_parts[1])
+                    return (major, minor)
+                except ValueError:
+                    # Couldn't convert to integer
+                    return (0, 0)
             return (0, 0)  # Default if parsing fails
         except:
             return (0, 0)  # Default if import fails
     
     def _add_audio_recorder(self):
         """Add the most appropriate audio recorder based on environment"""
+        # Create a container to display any errors
+        error_container = st.empty()
+        
         try:
             # Try using native Streamlit microphone (v1.18.0+)
             if self.streamlit_version[0] > 1 or (self.streamlit_version[0] == 1 and self.streamlit_version[1] >= 18):
-                self._add_native_recorder()
+                if self._add_native_recorder():
+                    return
+            
             # Fall back to WebRTC if available
-            elif HAS_WEBRTC:
-                self._add_webrtc_recorder()
-            # Last resort: file upload
-            else:
-                self._add_upload_recorder()
+            if HAS_WEBRTC:
+                try:
+                    self._add_webrtc_recorder()
+                    return
+                except Exception as e:
+                    print(f"WebRTC recorder failed: {e}")
+                    # Continue to file upload fallback
+            
+            # Last resort: file upload (always works)
+            self._add_upload_recorder()
+            
         except Exception as e:
-            st.error(f"Error setting up audio recorder: {e}")
+            # Clear any previous error
+            error_container.empty()
+            # Show the error and fall back to file upload
+            error_container.error(f"Error setting up audio recorder: {str(e)}")
             # Always provide a fallback method
             self._add_upload_recorder()
     
     def _add_native_recorder(self):
         """Add Streamlit's native microphone recorder (v1.18.0+)"""
-        st.markdown("### 🎙️ Record Your Pronunciation")
-        st.markdown("Click the microphone, say the word clearly, then wait for processing.")
-        
-        # Generate a unique key for the microphone input
-        mic_key = f"mic_{int(time.time())}"
-        
-        # Use Streamlit's native microphone input
-        audio_bytes = st.microphone_input("Record your pronunciation", key=mic_key)
-        
-        # Process the recorded audio
-        if audio_bytes is not None:
-            # Display the audio playback
-            st.audio(audio_bytes)
+        try:
+            st.markdown("### 🎙️ Record Your Pronunciation")
+            st.markdown("Click the microphone, say the word clearly, then wait for processing.")
             
-            # Store in session state for analysis
-            st.session_state.audio_data = audio_bytes
-            st.session_state.audio_data_received = True
+            # Generate a unique key for the microphone input
+            mic_key = f"mic_{int(time.time())}"
             
-            # Update current recording word if in a practice session
-            self._update_current_recording_word()
+            # Safer way to check if microphone_input exists
+            if not hasattr(st, 'microphone_input'):
+                raise AttributeError("Streamlit version doesn't support microphone_input")
             
-            # Add a button to process the recording
-            if st.button("Analyze My Pronunciation", type="primary", key="analyze_recording"):
-                st.rerun()
+            # Use Streamlit's native microphone input
+            audio_bytes = st.microphone_input("Record your pronunciation", key=mic_key)
+            
+            # Process the recorded audio
+            if audio_bytes is not None:
+                # Display the audio playback
+                st.audio(audio_bytes)
+                
+                # Store in session state for analysis
+                st.session_state.audio_data = audio_bytes
+                st.session_state.audio_data_received = True
+                
+                # Update current recording word if in a practice session
+                self._update_current_recording_word()
+                
+                # Add a button to process the recording
+                if st.button("Analyze My Pronunciation", type="primary", key="analyze_recording"):
+                    st.rerun()
+            
+            return True  # Successfully used native recorder
+        except (AttributeError, Exception) as e:
+            # If we get here, the native recorder didn't work
+            print(f"Native recorder unavailable: {e}")
+            return False
     
     def _add_webrtc_recorder(self):
         """Add WebRTC-based real-time audio recorder"""
+        if not HAS_WEBRTC:
+            raise ImportError("streamlit-webrtc is not installed")
+            
         st.markdown("### 🎙️ Real-Time Recording")
         st.markdown("Click 'START' below, say the word clearly, then click 'STOP'.")
         
@@ -245,70 +291,80 @@ class SimplePronunciationPractice:
         if 'audio_frames' not in st.session_state:
             st.session_state.audio_frames = []
         
-        def audio_frame_callback(frame):
-            """Process incoming audio frames"""
-            # Convert frame to numpy array and store in session state
-            sound = frame.to_ndarray()
-            st.session_state.audio_frames.append(sound)
-            return frame
-        
-        # Configure WebRTC
-        webrtc_ctx = webrtc_streamer(
-            key="pronunciation-recorder",
-            mode=WebRtcMode.SENDONLY,
-            audio_frame_callback=audio_frame_callback,
-            rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
-            media_stream_constraints={"video": False, "audio": True},
-        )
-        
-        # Show different messages based on recording state
-        if webrtc_ctx.state.playing:
-            status_indicator.info("Recording... Speak the word clearly.")
-        else:
-            if len(st.session_state.audio_frames) > 0:
-                status_indicator.success("Recording complete!")
+        try:
+            # Import required components
+            from streamlit_webrtc import webrtc_streamer, WebRtcMode
+            import av
+            
+            def audio_frame_callback(frame):
+                """Process incoming audio frames"""
+                # Convert frame to numpy array and store in session state
+                sound = frame.to_ndarray()
+                st.session_state.audio_frames.append(sound)
+                return frame
+            
+            # Configure WebRTC
+            webrtc_ctx = webrtc_streamer(
+                key="pronunciation-recorder",
+                mode=WebRtcMode.SENDONLY,
+                audio_frame_callback=audio_frame_callback,
+                rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
+                media_stream_constraints={"video": False, "audio": True},
+            )
+            
+            # Show different messages based on recording state
+            if webrtc_ctx.state.playing:
+                status_indicator.info("Recording... Speak the word clearly.")
             else:
-                status_indicator.info("Click START above to begin recording.")
-        
-        # Process button to convert frames to audio file
-        if not webrtc_ctx.state.playing and len(st.session_state.audio_frames) > 0:
-            if st.button("Process Recording", type="primary"):
-                with st.spinner("Processing audio..."):
-                    # Process the collected audio frames
-                    import numpy as np
-                    import io
-                    import wave
-                    
-                    # Combine all audio frames
-                    all_audio = np.concatenate(st.session_state.audio_frames, axis=0)
-                    
-                    # Convert to WAV format
-                    byte_io = io.BytesIO()
-                    with wave.open(byte_io, 'wb') as wf:
-                        wf.setnchannels(1)  # Mono audio
-                        wf.setsampwidth(2)  # 16-bit audio
-                        wf.setframerate(48000)  # 48kHz sampling rate
-                        wf.writeframes(all_audio.tobytes())
-                    
-                    # Get the WAV data
-                    byte_io.seek(0)
-                    audio_bytes = byte_io.read()
-                    
-                    # Store in session state
-                    st.session_state.audio_data = audio_bytes
-                    st.session_state.audio_data_received = True
-                    
-                    # Update current recording word
-                    self._update_current_recording_word()
-                    
-                    # Clear the frames cache
-                    st.session_state.audio_frames = []
-                    
-                    # Play the processed audio
-                    st.audio(audio_bytes)
-                    
-                    # Rerun to trigger analysis
-                    st.rerun()
+                if len(st.session_state.audio_frames) > 0:
+                    status_indicator.success("Recording complete!")
+                else:
+                    status_indicator.info("Click START above to begin recording.")
+            
+            # Process button to convert frames to audio file
+            if not webrtc_ctx.state.playing and len(st.session_state.audio_frames) > 0:
+                if st.button("Process Recording", type="primary"):
+                    with st.spinner("Processing audio..."):
+                        try:
+                            # Process the collected audio frames
+                            import numpy as np
+                            import io
+                            import wave
+                            
+                            # Combine all audio frames
+                            all_audio = np.concatenate(st.session_state.audio_frames, axis=0)
+                            
+                            # Convert to WAV format
+                            byte_io = io.BytesIO()
+                            with wave.open(byte_io, 'wb') as wf:
+                                wf.setnchannels(1)  # Mono audio
+                                wf.setsampwidth(2)  # 16-bit audio
+                                wf.setframerate(48000)  # 48kHz sampling rate
+                                wf.writeframes(all_audio.tobytes())
+                            
+                            # Get the WAV data
+                            byte_io.seek(0)
+                            audio_bytes = byte_io.read()
+                            
+                            # Store in session state
+                            st.session_state.audio_data = audio_bytes
+                            st.session_state.audio_data_received = True
+                            
+                            # Update current recording word
+                            self._update_current_recording_word()
+                            
+                            # Clear the frames cache
+                            st.session_state.audio_frames = []
+                            
+                            # Play the processed audio
+                            st.audio(audio_bytes)
+                            
+                            # Rerun to trigger analysis
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error processing audio: {e}")
+        except Exception as e:
+            raise Exception(f"WebRTC setup failed: {e}")
     
     def _add_upload_recorder(self):
         """Add file upload as a fallback recording method"""

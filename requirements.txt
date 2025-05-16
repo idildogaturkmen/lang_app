@@ -7,11 +7,11 @@ opencv-python-headless>=4.5.0
 gTTS>=2.2.0
 deep-translator>=1.9.0
 python-Levenshtein>=0.20.0
-pydub>=0.25.0
+pydub>=0.25.1
 rich==13.7.0
 streamlit-webrtc==0.47.1
-av
-SpeechRecognition>=3.8.0
+av>=9.0.0
+SpeechRecognition>=3.8.1
 python-Levenshtein
 google-cloud-vision==3.4.0
 google-cloud-translate>=2.0.0
