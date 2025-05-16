@@ -147,6 +147,13 @@ def create_pronunciation_practice(text_to_speech_func=None, get_audio_html_func=
 
 # Replace the entire SimplePronunciationPractice class with this implementation:
 
+"""
+Enhanced pronunciation practice implementation with multi-layered recording approach:
+1. Streamlit's native microphone input
+2. WebRTC-based recording
+3. File upload fallback
+"""
+
 class SimplePronunciationPractice:
     """
     Implementation of pronunciation practice with AI feedback
@@ -159,21 +166,56 @@ class SimplePronunciationPractice:
         self.translate_text = translate_text_func
         self.difficult_sounds = DIFFICULT_SOUNDS
         
+        # Determine Streamlit version to select appropriate recording method
+        self.streamlit_version = self._get_streamlit_version()
+        print(f"Detected Streamlit version: {self.streamlit_version}")
+        
         # Initialize speech recognition if available
         if HAS_SR:
             self.recognizer = sr.Recognizer()
             self.recognizer.energy_threshold = 300  # Lower threshold to detect speech
     
-    def _add_real_time_recorder(self):
-        """Add a real-time audio recorder with Streamlit's native microphone input"""
-        import io
-        import time
-        
+    def _get_streamlit_version(self):
+        """Get the current Streamlit version"""
+        try:
+            import streamlit
+            version = streamlit.__version__
+            # Parse version string to get major and minor version numbers
+            version_parts = version.split('.')
+            if len(version_parts) >= 2:
+                major, minor = int(version_parts[0]), int(version_parts[1])
+                return (major, minor)
+            return (0, 0)  # Default if parsing fails
+        except:
+            return (0, 0)  # Default if import fails
+    
+    def _add_audio_recorder(self):
+        """Add the most appropriate audio recorder based on environment"""
+        try:
+            # Try using native Streamlit microphone (v1.18.0+)
+            if self.streamlit_version[0] > 1 or (self.streamlit_version[0] == 1 and self.streamlit_version[1] >= 18):
+                self._add_native_recorder()
+            # Fall back to WebRTC if available
+            elif HAS_WEBRTC:
+                self._add_webrtc_recorder()
+            # Last resort: file upload
+            else:
+                self._add_upload_recorder()
+        except Exception as e:
+            st.error(f"Error setting up audio recorder: {e}")
+            # Always provide a fallback method
+            self._add_upload_recorder()
+    
+    def _add_native_recorder(self):
+        """Add Streamlit's native microphone recorder (v1.18.0+)"""
         st.markdown("### 🎙️ Record Your Pronunciation")
-        st.markdown("Click the microphone, say the word clearly, then click stop.")
+        st.markdown("Click the microphone, say the word clearly, then wait for processing.")
         
-        # Use Streamlit's native microphone input (available in versions 1.18.0+)
-        audio_bytes = st.microphone_input("Record your pronunciation", key=f"mic_{int(time.time())}")
+        # Generate a unique key for the microphone input
+        mic_key = f"mic_{int(time.time())}"
+        
+        # Use Streamlit's native microphone input
+        audio_bytes = st.microphone_input("Record your pronunciation", key=mic_key)
         
         # Process the recorded audio
         if audio_bytes is not None:
@@ -184,34 +226,30 @@ class SimplePronunciationPractice:
             st.session_state.audio_data = audio_bytes
             st.session_state.audio_data_received = True
             
-            # If we're in a practice session, store the current word ID
-            if 'current_practice_index' in st.session_state and 'practice_words' in st.session_state:
-                current_index = st.session_state.current_practice_index
-                if current_index < len(st.session_state.practice_words):
-                    current_word = st.session_state.practice_words[current_index]
-                    st.session_state.current_recording_word = current_word.get('id')
+            # Update current recording word if in a practice session
+            self._update_current_recording_word()
             
             # Add a button to process the recording
             if st.button("Analyze My Pronunciation", type="primary", key="analyze_recording"):
                 st.rerun()
+    
     def _add_webrtc_recorder(self):
         """Add WebRTC-based real-time audio recorder"""
-        from streamlit_webrtc import webrtc_streamer, WebRtcMode, ClientSettings
-        import av
-        import queue
-        import threading
-        
         st.markdown("### 🎙️ Real-Time Recording")
         st.markdown("Click 'START' below, say the word clearly, then click 'STOP'.")
         
-        # Create queues for audio processing
-        audio_queue = queue.Queue()
+        # Create an empty placeholder for status messages
         status_indicator = st.empty()
+        
+        # Cache for audio frames
+        if 'audio_frames' not in st.session_state:
+            st.session_state.audio_frames = []
         
         def audio_frame_callback(frame):
             """Process incoming audio frames"""
+            # Convert frame to numpy array and store in session state
             sound = frame.to_ndarray()
-            audio_queue.put(sound)
+            st.session_state.audio_frames.append(sound)
             return frame
         
         # Configure WebRTC
@@ -221,58 +259,109 @@ class SimplePronunciationPractice:
             audio_frame_callback=audio_frame_callback,
             rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
             media_stream_constraints={"video": False, "audio": True},
-            client_settings=ClientSettings(
-                rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
-                media_stream_constraints={"video": False, "audio": True},
-            ),
         )
         
+        # Show different messages based on recording state
         if webrtc_ctx.state.playing:
             status_indicator.info("Recording... Speak the word clearly.")
+        else:
+            if len(st.session_state.audio_frames) > 0:
+                status_indicator.success("Recording complete!")
+            else:
+                status_indicator.info("Click START above to begin recording.")
         
-        if webrtc_ctx.state.playing:
-            # If audio is being recorded, add a button to stop and analyze
-            if st.button("Stop and Analyze Pronunciation", type="primary"):
-                # Process the recorded audio in the queue
-                frames = []
-                try:
-                    while not audio_queue.empty():
-                        frames.append(audio_queue.get(timeout=1))
-                except queue.Empty:
-                    pass
-                    
-                if frames:
-                    # Convert audio frames to a single buffer
+        # Process button to convert frames to audio file
+        if not webrtc_ctx.state.playing and len(st.session_state.audio_frames) > 0:
+            if st.button("Process Recording", type="primary"):
+                with st.spinner("Processing audio..."):
+                    # Process the collected audio frames
                     import numpy as np
                     import io
                     import wave
-                    import soundfile as sf
                     
-                    # Combine all frames
-                    audio_data = np.concatenate(frames, axis=0)
+                    # Combine all audio frames
+                    all_audio = np.concatenate(st.session_state.audio_frames, axis=0)
                     
-                    # Save to a WAV file in memory
-                    virtual_file = io.BytesIO()
-                    sf.write(virtual_file, audio_data, 48000, format='WAV')
-                    virtual_file.seek(0)
+                    # Convert to WAV format
+                    byte_io = io.BytesIO()
+                    with wave.open(byte_io, 'wb') as wf:
+                        wf.setnchannels(1)  # Mono audio
+                        wf.setsampwidth(2)  # 16-bit audio
+                        wf.setframerate(48000)  # 48kHz sampling rate
+                        wf.writeframes(all_audio.tobytes())
+                    
+                    # Get the WAV data
+                    byte_io.seek(0)
+                    audio_bytes = byte_io.read()
                     
                     # Store in session state
-                    st.session_state.audio_data = virtual_file.read()
+                    st.session_state.audio_data = audio_bytes
                     st.session_state.audio_data_received = True
                     
-                    # Display success
-                    status_indicator.success("Recording processed! Analyzing pronunciation...")
-                    st.audio(st.session_state.audio_data)
+                    # Update current recording word
+                    self._update_current_recording_word()
                     
-                    # Force a rerun to trigger analysis
+                    # Clear the frames cache
+                    st.session_state.audio_frames = []
+                    
+                    # Play the processed audio
+                    st.audio(audio_bytes)
+                    
+                    # Rerun to trigger analysis
                     st.rerun()
-                else:
-                    status_indicator.error("No audio recorded. Please try again.")
+    
+    def _add_upload_recorder(self):
+        """Add file upload as a fallback recording method"""
+        st.markdown("### Record Your Pronunciation")
+        st.markdown("""
+        To practice pronunciation:
+        1. Use your device's voice recorder app to record yourself saying the word
+        2. Save the recording and upload it below
+        3. Click 'Process Recording' to evaluate
+        """)
         
-        # Display instructions if not recording
-        if not webrtc_ctx.state.playing and not st.session_state.get('audio_data_received', False):
-            st.info("Click START above to begin recording.")
+        # Create columns for better layout
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            # Add a file uploader for audio
+            uploaded_file = st.file_uploader(
+                "Upload your pronunciation recording (WAV, MP3, etc.)", 
+                type=["wav", "mp3", "ogg", "m4a"],
+                key=f"audio_upload_{int(time.time())}"
+            )
+        
+        # Process the uploaded file
+        if uploaded_file is not None:
+            # Read the file
+            audio_bytes = uploaded_file.read()
             
+            # Store in session state
+            st.session_state.audio_data = audio_bytes
+            st.session_state.audio_data_received = True
+            
+            # Update current recording word
+            self._update_current_recording_word()
+            
+            # Display a success message
+            st.success("✅ Recording uploaded successfully!")
+            
+            # Display the audio player
+            st.audio(audio_bytes)
+            
+            with col2:
+                # Add a button to process the recording
+                if st.button("Process Recording", type="primary", key="process_recording"):
+                    st.rerun()
+    
+    def _update_current_recording_word(self):
+        """Update the current recording word in session state if in a practice session"""
+        if 'current_practice_index' in st.session_state and 'practice_words' in st.session_state:
+            current_index = st.session_state.current_practice_index
+            if current_index < len(st.session_state.practice_words):
+                current_word = st.session_state.practice_words[current_index]
+                st.session_state.current_recording_word = current_word.get('id')
+    
     def render_practice_ui(self, word):
         """Render pronunciation practice UI for a word"""
         with st.expander("🎤 Practice Pronunciation"):
@@ -280,16 +369,6 @@ class SimplePronunciationPractice:
             original_word = word.get('word_original', '')
             translated_word = word.get('word_translated', '')
             language_code = word.get('language_translated', 'en')
-            
-            # Add a debug section (only visible in development)
-            if os.environ.get('STREAMLIT_DEBUG', '').lower() == 'true':
-                st.write("Debug Info:")
-                st.write({
-                    "has_sr": HAS_SR,
-                    "has_levenshtein": HAS_LEVENSHTEIN,
-                    "audio_data_exists": 'audio_data' in st.session_state,
-                    "language_code": language_code
-                })
             
             # Display the word to practice
             st.subheader(f"Practice: {translated_word}")
@@ -303,8 +382,8 @@ class SimplePronunciationPractice:
             # Show pronunciation tips
             self._show_pronunciation_tips(word)
             
-            # Add built-in audio recorder
-            self._add_js_recorder()
+            # Add the appropriate audio recorder
+            self._add_audio_recorder()
             
             # Calculate score based on speech recognition or self-assessment
             if HAS_SR and 'audio_data' in st.session_state and st.session_state.audio_data:
@@ -341,6 +420,146 @@ class SimplePronunciationPractice:
                 # Show feedback based on self-rating
                 self._show_simple_feedback(translated_word, language_code, score_map.get(rating, 60))
     
+    def render_practice_session(self, vocabulary, language_code):
+        """Render pronunciation practice session"""
+        st.markdown("## Pronunciation Practice")
+        
+        # If there's no practice session data, show a message
+        if 'practice_words' not in st.session_state:
+            st.info("Click 'Start Practice Session' to begin.")
+            return
+        
+        # Get current word
+        current_index = st.session_state.current_practice_index
+        if current_index < len(st.session_state.practice_words):
+            current_word = st.session_state.practice_words[current_index]
+            
+            # Progress bar
+            progress = current_index / len(st.session_state.practice_words)
+            st.progress(progress)
+            st.subheader(f"Word {current_index + 1} of {len(st.session_state.practice_words)}")
+            
+            # Word info with larger, more visible styling
+            st.markdown(f"""
+            <div style="background-color: #f0f2f6; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
+                <h2 style="margin: 0;">{current_word.get('word_translated', '')}</h2>
+                <p style="margin: 5px 0 0 0; color: #666;">English: {current_word.get('word_original', '')}</p>
+                <p style="margin: 0; font-weight: bold; color: #1e88e5;">{LANGUAGE_NAMES.get(language_code, language_code)}</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Listen to pronunciation
+            st.markdown("### 👂 Listen to correct pronunciation")
+            audio_bytes = self.text_to_speech(current_word.get('word_translated', ''), language_code)
+            if audio_bytes:
+                st.markdown(self.get_audio_html(audio_bytes), unsafe_allow_html=True)
+            
+            # Pronunciation guide
+            with st.expander("Pronunciation Guide", expanded=True):
+                self._show_pronunciation_tips(current_word)
+            
+            # Add recorder with clear instructions
+            st.markdown("### 🎙️ Your turn - record your pronunciation")
+            st.markdown("Record yourself saying the word above, then analyze your pronunciation")
+            
+            # Add the appropriate audio recorder
+            self._add_audio_recorder()
+            
+            # Check if audio data is available
+            has_audio = 'audio_data' in st.session_state and st.session_state.audio_data
+            
+            if has_audio:
+                st.subheader("Your Recording")
+                
+                # Calculate score based on speech recognition or self-assessment
+                if HAS_SR:
+                    with st.spinner("Analyzing your pronunciation..."):
+                        # Process audio with speech recognition
+                        similarity_score = self._evaluate_pronunciation(
+                            audio_data=st.session_state.audio_data,
+                            target_word=current_word.get('word_translated', ''),
+                            language_code=language_code
+                        )
+                else:
+                    # Fall back to self-assessment
+                    rating = st.select_slider(
+                        "How well did you pronounce the word?",
+                        options=["Poor", "Fair", "Good", "Very Good", "Excellent"],
+                        value="Good"
+                    )
+                    
+                    # Calculate score based on rating
+                    score_map = {
+                        "Poor": 20,
+                        "Fair": 40,
+                        "Good": 60,
+                        "Very Good": 80,
+                        "Excellent": 95
+                    }
+                    similarity_score = score_map.get(rating, 60)
+                
+                # Show feedback
+                self._show_simple_feedback(
+                    current_word.get('word_translated', ''), 
+                    language_code, 
+                    similarity_score
+                )
+                
+                # Submit button
+                if st.button("Submit and Continue", type="primary"):
+                    # Store score
+                    if 'practice_scores' not in st.session_state:
+                        st.session_state.practice_scores = []
+                    st.session_state.practice_scores.append(similarity_score)
+                    
+                    # Clear audio data for next word
+                    if 'audio_data' in st.session_state:
+                        del st.session_state.audio_data
+                    if 'current_recording_word' in st.session_state:
+                        del st.session_state.current_recording_word
+                    
+                    # Move to next word
+                    st.session_state.current_practice_index += 1
+                    st.rerun()
+            
+            # Example in context
+            example = self._get_example_sentence(
+                current_word.get('word_original', ''), 
+                current_word.get('language_translated', 'en')
+            )
+            
+            with st.expander("Example in Context"):
+                st.markdown(f"**English:** {example['english']}")
+                if example.get('translated'):
+                    st.markdown(f"**{LANGUAGE_NAMES.get(language_code, language_code)}:** {example['translated']}")
+                    example_audio = self.text_to_speech(example['translated'], language_code)
+                    if example_audio:
+                        st.markdown(self.get_audio_html(example_audio), unsafe_allow_html=True)
+        else:
+            # Practice session completed
+            self._show_practice_results()
+            
+            # Reset button
+            if st.button("Practice Again", type="primary"):
+                import random
+                
+                # Create a new set of practice words
+                filtered_vocab = [word for word in vocabulary 
+                                if word['language_translated'] == language_code]
+                practice_size = min(5, len(filtered_vocab))
+                st.session_state.practice_words = random.sample(filtered_vocab, practice_size)
+                st.session_state.current_practice_index = 0
+                st.session_state.practice_scores = []
+                
+                # Clear audio data
+                if 'audio_data' in st.session_state:
+                    del st.session_state.audio_data
+                if 'current_recording_word' in st.session_state:
+                    del st.session_state.current_recording_word
+                
+                st.rerun()
+                
+    # The rest of the methods remain unchanged...
     def _evaluate_pronunciation(self, audio_data, target_word, language_code):
         """Evaluate pronunciation using speech recognition"""
         if not HAS_SR:
@@ -416,202 +635,7 @@ class SimplePronunciationPractice:
                 os.unlink(audio_file.name)
             except:
                 pass
-
-    def render_practice_session(self, vocabulary, language_code):
-        """Render pronunciation practice session"""
-        st.markdown("## Pronunciation Practice")
-        
-        # If there's no practice session data, show a message
-        if 'practice_words' not in st.session_state:
-            st.info("Click 'Start Practice Session' to begin.")
-            return
-        
-        # Get current word
-        current_index = st.session_state.current_practice_index
-        if current_index < len(st.session_state.practice_words):
-            current_word = st.session_state.practice_words[current_index]
-            
-            # Progress bar
-            progress = current_index / len(st.session_state.practice_words)
-            st.progress(progress)
-            st.subheader(f"Word {current_index + 1} of {len(st.session_state.practice_words)}")
-            
-            # Word info with larger, more visible styling
-            st.markdown(f"""
-            <div style="background-color: #f0f2f6; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
-                <h2 style="margin: 0;">{current_word.get('word_translated', '')}</h2>
-                <p style="margin: 5px 0 0 0; color: #666;">English: {current_word.get('word_original', '')}</p>
-                <p style="margin: 0; font-weight: bold; color: #1e88e5;">{LANGUAGE_NAMES.get(language_code, language_code)}</p>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Listen to pronunciation
-            st.markdown("### 👂 Listen to correct pronunciation")
-            audio_bytes = self.text_to_speech(current_word.get('word_translated', ''), language_code)
-            if audio_bytes:
-                st.markdown(self.get_audio_html(audio_bytes), unsafe_allow_html=True)
-            
-            # Pronunciation guide
-            with st.expander("Pronunciation Guide", expanded=True):
-                self._show_pronunciation_tips(current_word)
-            
-            # Add recorder with clear instructions
-            st.markdown("### 🎙️ Your turn - record your pronunciation")
-            st.markdown("Record yourself saying the word above, then upload the recording")
-            
-            # Add recorder - calls the updated method
-            self._add_js_recorder()
-            
-            # Check if audio data is available
-            has_audio = 'audio_data' in st.session_state and st.session_state.audio_data
-            
-            if has_audio:
-                st.subheader("Your Recording")
-                
-                # Calculate score based on speech recognition or self-assessment
-                if HAS_SR:
-                    with st.spinner("Analyzing your pronunciation..."):
-                        # Process audio with speech recognition
-                        similarity_score = self._evaluate_pronunciation(
-                            audio_data=st.session_state.audio_data,
-                            target_word=current_word.get('word_translated', ''),
-                            language_code=language_code
-                        )
-                else:
-                    # Fall back to self-assessment
-                    rating = st.select_slider(
-                        "How well did you pronounce the word?",
-                        options=["Poor", "Fair", "Good", "Very Good", "Excellent"],
-                        value="Good"
-                    )
-                    
-                    # Calculate score based on rating
-                    score_map = {
-                        "Poor": 20,
-                        "Fair": 40,
-                        "Good": 60,
-                        "Very Good": 80,
-                        "Excellent": 95
-                    }
-                    similarity_score = score_map.get(rating, 60)
-                
-                # Show feedback
-                self._show_simple_feedback(
-                    current_word.get('word_translated', ''), 
-                    language_code, 
-                    similarity_score
-                )
-                
-                # Submit button
-                if st.button("Submit and Continue", type="primary"):
-                    # Store score
-                    if 'practice_scores' not in st.session_state:
-                        st.session_state.practice_scores = []
-                    st.session_state.practice_scores.append(similarity_score)
-                    
-                    # Clear audio data for next word
-                    if 'audio_data' in st.session_state:
-                        del st.session_state.audio_data
-                    if 'current_recording_word' in st.session_state:
-                        del st.session_state.current_recording_word
-                    
-                    # Move to next word
-                    st.session_state.current_practice_index += 1
-                    st.rerun()
-                    
-            # Example in context
-            example = self._get_example_sentence(
-                current_word.get('word_original', ''), 
-                current_word.get('language_translated', 'en')
-            )
-            
-            with st.expander("Example in Context"):
-                st.markdown(f"**English:** {example['english']}")
-                if example.get('translated'):
-                    st.markdown(f"**{LANGUAGE_NAMES.get(language_code, language_code)}:** {example['translated']}")
-                    example_audio = self.text_to_speech(example['translated'], language_code)
-                    if example_audio:
-                        st.markdown(self.get_audio_html(example_audio), unsafe_allow_html=True)
-        else:
-            # Practice session completed
-            self._show_practice_results()
-            
-            # Reset button
-            if st.button("Practice Again", type="primary"):
-                import random
-                
-                # Create a new set of practice words
-                filtered_vocab = [word for word in vocabulary 
-                                if word['language_translated'] == language_code]
-                practice_size = min(5, len(filtered_vocab))
-                st.session_state.practice_words = random.sample(filtered_vocab, practice_size)
-                st.session_state.current_practice_index = 0
-                st.session_state.practice_scores = []
-                
-                # Clear audio data
-                if 'audio_data' in st.session_state:
-                    del st.session_state.audio_data
-                if 'current_recording_word' in st.session_state:
-                    del st.session_state.current_recording_word
-                
-                st.rerun()
-
-
-    def _add_js_recorder(self):
-        """Add audio recording functionality with a fallback option"""
-        # Check if we can use the native Streamlit microphone input (Streamlit 1.18.0+)
-        try:
-            # Try to use the microphone input
-            self._add_real_time_recorder()
-        except (AttributeError, ImportError):
-            # Fallback to file upload if microphone input is not available
-            st.markdown("### Record Your Pronunciation")
-            st.markdown("""
-            To practice pronunciation:
-            1. Use your device's voice recorder app to record yourself saying the word
-            2. Save the recording and upload it below
-            3. Click 'Process Recording' when ready to evaluate
-            """)
-            
-            # Create columns for better layout
-            col1, col2 = st.columns([3, 1])
-            
-            with col1:
-                # Add a file uploader for audio
-                uploaded_file = st.file_uploader(
-                    "Upload your pronunciation recording (WAV, MP3, etc.)", 
-                    type=["wav", "mp3", "ogg", "m4a"],
-                    key=f"audio_upload_{int(time.time())}"
-                )
-            
-            # Process the uploaded file
-            if uploaded_file is not None:
-                # Read the file
-                audio_bytes = uploaded_file.read()
-                
-                # Store in session state
-                st.session_state.audio_data = audio_bytes
-                st.session_state.audio_data_received = True
-                
-                # If we're in a practice session, store the current word ID
-                if 'current_practice_index' in st.session_state and 'practice_words' in st.session_state:
-                    current_index = st.session_state.current_practice_index
-                    if current_index < len(st.session_state.practice_words):
-                        current_word = st.session_state.practice_words[current_index]
-                        st.session_state.current_recording_word = current_word.get('id')
-                
-                # Display a success message
-                st.success("✅ Recording uploaded successfully!")
-                
-                # Display the audio player
-                st.audio(audio_bytes)
-                
-                with col2:
-                    # Add a button to process the recording
-                    if st.button("Process Recording", type="primary", key="process_recording"):
-                        st.rerun()
-
-
+    
     def _clean_text_for_comparison(self, text):
         """Clean text for comparison by removing punctuation and lowercasing"""
         return re.sub(r'[^\w\s]', '', text.lower()).strip()
