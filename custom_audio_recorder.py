@@ -57,6 +57,41 @@ with open(HTML_FILE, "w") as f:
             margin-top: 10px;
             font-style: italic;
         }
+        .visualization {
+            width: 100%;
+            height: 60px;
+            background-color: #eee;
+            margin: 10px 0;
+            position: relative;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        #volume-meter {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background: linear-gradient(to top, #4CAF50, #8BC34A, #CDDC39, #FFEB3B, #FFC107, #FF9800, #FF5722);
+            height: 0%;
+            transition: height 0.1s ease;
+        }
+        .frequency-bars {
+            display: flex;
+            justify-content: space-between;
+            height: 100%;
+            width: 100%;
+        }
+        .frequency-bar {
+            width: 3px;
+            background-color: #4CAF50;
+            margin: 0 1px;
+            transform-origin: bottom;
+        }
+        .pronunciation-feedback {
+            margin-top: 10px;
+            text-align: center;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -65,6 +100,16 @@ with open(HTML_FILE, "w") as f:
             <span id="buttonText">Start Recording</span>
         </button>
         <div id="status" class="status">Ready to record</div>
+        
+        <!-- Audio visualization -->
+        <div class="visualization">
+            <div id="volume-meter"></div>
+            <div id="frequency-bars" class="frequency-bars"></div>
+        </div>
+        
+        <!-- Real-time feedback -->
+        <div id="feedback" class="pronunciation-feedback"></div>
+        
         <audio id="audioPlayback" controls style="display: none; margin-top: 10px; width: 100%;"></audio>
     </div>
 
@@ -75,11 +120,20 @@ with open(HTML_FILE, "w") as f:
         let audioBlob;
         let isRecording = false;
         
+        // Audio analysis
+        let audioContext;
+        let analyser;
+        let microphoneStream;
+        let dataArray;
+        
         // Elements
         const recordButton = document.getElementById('recordButton');
         const buttonText = document.getElementById('buttonText');
         const statusText = document.getElementById('status');
         const audioPlayback = document.getElementById('audioPlayback');
+        const volumeMeter = document.getElementById('volume-meter');
+        const frequencyBars = document.getElementById('frequency-bars');
+        const feedbackElement = document.getElementById('feedback');
         
         // Set up event listeners
         recordButton.addEventListener('click', toggleRecording);
@@ -90,6 +144,103 @@ with open(HTML_FILE, "w") as f:
                 startRecording();
             } else {
                 stopRecording();
+            }
+        }
+        
+        // Initialize frequency bars
+        function initializeFrequencyBars(numBars = 32) {
+            frequencyBars.innerHTML = '';
+            for (let i = 0; i < numBars; i++) {
+                const bar = document.createElement('div');
+                bar.className = 'frequency-bar';
+                frequencyBars.appendChild(bar);
+            }
+        }
+        
+        // Initialize frequency bars on load
+        initializeFrequencyBars();
+        
+        // Set up audio analysis
+        async function setupAudioAnalysis(stream) {
+            try {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                microphoneStream = audioContext.createMediaStreamSource(stream);
+                microphoneStream.connect(analyser);
+                
+                analyser.fftSize = 256;
+                const bufferLength = analyser.frequencyBinCount;
+                dataArray = new Uint8Array(bufferLength);
+                
+                // Start visualization
+                visualize();
+            } catch (error) {
+                console.error('Error setting up audio analysis:', error);
+            }
+        }
+        
+        // Visualize audio
+        function visualize() {
+            if (!isRecording) return;
+            
+            // Get frequency data
+            analyser.getByteFrequencyData(dataArray);
+            
+            // Calculate average volume
+            let sum = 0;
+            const bars = document.querySelectorAll('.frequency-bar');
+            
+            // Update frequency bars
+            const barCount = bars.length;
+            const step = Math.floor(dataArray.length / barCount) || 1;
+            
+            for (let i = 0; i < barCount; i++) {
+                const dataIndex = i * step;
+                const value = dataArray[dataIndex] / 255.0;
+                sum += value;
+                
+                // Update bar height
+                if (bars[i]) {
+                    bars[i].style.height = `${value * 100}%`;
+                }
+            }
+            
+            // Calculate average volume
+            const average = sum / barCount;
+            
+            // Update volume meter
+            volumeMeter.style.height = `${average * 100}%`;
+            
+            // Update feedback based on volume
+            updateFeedback(average);
+            
+            // Send real-time data to Streamlit
+            if (window.Streamlit) {
+                window.Streamlit.setComponentValue({
+                    state: 'analyzing',
+                    volume: average,
+                    frequencyData: Array.from(dataArray).slice(0, barCount)
+                });
+            }
+            
+            // Continue visualization loop
+            requestAnimationFrame(visualize);
+        }
+        
+        // Update feedback based on audio analysis
+        function updateFeedback(volume) {
+            if (volume < 0.05) {
+                feedbackElement.textContent = 'Speak louder';
+                feedbackElement.style.color = '#FF5722';
+            } else if (volume > 0.8) {
+                feedbackElement.textContent = 'Too loud!';
+                feedbackElement.style.color = '#F44336';
+            } else if (volume > 0.4) {
+                feedbackElement.textContent = 'Good volume!';
+                feedbackElement.style.color = '#4CAF50';
+            } else {
+                feedbackElement.textContent = 'Speak a bit louder';
+                feedbackElement.style.color = '#FFC107';
             }
         }
         
@@ -108,12 +259,16 @@ with open(HTML_FILE, "w") as f:
                 
                 mediaRecorder.onstop = processRecording;
                 
+                // Set up audio analysis
+                setupAudioAnalysis(stream);
+                
                 // Start recording
                 mediaRecorder.start();
                 isRecording = true;
                 recordButton.classList.add('recording');
                 buttonText.textContent = 'Stop Recording';
                 statusText.textContent = 'Recording in progress...';
+                feedbackElement.textContent = 'Speak clearly...';
             } catch (err) {
                 console.error('Error accessing microphone:', err);
                 statusText.textContent = 'Error: Could not access microphone';
@@ -128,6 +283,14 @@ with open(HTML_FILE, "w") as f:
                 recordButton.classList.remove('recording');
                 buttonText.textContent = 'Start Recording';
                 statusText.textContent = 'Processing recording...';
+                
+                // Stop visualization
+                if (audioContext) {
+                    // Close audio context
+                    if (audioContext.state !== 'closed') {
+                        audioContext.close().catch(console.error);
+                    }
+                }
             }
         }
         
@@ -146,6 +309,7 @@ with open(HTML_FILE, "w") as f:
                 // Send to Streamlit
                 sendToStreamlit(base64data);
                 statusText.textContent = 'Recording complete!';
+                feedbackElement.textContent = 'Processing your pronunciation...';
             };
         }
         
@@ -153,6 +317,7 @@ with open(HTML_FILE, "w") as f:
         function sendToStreamlit(base64AudioData) {
             if (window.Streamlit) {
                 window.Streamlit.setComponentValue({
+                    state: 'complete',
                     data: base64AudioData,
                     format: 'audio/wav'
                 });
@@ -173,30 +338,41 @@ _recorder_counter = 0
 
 # Create the custom component function
 def audio_recorder():
-    """Custom audio recorder component with JavaScript"""
+    """Enhanced custom audio recorder component with real-time analysis"""
     global _recorder_counter
     
     try:
         # Increment the counter
         _recorder_counter += 1
         
-        # Get the component value - DO NOT USE THE KEY PARAMETER AT ALL
+        # Process the returned value with real-time analysis handling
         component_value = components.html(
             open(HTML_FILE, "r").read(),
-            height=200
+            height=280  # Increased height for visualization
         )
         
         # Process the returned value
-        if component_value and isinstance(component_value, dict) and 'data' in component_value:
-            # Decode the base64 audio data
-            audio_bytes = base64.b64decode(component_value['data'])
-            
-            # Store in session state
-            st.session_state.audio_data = audio_bytes
-            st.session_state.audio_data_received = True
-            
-            # Return the audio bytes
-            return audio_bytes
+        if component_value and isinstance(component_value, dict):
+            # Check if this is real-time analysis data
+            if component_value.get('state') == 'analyzing':
+                # Store real-time data in session state
+                st.session_state.audio_analysis = {
+                    'volume': component_value.get('volume', 0),
+                    'frequency_data': component_value.get('frequencyData', [])
+                }
+                return None
+                
+            # Check if we have complete data
+            elif component_value.get('state') == 'complete' and 'data' in component_value:
+                # Decode the base64 audio data
+                audio_bytes = base64.b64decode(component_value['data'])
+                
+                # Store in session state
+                st.session_state.audio_data = audio_bytes
+                st.session_state.audio_data_received = True
+                
+                # Return the audio bytes
+                return audio_bytes
         
         return None
     except Exception as e:
