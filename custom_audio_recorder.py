@@ -1017,65 +1017,38 @@ function stopRecording() {
     """)
 
 # Create the custom component function
-def audio_recorder(target_word):
-    """Custom audio recorder component with real-time pronunciation feedback"""
+def audio_recorder():
+    """Custom audio recorder component with JavaScript"""
     try:
-        # Create a unique height based on whether we're setting a target word
-        height = 400 if target_word else 320
-        
-        # Create parameters for passing to the component
-        component_params = {}
-        if target_word:
-            component_params["targetWord"] = target_word
-        
         # Get the component value
         component_value = components.html(
             open(HTML_FILE, "r").read(),
-            height=height,
-            **component_params
+            height=200
         )
         
-        # Handle real-time analysis data
-        if component_value and isinstance(component_value, dict):
-            # Check if this is real-time analysis data
-            if component_value.get('state') == 'analyzing':
-                # Store metrics in session state
-                metrics = component_value.get('metrics', {})
-                st.session_state.realtime_metrics = metrics
-                return None
-                
-            # Check if this is the completed recording
-            if component_value.get('state') == 'complete' and 'data' in component_value:
-                # Decode the base64 audio data
-                audio_bytes = base64.b64decode(component_value['data'])
-                
-                # Store in session state for persistence
-                st.session_state.audio_data = audio_bytes
-                st.session_state.audio_data_received = True
-                
-                # Display the audio player in Streamlit
-                audio_container = st.container()
-                with audio_container:
-                    st.audio(audio_bytes, format="audio/wav")
-                    st.success("Recording saved! You can replay it using the player above.")
-                
-                # Return the audio bytes
-                return audio_bytes
+        # Process the returned value
+        if component_value and isinstance(component_value, dict) and 'data' in component_value:
+            # Decode the base64 audio data
+            audio_bytes = base64.b64decode(component_value['data'])
+            
+            # Store in session state for persistence
+            st.session_state.audio_data = audio_bytes
+            st.session_state.audio_data_received = True
+            
+            # Display the audio player in Streamlit
+            audio_container = st.container()
+            with audio_container:
+                st.audio(audio_bytes, format="audio/wav")
+                st.success("Recording saved! You can replay it using the player above.")
+            
+            # Return the audio bytes
+            return audio_bytes
         
         # If we already have audio data in session state, display it
         elif 'audio_data' in st.session_state and st.session_state.audio_data_received:
             st.audio(st.session_state.audio_data, format="audio/wav")
             st.success("Previous recording available. You can replay it or record a new one.")
             return st.session_state.audio_data
-        
-        # If real-time metrics are available, show them
-        if 'realtime_metrics' in st.session_state:
-            metrics = st.session_state.realtime_metrics
-            
-            # Clean up old metrics after recording
-            if component_value and isinstance(component_value, dict) and component_value.get('state') == 'complete':
-                if 'realtime_metrics' in st.session_state:
-                    del st.session_state.realtime_metrics
         
         return None
     except Exception as e:
