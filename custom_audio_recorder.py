@@ -57,40 +57,10 @@ with open(HTML_FILE, "w") as f:
             margin-top: 10px;
             font-style: italic;
         }
-        .visualization {
+        #recordingDisplay {
+            margin-top: 15px;
             width: 100%;
-            height: 60px;
-            background-color: #eee;
-            margin: 10px 0;
-            position: relative;
-            border-radius: 4px;
-            overflow: hidden;
-        }
-        #volume-meter {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            width: 100%;
-            background: linear-gradient(to top, #4CAF50, #8BC34A, #CDDC39, #FFEB3B, #FFC107, #FF9800, #FF5722);
-            height: 0%;
-            transition: height 0.1s ease;
-        }
-        .frequency-bars {
-            display: flex;
-            justify-content: space-between;
-            height: 100%;
-            width: 100%;
-        }
-        .frequency-bar {
-            width: 3px;
-            background-color: #4CAF50;
-            margin: 0 1px;
-            transform-origin: bottom;
-        }
-        .pronunciation-feedback {
-            margin-top: 10px;
             text-align: center;
-            font-weight: bold;
         }
     </style>
 </head>
@@ -100,18 +70,9 @@ with open(HTML_FILE, "w") as f:
             <span id="buttonText">Start Recording</span>
         </button>
         <div id="status" class="status">Ready to record</div>
-        
-        <!-- Audio visualization -->
-        <div class="visualization">
-            <div id="volume-meter"></div>
-            <div id="frequency-bars" class="frequency-bars"></div>
+        <div id="recordingDisplay">
+            <!-- Audio player will be added here -->
         </div>
-        
-        <!-- Real-time feedback -->
-        <div id="feedback" class="pronunciation-feedback"></div>
-        
-        <!-- Update the audio player style in the HTML template -->
-        <audio id="audioPlayback" controls style="display: none; margin-top: 15px; width: 100%; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);"></audio>
     </div>
 
     <script>
@@ -120,21 +81,13 @@ with open(HTML_FILE, "w") as f:
         let mediaRecorder;
         let audioBlob;
         let isRecording = false;
-        
-        // Audio analysis
-        let audioContext;
-        let analyser;
-        let microphoneStream;
-        let dataArray;
+        let audioUrl = null;
         
         // Elements
         const recordButton = document.getElementById('recordButton');
         const buttonText = document.getElementById('buttonText');
         const statusText = document.getElementById('status');
-        const audioPlayback = document.getElementById('audioPlayback');
-        const volumeMeter = document.getElementById('volume-meter');
-        const frequencyBars = document.getElementById('frequency-bars');
-        const feedbackElement = document.getElementById('feedback');
+        const recordingDisplay = document.getElementById('recordingDisplay');
         
         // Set up event listeners
         recordButton.addEventListener('click', toggleRecording);
@@ -148,107 +101,12 @@ with open(HTML_FILE, "w") as f:
             }
         }
         
-        // Initialize frequency bars
-        function initializeFrequencyBars(numBars = 32) {
-            frequencyBars.innerHTML = '';
-            for (let i = 0; i < numBars; i++) {
-                const bar = document.createElement('div');
-                bar.className = 'frequency-bar';
-                frequencyBars.appendChild(bar);
-            }
-        }
-        
-        // Initialize frequency bars on load
-        initializeFrequencyBars();
-        
-        // Set up audio analysis
-        async function setupAudioAnalysis(stream) {
-            try {
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                analyser = audioContext.createAnalyser();
-                microphoneStream = audioContext.createMediaStreamSource(stream);
-                microphoneStream.connect(analyser);
-                
-                analyser.fftSize = 256;
-                const bufferLength = analyser.frequencyBinCount;
-                dataArray = new Uint8Array(bufferLength);
-                
-                // Start visualization
-                visualize();
-            } catch (error) {
-                console.error('Error setting up audio analysis:', error);
-            }
-        }
-        
-        // Visualize audio
-        function visualize() {
-            if (!isRecording) return;
-            
-            // Get frequency data
-            analyser.getByteFrequencyData(dataArray);
-            
-            // Calculate average volume
-            let sum = 0;
-            const bars = document.querySelectorAll('.frequency-bar');
-            
-            // Update frequency bars
-            const barCount = bars.length;
-            const step = Math.floor(dataArray.length / barCount) || 1;
-            
-            for (let i = 0; i < barCount; i++) {
-                const dataIndex = i * step;
-                const value = dataArray[dataIndex] / 255.0;
-                sum += value;
-                
-                // Update bar height
-                if (bars[i]) {
-                    bars[i].style.height = `${value * 100}%`;
-                }
-            }
-            
-            // Calculate average volume
-            const average = sum / barCount;
-            
-            // Update volume meter
-            volumeMeter.style.height = `${average * 100}%`;
-            
-            // Update feedback based on volume
-            updateFeedback(average);
-            
-            // Send real-time data to Streamlit
-            if (window.Streamlit) {
-                window.Streamlit.setComponentValue({
-                    state: 'analyzing',
-                    volume: average,
-                    frequencyData: Array.from(dataArray).slice(0, barCount)
-                });
-            }
-            
-            // Continue visualization loop
-            requestAnimationFrame(visualize);
-        }
-        
-        // Update feedback based on audio analysis
-        function updateFeedback(volume) {
-            if (volume < 0.05) {
-                feedbackElement.textContent = 'Speak louder';
-                feedbackElement.style.color = '#FF5722';
-            } else if (volume > 0.8) {
-                feedbackElement.textContent = 'Too loud!';
-                feedbackElement.style.color = '#F44336';
-            } else if (volume > 0.4) {
-                feedbackElement.textContent = 'Good volume!';
-                feedbackElement.style.color = '#4CAF50';
-            } else {
-                feedbackElement.textContent = 'Speak a bit louder';
-                feedbackElement.style.color = '#FFC107';
-            }
-        }
-        
         // Start recording function
         async function startRecording() {
             audioChunks = [];
-            audioPlayback.style.display = 'none';
+            
+            // Clear previous recording display
+            recordingDisplay.innerHTML = '';
             
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -260,16 +118,12 @@ with open(HTML_FILE, "w") as f:
                 
                 mediaRecorder.onstop = processRecording;
                 
-                // Set up audio analysis
-                setupAudioAnalysis(stream);
-                
                 // Start recording
                 mediaRecorder.start();
                 isRecording = true;
                 recordButton.classList.add('recording');
                 buttonText.textContent = 'Stop Recording';
                 statusText.textContent = 'Recording in progress...';
-                feedbackElement.textContent = 'Speak clearly...';
             } catch (err) {
                 console.error('Error accessing microphone:', err);
                 statusText.textContent = 'Error: Could not access microphone';
@@ -285,24 +139,27 @@ with open(HTML_FILE, "w") as f:
                 buttonText.textContent = 'Start Recording';
                 statusText.textContent = 'Processing recording...';
                 
-                // Stop visualization
-                if (audioContext) {
-                    // Close audio context
-                    if (audioContext.state !== 'closed') {
-                        audioContext.close().catch(console.error);
-                    }
-                }
+                // Stop all tracks in the stream to release microphone
+                mediaRecorder.stream.getTracks().forEach(track => track.stop());
             }
         }
         
         // Process the recording after stopping
         function processRecording() {
             audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-            const audioUrl = URL.createObjectURL(audioBlob);
+            audioUrl = URL.createObjectURL(audioBlob);
             
-            // Make sure the audio player is visible
-            audioPlayback.src = audioUrl;
-            audioPlayback.style.display = 'block';
+            // Create and display audio player
+            const audioPlayer = document.createElement('audio');
+            audioPlayer.controls = true;
+            audioPlayer.src = audioUrl;
+            audioPlayer.style.width = '100%';
+            audioPlayer.style.marginTop = '10px';
+            audioPlayer.style.borderRadius = '4px';
+            
+            // Clear previous content and add the player
+            recordingDisplay.innerHTML = '';
+            recordingDisplay.appendChild(audioPlayer);
             
             // Convert to base64 for passing to Streamlit
             const reader = new FileReader();
@@ -312,27 +169,17 @@ with open(HTML_FILE, "w") as f:
                 // Send to Streamlit
                 sendToStreamlit(base64data);
                 statusText.textContent = 'Recording complete!';
-                feedbackElement.textContent = 'Recording available for playback';
             };
         }
         
         // Send data to Streamlit
         function sendToStreamlit(base64AudioData) {
             if (window.Streamlit) {
-                // First send processing state
                 window.Streamlit.setComponentValue({
-                    status: 'processing',
-                    data: null
+                    data: base64AudioData,
+                    format: 'audio/wav',
+                    status: 'complete'
                 });
-                
-                // Short delay then send complete data
-                setTimeout(() => {
-                    window.Streamlit.setComponentValue({
-                        status: 'complete',
-                        data: base64AudioData,
-                        format: 'audio/wav'
-                    });
-                }, 300);
             }
         }
         
@@ -345,21 +192,10 @@ with open(HTML_FILE, "w") as f:
 </html>
     """)
 
-# Create a very simple global counter to make each component unique
-_recorder_counter = 0
-
 # Create the custom component function
 def audio_recorder():
-    """Custom audio recorder component with JavaScript that ensures recording playback"""
-    global _recorder_counter
-    
+    """Custom audio recorder component with JavaScript"""
     try:
-        # Increment the counter
-        _recorder_counter += 1
-        
-        # Create container for debug messages if needed
-        debug_container = st.empty()
-        
         # Get the component value
         component_value = components.html(
             open(HTML_FILE, "r").read(),
@@ -371,23 +207,27 @@ def audio_recorder():
             # Decode the base64 audio data
             audio_bytes = base64.b64decode(component_value['data'])
             
-            # Store in session state
+            # Store in session state for persistence
             st.session_state.audio_data = audio_bytes
             st.session_state.audio_data_received = True
             
-            # IMPORTANT: Display the audio player directly here
-            st.audio(audio_bytes, format="audio/wav")
+            # Display the audio player in Streamlit
+            audio_container = st.container()
+            with audio_container:
+                st.audio(audio_bytes, format="audio/wav")
+                st.success("Recording saved! You can replay it using the player above.")
             
             # Return the audio bytes
             return audio_bytes
         
-        # Check if we already have audio data from a previous run
-        elif st.session_state.get('audio_data') is not None and st.session_state.get('audio_data_received', False):
-            # Show the audio player for existing recording
+        # If we already have audio data in session state, display it
+        elif 'audio_data' in st.session_state and st.session_state.audio_data_received:
             st.audio(st.session_state.audio_data, format="audio/wav")
+            st.success("Previous recording available. You can replay it or record a new one.")
             return st.session_state.audio_data
         
         return None
     except Exception as e:
         st.error(f"Error in audio recorder component: {e}")
+        st.exception(e)  # Show full exception for debugging
         return None

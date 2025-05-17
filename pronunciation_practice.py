@@ -148,6 +148,31 @@ RECOGNITION_LANGUAGES = {
     "en": "en-US"   # English
 }
 
+# At the top of your pronunciation practice page (before other content)
+st.markdown("## 🎤 Pronunciation Practice")
+
+# Add a debug expander (you can remove this later)
+with st.expander("Debug Information", expanded=False):
+    st.write("Session State Keys:", list(st.session_state.keys()))
+    if 'audio_data' in st.session_state:
+        st.write("Audio data exists in session state:", 
+                 f"Size: {len(st.session_state.audio_data)} bytes")
+    if 'audio_data_received' in st.session_state:
+        st.write("Audio received flag:", st.session_state.audio_data_received)
+    
+    # Add a manual audio player for the existing recording
+    if 'audio_data' in st.session_state and st.session_state.audio_data:
+        st.write("Debug Player:")
+        st.audio(st.session_state.audio_data, format="audio/wav")
+    
+    # Add a button to clear session state
+    if st.button("Clear Audio Data"):
+        if 'audio_data' in st.session_state:
+            del st.session_state.audio_data
+        if 'audio_data_received' in st.session_state:
+            st.session_state.audio_data_received = False
+        st.rerun()
+        
 def create_pronunciation_practice(text_to_speech_func=None, get_audio_html_func=None, translate_text_func=None):
     """
     Create a pronunciation practice module.
@@ -294,53 +319,26 @@ class SimplePronunciationPractice:
                 self._add_upload_recorder()
     
     def _add_custom_recorder(self):
-        """Add the custom JavaScript-based audio recorder with guaranteed playback"""
+        """Add the custom JavaScript-based audio recorder"""
         try:
             # Use our custom recorder component
             audio_bytes = self.custom_recorder()
             
-            # If we have audio data, display it and prepare for analysis
+            # If we have audio data, prepare for analysis
             if audio_bytes:
-                st.success("✅ Recording complete!")
-                
                 # Update current recording word if in practice session
                 self._update_current_recording_word()
                 
-                # Always display a clear section title for the recording
-                st.subheader("Your Recording")
-                
-                # The audio player is already shown by the custom_recorder function
-                # But we'll add a note to make it clear
-                st.caption("You can replay your recording using the player above.")
-                
-                # Add analyze button
-                if st.button("✨ Analyze My Pronunciation", key=f"analyze_btn_{int(time.time())}"):
-                    with st.spinner("Analyzing your pronunciation..."):
-                        # Perform analysis here
-                        if 'current_recording_word' in st.session_state:
-                            word_id = st.session_state.current_recording_word
-                            # Find the word in practice session
-                            for word in st.session_state.practice_words:
-                                if word.get('id') == word_id:
-                                    target_word = word.get('word_translated', '')
-                                    language_code = word.get('language_translated', 'en')
-                                    similarity_score = self._evaluate_pronunciation(
-                                        audio_data=audio_bytes,
-                                        target_word=target_word,
-                                        language_code=language_code
-                                    )
-                                    self._show_simple_feedback(target_word, language_code, similarity_score)
-                                    break
-                        else:
-                            st.warning("No target word found for comparison.")
-                            
-                return True
-            else:
-                st.info("Use the recorder above to practice your pronunciation")
-                return False
-                
+                # Add analyze button with a unique key based on timestamp
+                button_key = f"analyze_btn_{int(time.time() * 1000)}"
+                if st.button("✨ Analyze My Pronunciation", key=button_key):
+                    # Do the analysis
+                    return True  # Signal to parent function that analysis should be performed
+            
+            return False  # Don't run analysis yet
         except Exception as e:
             st.error(f"Error using custom recorder: {e}")
+            st.exception(e)  # Show detailed error for debugging
             return False
     
     def _add_webrtc_recorder(self):
