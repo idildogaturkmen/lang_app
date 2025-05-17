@@ -623,6 +623,394 @@ with open(HTML_FILE, "w") as f:
         if (window.Streamlit) {
             window.Streamlit.componentReady();
         }
+            
+        // Add real-time visualization function
+function setupVisualization() {
+    // Create visualization canvas if it doesn't exist
+    if (!document.getElementById('audio-visualizer')) {
+        const canvas = document.createElement('canvas');
+        canvas.id = 'audio-visualizer';
+        canvas.width = 300;
+        canvas.height = 60;
+        canvas.style.marginTop = '10px';
+        canvas.style.width = '100%';
+        canvas.style.borderRadius = '4px';
+        canvas.style.backgroundColor = '#f0f0f0';
+        
+        // Add it to the container
+        recordingDisplay.appendChild(canvas);
+        
+        // Add volume level indicator
+        const volumeIndicator = document.createElement('div');
+        volumeIndicator.id = 'volume-level';
+        volumeIndicator.style.width = '100%';
+        volumeIndicator.style.height = '4px';
+        volumeIndicator.style.backgroundColor = '#e0e0e0';
+        volumeIndicator.style.position = 'relative';
+        volumeIndicator.style.marginTop = '5px';
+        volumeIndicator.style.borderRadius = '2px';
+        
+        const volumeMeter = document.createElement('div');
+        volumeMeter.id = 'volume-meter';
+        volumeMeter.style.height = '100%';
+        volumeMeter.style.width = '0%';
+        volumeMeter.style.backgroundColor = '#4CAF50';
+        volumeMeter.style.borderRadius = '2px';
+        volumeMeter.style.transition = 'width 0.1s ease';
+        
+        volumeIndicator.appendChild(volumeMeter);
+        recordingDisplay.appendChild(volumeIndicator);
+        
+        // Add feedback text area
+        const feedbackText = document.createElement('div');
+        feedbackText.id = 'feedback-text';
+        feedbackText.style.marginTop = '5px';
+        feedbackText.style.fontSize = '14px';
+        feedbackText.style.color = '#666';
+        feedbackText.style.textAlign = 'center';
+        feedbackText.textContent = 'Ready to record';
+        
+        recordingDisplay.appendChild(feedbackText);
+    }
+    
+    return document.getElementById('audio-visualizer');
+}
+
+// Start audio visualization
+function startVisualization(stream) {
+    const canvas = setupVisualization();
+    const canvasCtx = canvas.getContext('2d');
+    const volumeMeter = document.getElementById('volume-meter');
+    const feedbackText = document.getElementById('feedback-text');
+    
+    // Set up audio context and analyzer
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 256;
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    
+    // Connect the audio stream
+    const source = audioContext.createMediaStreamSource(stream);
+    source.connect(analyser);
+    
+    // Visualization function
+    function draw() {
+        if (!isRecording) return;
+        
+        requestAnimationFrame(draw);
+        
+        // Get frequency data
+        analyser.getByteFrequencyData(dataArray);
+        
+        // Calculate volume level (0-100)
+        let sum = 0;
+        for(let i = 0; i < bufferLength; i++) {
+            sum += dataArray[i];
+        }
+        const average = sum / bufferLength;
+        const volumePercentage = (average / 255) * 100;
+        
+        // Update volume meter
+        volumeMeter.style.width = `${volumePercentage}%`;
+        
+        // Update feedback text based on volume
+        if (volumePercentage < 5) {
+            feedbackText.textContent = 'Speak louder...';
+            feedbackText.style.color = '#F44336';
+        } else if (volumePercentage > 80) {
+            feedbackText.textContent = 'Too loud!';
+            feedbackText.style.color = '#F44336';
+        } else if (volumePercentage > 40) {
+            feedbackText.textContent = 'Good volume!';
+            feedbackText.style.color = '#4CAF50';
+        } else {
+            feedbackText.textContent = 'Speak a bit louder';
+            feedbackText.style.color = '#FFC107';
+        }
+        
+        // Draw visualization
+        canvasCtx.fillStyle = 'rgb(240, 240, 240)';
+        canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        const barWidth = (canvas.width / bufferLength) * 2.5;
+        let x = 0;
+        
+        for(let i = 0; i < bufferLength; i++) {
+            const barHeight = (dataArray[i] / 255) * canvas.height;
+            
+            // Create gradient color based on frequency
+            const hue = i / bufferLength * 240;
+            canvasCtx.fillStyle = `hsl(${hue}, 70%, 50%)`;
+            
+            canvasCtx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+            x += barWidth + 1;
+        }
+        
+        // Send data to Streamlit
+        if (window.Streamlit && isRecording) {
+            window.Streamlit.setComponentValue({
+                status: 'recording',
+                volume: volumePercentage,
+                frequencyData: Array.from(dataArray).slice(0, 10) // Send just first 10 values
+            });
+        }
+    }
+    
+    // Start visualization
+    draw();
+    
+    // Save audio context for cleanup
+    window.audioContext = audioContext;
+    
+    return analyser;
+}
+
+// Modify startRecording to include visualization
+async function startRecording() {
+    audioChunks = [];
+    
+    // Clear previous recording display
+    recordingDisplay.innerHTML = '';
+    
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder = new MediaRecorder(stream);
+        
+        mediaRecorder.ondataavailable = (event) => {
+            audioChunks.push(event.data);
+        };
+        
+        mediaRecorder.onstop = processRecording;
+        
+        // Start recording
+        mediaRecorder.start();
+        isRecording = true;
+        recordButton.classList.add('recording');
+        buttonText.textContent = 'Stop Recording';
+        statusText.textContent = 'Recording in progress...';
+        
+        // Start visualization
+        startVisualization(stream);
+    } catch (err) {
+        console.error('Error accessing microphone:', err);
+        statusText.textContent = 'Error: Could not access microphone';
+    }
+}
+
+// Modify stopRecording to clean up
+function stopRecording() {
+    if (mediaRecorder && isRecording) {
+        mediaRecorder.stop();
+        isRecording = false;
+        recordButton.classList.remove('recording');
+        buttonText.textContent = 'Start Recording';
+        statusText.textContent = 'Processing recording...';
+        
+        // Stop all tracks in the stream to release microphone
+        mediaRecorder.stream.getTracks().forEach(track => track.stop());
+        
+        // Clean up audio context
+        if (window.audioContext && window.audioContext.state !== 'closed') {
+            window.audioContext.close().catch(console.error);
+        }
+    }
+}
+
+
+        // Add real-time visualization function
+        function setupVisualization() {
+            // Create visualization canvas if it doesn't exist
+            if (!document.getElementById('audio-visualizer')) {
+                const canvas = document.createElement('canvas');
+                canvas.id = 'audio-visualizer';
+                canvas.width = 300;
+                canvas.height = 60;
+                canvas.style.marginTop = '10px';
+                canvas.style.width = '100%';
+                canvas.style.borderRadius = '4px';
+                canvas.style.backgroundColor = '#f0f0f0';
+                
+                // Add it to the container
+                recordingDisplay.appendChild(canvas);
+                
+                // Add volume level indicator
+                const volumeIndicator = document.createElement('div');
+                volumeIndicator.id = 'volume-level';
+                volumeIndicator.style.width = '100%';
+                volumeIndicator.style.height = '4px';
+                volumeIndicator.style.backgroundColor = '#e0e0e0';
+                volumeIndicator.style.position = 'relative';
+                volumeIndicator.style.marginTop = '5px';
+                volumeIndicator.style.borderRadius = '2px';
+                
+                const volumeMeter = document.createElement('div');
+                volumeMeter.id = 'volume-meter';
+                volumeMeter.style.height = '100%';
+                volumeMeter.style.width = '0%';
+                volumeMeter.style.backgroundColor = '#4CAF50';
+                volumeMeter.style.borderRadius = '2px';
+                volumeMeter.style.transition = 'width 0.1s ease';
+                
+                volumeIndicator.appendChild(volumeMeter);
+                recordingDisplay.appendChild(volumeIndicator);
+                
+                // Add feedback text area
+                const feedbackText = document.createElement('div');
+                feedbackText.id = 'feedback-text';
+                feedbackText.style.marginTop = '5px';
+                feedbackText.style.fontSize = '14px';
+                feedbackText.style.color = '#666';
+                feedbackText.style.textAlign = 'center';
+                feedbackText.textContent = 'Ready to record';
+                
+                recordingDisplay.appendChild(feedbackText);
+            }
+            
+            return document.getElementById('audio-visualizer');
+        }
+
+        // Start audio visualization
+        function startVisualization(stream) {
+            const canvas = setupVisualization();
+            const canvasCtx = canvas.getContext('2d');
+            const volumeMeter = document.getElementById('volume-meter');
+            const feedbackText = document.getElementById('feedback-text');
+            
+            // Set up audio context and analyzer
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const analyser = audioContext.createAnalyser();
+            analyser.fftSize = 256;
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            
+            // Connect the audio stream
+            const source = audioContext.createMediaStreamSource(stream);
+            source.connect(analyser);
+            
+            // Visualization function
+            function draw() {
+                if (!isRecording) return;
+                
+                requestAnimationFrame(draw);
+                
+                // Get frequency data
+                analyser.getByteFrequencyData(dataArray);
+                
+                // Calculate volume level (0-100)
+                let sum = 0;
+                for(let i = 0; i < bufferLength; i++) {
+                    sum += dataArray[i];
+                }
+                const average = sum / bufferLength;
+                const volumePercentage = (average / 255) * 100;
+                
+                // Update volume meter
+                volumeMeter.style.width = `${volumePercentage}%`;
+                
+                // Update feedback text based on volume
+                if (volumePercentage < 5) {
+                    feedbackText.textContent = 'Speak louder...';
+                    feedbackText.style.color = '#F44336';
+                } else if (volumePercentage > 80) {
+                    feedbackText.textContent = 'Too loud!';
+                    feedbackText.style.color = '#F44336';
+                } else if (volumePercentage > 40) {
+                    feedbackText.textContent = 'Good volume!';
+                    feedbackText.style.color = '#4CAF50';
+                } else {
+                    feedbackText.textContent = 'Speak a bit louder';
+                    feedbackText.style.color = '#FFC107';
+                }
+                
+                // Draw visualization
+                canvasCtx.fillStyle = 'rgb(240, 240, 240)';
+                canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                const barWidth = (canvas.width / bufferLength) * 2.5;
+                let x = 0;
+                
+                for(let i = 0; i < bufferLength; i++) {
+                    const barHeight = (dataArray[i] / 255) * canvas.height;
+                    
+                    // Create gradient color based on frequency
+                    const hue = i / bufferLength * 240;
+                    canvasCtx.fillStyle = `hsl(${hue}, 70%, 50%)`;
+                    
+                    canvasCtx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+                    x += barWidth + 1;
+                }
+                
+                // Send data to Streamlit
+                if (window.Streamlit && isRecording) {
+                    window.Streamlit.setComponentValue({
+                        status: 'recording',
+                        volume: volumePercentage,
+                        frequencyData: Array.from(dataArray).slice(0, 10) // Send just first 10 values
+                    });
+                }
+            }
+            
+            // Start visualization
+            draw();
+            
+            // Save audio context for cleanup
+            window.audioContext = audioContext;
+            
+            return analyser;
+        }
+
+        // Modify startRecording to include visualization
+        async function startRecording() {
+            audioChunks = [];
+            
+            // Clear previous recording display
+            recordingDisplay.innerHTML = '';
+            
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                
+                mediaRecorder.ondataavailable = (event) => {
+                    audioChunks.push(event.data);
+                };
+                
+                mediaRecorder.onstop = processRecording;
+                
+                // Start recording
+                mediaRecorder.start();
+                isRecording = true;
+                recordButton.classList.add('recording');
+                buttonText.textContent = 'Stop Recording';
+                statusText.textContent = 'Recording in progress...';
+                
+                // Start visualization
+                startVisualization(stream);
+            } catch (err) {
+                console.error('Error accessing microphone:', err);
+                statusText.textContent = 'Error: Could not access microphone';
+            }
+        }
+
+        // Modify stopRecording to clean up
+        function stopRecording() {
+            if (mediaRecorder && isRecording) {
+                mediaRecorder.stop();
+                isRecording = false;
+                recordButton.classList.remove('recording');
+                buttonText.textContent = 'Start Recording';
+                statusText.textContent = 'Processing recording...';
+                
+                // Stop all tracks in the stream to release microphone
+                mediaRecorder.stream.getTracks().forEach(track => track.stop());
+                
+                // Clean up audio context
+                if (window.audioContext && window.audioContext.state !== 'closed') {
+                    window.audioContext.close().catch(console.error);
+                }
+            }
+        }
+            
     </script>
 </body>
 </html>
