@@ -338,7 +338,7 @@ class SimplePronunciationPractice:
                 target_word = current_word.get('word_translated', '')
             
             # Use our custom recorder component - pass target word for analysis
-            audio_bytes = self.custom_recorder(target_word=target_word)
+            audio_bytes = self.custom_recorder()
             
             # Show real-time metrics if available
             if 'realtime_metrics' in st.session_state:
