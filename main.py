@@ -2669,6 +2669,11 @@ elif app_mode == "Pronunciation Practice":
                     get_audio_html_func=get_audio_html,
                     translate_text_func=translate_text
                 )
+                
+                # If you've imported the custom recorder, make it available to the module
+                if has_custom_recorder:
+                    st.session_state.pronunciation_practice.custom_recorder = audio_recorder
+                    st.session_state.pronunciation_practice.has_custom_recorder = True
             
             # Get vocabulary from database
             vocabulary = get_all_vocabulary_direct()
@@ -2686,37 +2691,25 @@ elif app_mode == "Pronunciation Practice":
             filtered_vocab = [word for word in vocabulary if word['language_translated'] == practice_language_code]
             
             if filtered_vocab:
-                info_message(f"Found {len(filtered_vocab)} words in {practice_language}. Start a practice session to improve your pronunciation.")
-                
-                # Start a new practice session button
-                if 'practice_words' not in st.session_state:
-                    if st.button("Start Practice Session"):
-                        try:
-                            # Import standard library random (not numpy)
-                            import random
-                            # Select 5 random words for practice (or fewer if not enough words)
-                            practice_size = min(5, len(filtered_vocab))
-                            st.session_state.practice_words = random.sample(filtered_vocab, practice_size)
-                            st.session_state.current_practice_index = 0
-                            st.session_state.practice_scores = []
-                            st.rerun()
-                        except Exception as e:
-                            error_message(f"Error starting practice session: {str(e)}")
-                
                 # Run the practice session if words are selected
                 if 'practice_words' in st.session_state:
-                    try:
-                        st.session_state.pronunciation_practice.render_practice_session(
-                            vocabulary, practice_language_code)
-                    except Exception as e:
-                        error_message(f"Error in practice session: {str(e)}")
-                        # Add a reset button
-                        if st.button("Reset Practice Session"):
-                            if 'practice_words' in st.session_state:
-                                del st.session_state.practice_words
-                            st.rerun()
+                    st.session_state.pronunciation_practice.render_practice_session(
+                        vocabulary, practice_language_code)
+                else:
+                    # Start a new practice session button
+                    info_message(f"Found {len(filtered_vocab)} words in {practice_language}. Start a practice session to improve your pronunciation.")
+                    if st.button("Start Practice Session"):
+                        # Import standard library random (not numpy)
+                        import random
+                        # Select 5 random words for practice (or fewer if not enough words)
+                        practice_size = min(5, len(filtered_vocab))
+                        st.session_state.practice_words = random.sample(filtered_vocab, practice_size)
+                        st.session_state.current_practice_index = 0
+                        st.session_state.practice_scores = []
+                        st.rerun()
             else:
                 warning_message(f"No vocabulary words found for {practice_language}. Go to Camera Mode to add words first.")
+            
         
         except Exception as e:
             error_message(f"Error initializing pronunciation practice: {str(e)}")
