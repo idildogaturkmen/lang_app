@@ -591,93 +591,134 @@ class SimplePronunciationPractice:
                 self._show_simple_feedback(translated_word, language_code, score_map.get(rating, 60))
     
     def render_practice_session(self, vocabulary, language_code):
-    """Render pronunciation practice session with guaranteed audio playback"""
-    st.markdown("## Pronunciation Practice")
-    
-    # If there's no practice session data, show a message
-    if 'practice_words' not in st.session_state:
-        st.info("Click 'Start Practice Session' to begin.")
-        return
-    
-    # Get current word
-    current_index = st.session_state.current_practice_index
-    if current_index < len(st.session_state.practice_words):
-        current_word = st.session_state.practice_words[current_index]
+        """Render pronunciation practice session with guaranteed audio playback"""
+        st.markdown("## Pronunciation Practice")
         
-        # Progress bar
-        progress = current_index / len(st.session_state.practice_words)
-        st.progress(progress)
-        st.subheader(f"Word {current_index + 1} of {len(st.session_state.practice_words)}")
+        # If there's no practice session data, show a message
+        if 'practice_words' not in st.session_state:
+            st.info("Click 'Start Practice Session' to begin.")
+            return
         
-        # Word info with larger, more visible styling
-        st.markdown(f"""
-        <div style="background-color: #f0f2f6; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
-            <h2 style="margin: 0;">{current_word.get('word_translated', '')}</h2>
-            <p style="margin: 5px 0 0 0; color: #666;">English: {current_word.get('word_original', '')}</p>
-            <p style="margin: 0; font-weight: bold; color: #1e88e5;">{LANGUAGE_NAMES.get(language_code, language_code)}</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Listen to pronunciation
-        st.markdown("### 👂 Listen to correct pronunciation")
-        audio_bytes = self.text_to_speech(current_word.get('word_translated', ''), language_code)
-        if audio_bytes:
-            st.markdown(self.get_audio_html(audio_bytes), unsafe_allow_html=True)
-        
-        # Pronunciation guide
-        with st.expander("Pronunciation Guide", expanded=True):
-            self._show_pronunciation_tips(current_word)
-        
-        # Add the recording section - ONE title handled inside this method
-        st.markdown("### 🎙️ Record Your Pronunciation")
-        audio_recorded = self._add_audio_recorder()
-        
-        # Check if audio data is available
-        has_audio = 'audio_data' in st.session_state and st.session_state.audio_data
-        
-        if has_audio and audio_recorded:
-            # Calculate score based on speech recognition or self-assessment
-            if HAS_SR:
-                with st.spinner("Analyzing your pronunciation..."):
-                    # Process audio with speech recognition
-                    similarity_score = self._evaluate_pronunciation(
-                        audio_data=st.session_state.audio_data,
-                        target_word=current_word.get('word_translated', ''),
-                        language_code=language_code
+        # Get current word
+        current_index = st.session_state.current_practice_index
+        if current_index < len(st.session_state.practice_words):
+            current_word = st.session_state.practice_words[current_index]
+            
+            # Progress bar
+            progress = current_index / len(st.session_state.practice_words)
+            st.progress(progress)
+            st.subheader(f"Word {current_index + 1} of {len(st.session_state.practice_words)}")
+            
+            # Word info with larger, more visible styling
+            st.markdown(f"""
+            <div style="background-color: #f0f2f6; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
+                <h2 style="margin: 0;">{current_word.get('word_translated', '')}</h2>
+                <p style="margin: 5px 0 0 0; color: #666;">English: {current_word.get('word_original', '')}</p>
+                <p style="margin: 0; font-weight: bold; color: #1e88e5;">{LANGUAGE_NAMES.get(language_code, language_code)}</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Listen to pronunciation
+            st.markdown("### 👂 Listen to correct pronunciation")
+            audio_bytes = self.text_to_speech(current_word.get('word_translated', ''), language_code)
+            if audio_bytes:
+                st.markdown(self.get_audio_html(audio_bytes), unsafe_allow_html=True)
+            
+            # Pronunciation guide
+            with st.expander("Pronunciation Guide", expanded=True):
+                self._show_pronunciation_tips(current_word)
+            
+            # Add the recording section - ONE title handled inside this method
+            st.markdown("### 🎙️ Record Your Pronunciation")
+            audio_recorded = self._add_audio_recorder()
+            
+            # Check if audio data is available
+            has_audio = 'audio_data' in st.session_state and st.session_state.audio_data
+            
+            if has_audio and audio_recorded:
+                # Calculate score based on speech recognition or self-assessment
+                if HAS_SR:
+                    with st.spinner("Analyzing your pronunciation..."):
+                        # Process audio with speech recognition
+                        similarity_score = self._evaluate_pronunciation(
+                            audio_data=st.session_state.audio_data,
+                            target_word=current_word.get('word_translated', ''),
+                            language_code=language_code
+                        )
+                else:
+                    # Fall back to self-assessment
+                    rating = st.select_slider(
+                        "How well did you pronounce the word?",
+                        options=["Poor", "Fair", "Good", "Very Good", "Excellent"],
+                        value="Good"
                     )
-            else:
-                # Fall back to self-assessment
-                rating = st.select_slider(
-                    "How well did you pronounce the word?",
-                    options=["Poor", "Fair", "Good", "Very Good", "Excellent"],
-                    value="Good"
+                    
+                    # Calculate score based on rating
+                    score_map = {
+                        "Poor": 20,
+                        "Fair": 40,
+                        "Good": 60,
+                        "Very Good": 80,
+                        "Excellent": 95
+                    }
+                    similarity_score = score_map.get(rating, 60)
+                
+                # Show feedback
+                self._show_simple_feedback(
+                    current_word.get('word_translated', ''), 
+                    language_code, 
+                    similarity_score
                 )
                 
-                # Calculate score based on rating
-                score_map = {
-                    "Poor": 20,
-                    "Fair": 40,
-                    "Good": 60,
-                    "Very Good": 80,
-                    "Excellent": 95
-                }
-                similarity_score = score_map.get(rating, 60)
+                # Submit button
+                if st.button("Submit and Continue", type="primary"):
+                    # Store score
+                    if 'practice_scores' not in st.session_state:
+                        st.session_state.practice_scores = []
+                    st.session_state.practice_scores.append(similarity_score)
+                    
+                    # Clear audio data for next word
+                    if 'audio_data' in st.session_state:
+                        del st.session_state.audio_data
+                    if 'audio_data_received' in st.session_state:
+                        st.session_state.audio_data_received = False
+                    if 'current_recording_word' in st.session_state:
+                        del st.session_state.current_recording_word
+                    
+                    # Move to next word
+                    st.session_state.current_practice_index += 1
+                    st.rerun()
             
-            # Show feedback
-            self._show_simple_feedback(
-                current_word.get('word_translated', ''), 
-                language_code, 
-                similarity_score
+            # Example in context
+            example = self._get_example_sentence(
+                current_word.get('word_original', ''), 
+                current_word.get('language_translated', 'en')
             )
             
-            # Submit button
-            if st.button("Submit and Continue", type="primary"):
-                # Store score
-                if 'practice_scores' not in st.session_state:
-                    st.session_state.practice_scores = []
-                st.session_state.practice_scores.append(similarity_score)
+            with st.expander("Example in Context"):
+                st.markdown(f"**English:** {example['english']}")
+                if example.get('translated'):
+                    st.markdown(f"**{LANGUAGE_NAMES.get(language_code, language_code)}:** {example['translated']}")
+                    example_audio = self.text_to_speech(example['translated'], language_code)
+                    if example_audio:
+                        st.markdown(self.get_audio_html(example_audio), unsafe_allow_html=True)
+        else:
+            # Practice session completed
+            self._show_practice_results()
+            
+            # Reset button
+            if st.button("Practice Again", type="primary"):
+                import random
                 
-                # Clear audio data for next word
+                # Create a new set of practice words
+                filtered_vocab = [word for word in vocabulary 
+                                if word['language_translated'] == language_code]
+                practice_size = min(5, len(filtered_vocab))
+                st.session_state.practice_words = random.sample(filtered_vocab, practice_size)
+                st.session_state.current_practice_index = 0
+                st.session_state.practice_scores = []
+                
+                # Clear audio data
                 if 'audio_data' in st.session_state:
                     del st.session_state.audio_data
                 if 'audio_data_received' in st.session_state:
@@ -685,48 +726,7 @@ class SimplePronunciationPractice:
                 if 'current_recording_word' in st.session_state:
                     del st.session_state.current_recording_word
                 
-                # Move to next word
-                st.session_state.current_practice_index += 1
                 st.rerun()
-        
-        # Example in context
-        example = self._get_example_sentence(
-            current_word.get('word_original', ''), 
-            current_word.get('language_translated', 'en')
-        )
-        
-        with st.expander("Example in Context"):
-            st.markdown(f"**English:** {example['english']}")
-            if example.get('translated'):
-                st.markdown(f"**{LANGUAGE_NAMES.get(language_code, language_code)}:** {example['translated']}")
-                example_audio = self.text_to_speech(example['translated'], language_code)
-                if example_audio:
-                    st.markdown(self.get_audio_html(example_audio), unsafe_allow_html=True)
-    else:
-        # Practice session completed
-        self._show_practice_results()
-        
-        # Reset button
-        if st.button("Practice Again", type="primary"):
-            import random
-            
-            # Create a new set of practice words
-            filtered_vocab = [word for word in vocabulary 
-                            if word['language_translated'] == language_code]
-            practice_size = min(5, len(filtered_vocab))
-            st.session_state.practice_words = random.sample(filtered_vocab, practice_size)
-            st.session_state.current_practice_index = 0
-            st.session_state.practice_scores = []
-            
-            # Clear audio data
-            if 'audio_data' in st.session_state:
-                del st.session_state.audio_data
-            if 'audio_data_received' in st.session_state:
-                st.session_state.audio_data_received = False
-            if 'current_recording_word' in st.session_state:
-                del st.session_state.current_recording_word
-            
-            st.rerun()
                 
     def _evaluate_pronunciation(self, audio_data, target_word, language_code):
         """Enhanced pronunciation evaluation with multiple techniques"""
