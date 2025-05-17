@@ -319,10 +319,34 @@ class SimplePronunciationPractice:
                 self._add_upload_recorder()
     
     def _add_custom_recorder(self):
-        """Add the custom JavaScript-based audio recorder"""
+        """Add the custom JavaScript-based audio recorder with real-time feedback"""
         try:
-            # Use our custom recorder component
-            audio_bytes = self.custom_recorder()
+            # Get current word information
+            current_word = None
+            if 'practice_words' in st.session_state and 'current_practice_index' in st.session_state:
+                index = st.session_state.current_practice_index
+                if index < len(st.session_state.practice_words):
+                    current_word = st.session_state.practice_words[index]
+            
+            # Get the target word to pass to the recorder
+            target_word = None
+            if current_word:
+                target_word = current_word.get('word_translated', '')
+            
+            # Use our custom recorder component - pass target word for analysis
+            audio_bytes = self.custom_recorder(target_word=target_word)
+            
+            # Show real-time metrics if available
+            if 'realtime_metrics' in st.session_state:
+                metrics = st.session_state.realtime_metrics
+                
+                # Add a small delay to ensure metrics are displayed
+                time.sleep(0.1)
+                
+                # If the user has stopped recording, clear the metrics
+                if audio_bytes:
+                    if 'realtime_metrics' in st.session_state:
+                        del st.session_state.realtime_metrics
             
             # If we have audio data, prepare for analysis
             if audio_bytes:
@@ -535,6 +559,9 @@ class SimplePronunciationPractice:
             
             # Single heading for recording section
             st.markdown("### 🎙️ Record Your Pronunciation")
+
+            # Show real-time metrics container
+            self._show_realtime_metrics()
             
             # Add the appropriate audio recorder - HEADING IS MOVED HERE
             if self.has_custom_recorder:
@@ -626,6 +653,9 @@ class SimplePronunciationPractice:
             with st.expander("Pronunciation Guide", expanded=True):
                 self._show_pronunciation_tips(current_word)
             
+            # Show real-time metrics container
+            self._show_realtime_metrics()
+
             # Add the recording section - ONE title handled inside this method
             st.markdown("### 🎙️ Record Your Pronunciation")
             audio_recorded = self._add_audio_recorder()
@@ -1469,6 +1499,57 @@ class SimplePronunciationPractice:
                 st.warning(f"Your pronunciation score has decreased by {abs(improvement):.0f} points. Try listening carefully to the example again.")
             else:
                 st.info("Your pronunciation score has remained stable. Keep practicing to improve!")
+
+    def _show_realtime_metrics(self):
+        """Display real-time pronunciation metrics if available"""
+        if 'realtime_metrics' in st.session_state:
+            metrics = st.session_state.realtime_metrics
+            
+            # Create a container for metrics
+            metrics_container = st.container()
+            
+            with metrics_container:
+                st.markdown("### Real-time Pronunciation Feedback")
+                
+                # Display feedback message
+                feedback = metrics.get('feedback', 'Speak clearly into the microphone')
+                st.info(feedback)
+                
+                # Create columns for metrics
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    volume = metrics.get('volume', 0)
+                    st.metric("Volume", f"{int(volume)}%")
+                    # Add color-coded progress bar
+                    color = "#4CAF50" if volume >= 40 else "#FFC107" if volume >= 20 else "#F44336"
+                    st.markdown(f"""
+                    <div style="width: 100%; background-color: #e0e0e0; border-radius: 4px; height: 8px;">
+                        <div style="width: {volume}%; background-color: {color}; height: 8px; border-radius: 4px;"></div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                with col2:
+                    clarity = metrics.get('clarity', 0)
+                    st.metric("Clarity", f"{int(clarity)}%")
+                    # Add color-coded progress bar
+                    color = "#4CAF50" if clarity >= 70 else "#FFC107" if clarity >= 40 else "#F44336"
+                    st.markdown(f"""
+                    <div style="width: 100%; background-color: #e0e0e0; border-radius: 4px; height: 8px;">
+                        <div style="width: {clarity}%; background-color: {color}; height: 8px; border-radius: 4px;"></div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                with col3:
+                    pitch = metrics.get('pitchAccuracy', 0)
+                    st.metric("Pitch", f"{int(pitch)}%")
+                    # Add color-coded progress bar
+                    color = "#4CAF50" if pitch >= 70 else "#FFC107" if pitch >= 50 else "#F44336"
+                    st.markdown(f"""
+                    <div style="width: 100%; background-color: #e0e0e0; border-radius: 4px; height: 8px;">
+                        <div style="width: {pitch}%; background-color: {color}; height: 8px; border-radius: 4px;"></div>
+                    </div>
+                    """, unsafe_allow_html=True)
     
 
 class AudioAnalyzer:

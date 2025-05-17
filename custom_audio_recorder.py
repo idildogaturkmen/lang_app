@@ -21,7 +21,7 @@ with open(HTML_FILE, "w") as f:
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Audio Recorder</title>
+    <title>Audio Recorder with Real-time Feedback</title>
     <style>
         .recorder-container {
             display: flex;
@@ -60,7 +60,59 @@ with open(HTML_FILE, "w") as f:
         #recordingDisplay {
             margin-top: 15px;
             width: 100%;
+        }
+        
+        /* Real-time feedback styles */
+        .visualization-container {
+            width: 100%;
+            margin: 10px 0;
+        }
+        
+        .feedback-meter {
+            width: 100%;
+            height: 8px;
+            background-color: #e0e0e0;
+            border-radius: 4px;
+            margin: 5px 0;
+            overflow: hidden;
+        }
+        
+        .feedback-bar {
+            height: 100%;
+            width: 0%;
+            transition: width 0.2s ease, background-color 0.2s ease;
+            border-radius: 4px;
+        }
+        
+        .feedback-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 2px;
+        }
+        
+        .feedback-value {
+            font-weight: bold;
+            text-align: right;
+        }
+        
+        .realtime-feedback {
+            margin-top: 10px;
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 14px;
             text-align: center;
+            background-color: #f0f0f0;
+        }
+        
+        /* Waveform canvas */
+        #waveform, #spectrogram {
+            width: 100%;
+            height: 60px;
+            background-color: #f0f0f0;
+            border-radius: 4px;
+            margin-top: 5px;
         }
     </style>
 </head>
@@ -70,9 +122,48 @@ with open(HTML_FILE, "w") as f:
             <span id="buttonText">Start Recording</span>
         </button>
         <div id="status" class="status">Ready to record</div>
-        <div id="recordingDisplay">
-            <!-- Audio player will be added here -->
+        
+        <!-- Real-time feedback visualizations -->
+        <div class="visualization-container" id="visualizationContainer" style="display: none;">
+            <!-- Volume meter -->
+            <div class="feedback-label">
+                <span>Volume</span>
+                <span class="feedback-value" id="volumeValue">0%</span>
+            </div>
+            <div class="feedback-meter">
+                <div class="feedback-bar" id="volumeBar" style="background-color: #4CAF50;"></div>
+            </div>
+            
+            <!-- Clarity meter -->
+            <div class="feedback-label">
+                <span>Clarity</span>
+                <span class="feedback-value" id="clarityValue">0%</span>
+            </div>
+            <div class="feedback-meter">
+                <div class="feedback-bar" id="clarityBar" style="background-color: #2196F3;"></div>
+            </div>
+            
+            <!-- Pitch accuracy meter -->
+            <div class="feedback-label">
+                <span>Pitch</span>
+                <span class="feedback-value" id="pitchValue">0%</span>
+            </div>
+            <div class="feedback-meter">
+                <div class="feedback-bar" id="pitchBar" style="background-color: #FF9800;"></div>
+            </div>
+            
+            <!-- Real-time feedback message -->
+            <div class="realtime-feedback" id="feedbackMessage">
+                Speak clearly into the microphone
+            </div>
+            
+            <!-- Audio visualizations -->
+            <canvas id="waveform"></canvas>
+            <canvas id="spectrogram"></canvas>
         </div>
+        
+        <!-- Recording playback area -->
+        <div id="recordingDisplay"></div>
     </div>
 
     <script>
@@ -82,15 +173,54 @@ with open(HTML_FILE, "w") as f:
         let audioBlob;
         let isRecording = false;
         let audioUrl = null;
+        let audioContext;
+        let analyser;
+        let scriptProcessor;
+        let targetWord = ""; // Will be set from Streamlit
         
         // Elements
         const recordButton = document.getElementById('recordButton');
         const buttonText = document.getElementById('buttonText');
         const statusText = document.getElementById('status');
         const recordingDisplay = document.getElementById('recordingDisplay');
+        const visualizationContainer = document.getElementById('visualizationContainer');
+        
+        // Feedback meters
+        const volumeBar = document.getElementById('volumeBar');
+        const clarityBar = document.getElementById('clarityBar');
+        const pitchBar = document.getElementById('pitchBar');
+        const volumeValue = document.getElementById('volumeValue');
+        const clarityValue = document.getElementById('clarityValue');
+        const pitchValue = document.getElementById('pitchValue');
+        const feedbackMessage = document.getElementById('feedbackMessage');
+        
+        // Canvas elements
+        const waveformCanvas = document.getElementById('waveform');
+        const spectrogramCanvas = document.getElementById('spectrogram');
+        const waveformCtx = waveformCanvas.getContext('2d');
+        const spectrogramCtx = spectrogramCanvas.getContext('2d');
         
         // Set up event listeners
         recordButton.addEventListener('click', toggleRecording);
+        
+        // Function to receive data from Streamlit
+        function onDataFromStreamlit(event) {
+            const data = event.data;
+            
+            // Check if it's a message from Streamlit
+            if (data.type === 'streamlit:setComponentValue') {
+                const value = data.value;
+                
+                // Check if the message contains target word data
+                if (value && value.targetWord) {
+                    targetWord = value.targetWord;
+                    console.log('Target word set:', targetWord);
+                }
+            }
+        }
+        
+        // Listen for messages from Streamlit
+        window.addEventListener('message', onDataFromStreamlit);
         
         // Toggle recording state
         function toggleRecording() {
@@ -98,6 +228,220 @@ with open(HTML_FILE, "w") as f:
                 startRecording();
             } else {
                 stopRecording();
+            }
+        }
+        
+        // Initialize audio analysis
+        function initAudioAnalysis(stream) {
+            try {
+                // Create audio context
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                
+                // Create analyser node
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 2048;
+                analyser.smoothingTimeConstant = 0.8;
+                
+                // Create script processor for detailed analysis
+                scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+                
+                // Connect audio source to analyser and script processor
+                const source = audioContext.createMediaStreamSource(stream);
+                source.connect(analyser);
+                analyser.connect(scriptProcessor);
+                scriptProcessor.connect(audioContext.destination);
+                
+                // Set up buffers for analysis
+                const bufferLength = analyser.frequencyBinCount;
+                const timeDataArray = new Uint8Array(bufferLength);
+                const frequencyDataArray = new Uint8Array(bufferLength);
+                
+                // Process audio data
+                scriptProcessor.onaudioprocess = function(audioProcessingEvent) {
+                    if (!isRecording) return;
+                    
+                    // Get time domain and frequency data
+                    analyser.getByteTimeDomainData(timeDataArray);
+                    analyser.getByteFrequencyData(frequencyDataArray);
+                    
+                    // Calculate audio metrics
+                    const metrics = calculateAudioMetrics(timeDataArray, frequencyDataArray);
+                    
+                    // Update visualizations
+                    updateVisualizations(timeDataArray, frequencyDataArray, metrics);
+                    
+                    // Send data to Streamlit
+                    sendRealtimeDataToStreamlit(metrics);
+                };
+                
+                // Show visualization container
+                visualizationContainer.style.display = 'block';
+                
+                return { analyser, scriptProcessor };
+            } catch (err) {
+                console.error('Error initializing audio analysis:', err);
+                return null;
+            }
+        }
+        
+        // Calculate audio metrics for feedback
+        function calculateAudioMetrics(timeDataArray, frequencyDataArray) {
+            // Calculate volume (amplitude)
+            let sumSquares = 0;
+            for (let i = 0; i < timeDataArray.length; i++) {
+                // Convert from 0-255 to -1 to 1
+                const amplitude = (timeDataArray[i] - 128) / 128;
+                sumSquares += amplitude * amplitude;
+            }
+            const rms = Math.sqrt(sumSquares / timeDataArray.length);
+            const volume = Math.min(100, Math.max(0, rms * 300)); // Scale to 0-100%
+            
+            // Calculate clarity (signal-to-noise ratio approximation)
+            // For simplicity, we'll use the ratio of mid frequencies to high frequencies
+            const midFreqSum = frequencyDataArray.slice(10, 50).reduce((a, b) => a + b, 0);
+            const highFreqSum = frequencyDataArray.slice(100, 200).reduce((a, b) => a + b, 0) + 1; // Add 1 to avoid division by zero
+            const clarity = Math.min(100, Math.max(0, (midFreqSum / highFreqSum) * 50));
+            
+            // Calculate pitch accuracy (simplified)
+            // In a real app, we'd compare to the target word's expected frequency distribution
+            // Here we'll just use a random value influenced by volume for demonstration
+            let pitchAccuracy;
+            if (targetWord) {
+                // With a real target word, we could do better analysis
+                // This is just a placeholder algorithm
+                const predictability = (Math.sin(Date.now() / 1000) + 1) / 2; // Oscillates between 0-1
+                pitchAccuracy = Math.min(100, Math.max(0, 70 + (volume / 10) * predictability));
+            } else {
+                // Without a target word, just provide an estimate based on volume
+                pitchAccuracy = Math.min(100, Math.max(0, 50 + (volume / 5)));
+            }
+            
+            // Generate feedback message
+            let feedback = '';
+            
+            if (volume < 20) {
+                feedback = 'Speak louder for better recognition';
+            } else if (volume > 80) {
+                feedback = 'You\'re speaking too loudly';
+            } else if (clarity < 40) {
+                feedback = 'Try to speak more clearly';
+            } else if (pitchAccuracy < 50) {
+                feedback = 'Focus on the correct pronunciation';
+            } else if (volume >= 20 && clarity >= 40 && pitchAccuracy >= 60) {
+                feedback = 'Good pronunciation! Keep going';
+            } else {
+                feedback = 'Continue speaking naturally';
+            }
+            
+            return {
+                volume,
+                clarity,
+                pitchAccuracy,
+                feedback
+            };
+        }
+        
+        // Update visual elements with metrics
+        function updateVisualizations(timeDataArray, frequencyDataArray, metrics) {
+            // Update meter bars
+            volumeBar.style.width = `${metrics.volume}%`;
+            clarityBar.style.width = `${metrics.clarity}%`;
+            pitchBar.style.width = `${metrics.pitchAccuracy}%`;
+            
+            // Update numeric values
+            volumeValue.textContent = `${Math.round(metrics.volume)}%`;
+            clarityValue.textContent = `${Math.round(metrics.clarity)}%`;
+            pitchValue.textContent = `${Math.round(metrics.pitchAccuracy)}%`;
+            
+            // Update feedback message
+            feedbackMessage.textContent = metrics.feedback;
+            
+            // Color code the feedback based on overall quality
+            const overallQuality = (metrics.volume + metrics.clarity + metrics.pitchAccuracy) / 3;
+            if (overallQuality >= 70) {
+                feedbackMessage.style.backgroundColor = '#e8f5e9'; // Light green
+                feedbackMessage.style.color = '#2e7d32'; // Dark green
+            } else if (overallQuality >= 50) {
+                feedbackMessage.style.backgroundColor = '#fff8e1'; // Light amber
+                feedbackMessage.style.color = '#ff8f00'; // Dark amber
+            } else {
+                feedbackMessage.style.backgroundColor = '#ffebee'; // Light red
+                feedbackMessage.style.color = '#c62828'; // Dark red
+            }
+            
+            // Draw waveform
+            drawWaveform(timeDataArray);
+            
+            // Draw spectrogram
+            drawSpectrogram(frequencyDataArray);
+        }
+        
+        // Draw waveform on canvas
+        function drawWaveform(timeDataArray) {
+            const width = waveformCanvas.width;
+            const height = waveformCanvas.height;
+            
+            waveformCtx.fillStyle = '#f0f0f0';
+            waveformCtx.fillRect(0, 0, width, height);
+            
+            waveformCtx.lineWidth = 2;
+            waveformCtx.strokeStyle = '#4CAF50';
+            waveformCtx.beginPath();
+            
+            const sliceWidth = width / timeDataArray.length;
+            let x = 0;
+            
+            for (let i = 0; i < timeDataArray.length; i++) {
+                const v = timeDataArray[i] / 128.0;
+                const y = v * height / 2;
+                
+                if (i === 0) {
+                    waveformCtx.moveTo(x, y);
+                } else {
+                    waveformCtx.lineTo(x, y);
+                }
+                
+                x += sliceWidth;
+            }
+            
+            waveformCtx.lineTo(width, height / 2);
+            waveformCtx.stroke();
+        }
+        
+        // Draw spectrogram on canvas
+        function drawSpectrogram(frequencyDataArray) {
+            const width = spectrogramCanvas.width;
+            const height = spectrogramCanvas.height;
+            
+            spectrogramCtx.fillStyle = '#f0f0f0';
+            spectrogramCtx.fillRect(0, 0, width, height);
+            
+            // We'll use the first 256 frequency bins (or fewer if not available)
+            const numBins = Math.min(256, frequencyDataArray.length);
+            const barWidth = width / numBins;
+            
+            for (let i = 0; i < numBins; i++) {
+                const value = frequencyDataArray[i];
+                const percent = value / 255;
+                const barHeight = height * percent;
+                const x = i * barWidth;
+                const y = height - barHeight;
+                
+                // Create gradient color based on frequency
+                const hue = (i / numBins) * 240; // blue to red
+                spectrogramCtx.fillStyle = `hsl(${hue}, 70%, 50%)`;
+                spectrogramCtx.fillRect(x, y, barWidth, barHeight);
+            }
+        }
+        
+        // Send real-time data to Streamlit
+        function sendRealtimeDataToStreamlit(metrics) {
+            if (window.Streamlit) {
+                window.Streamlit.setComponentValue({
+                    state: 'analyzing',
+                    metrics: metrics,
+                    timestamp: Date.now()
+                });
             }
         }
         
@@ -117,6 +461,9 @@ with open(HTML_FILE, "w") as f:
                 };
                 
                 mediaRecorder.onstop = processRecording;
+                
+                // Initialize audio analysis
+                const analysis = initAudioAnalysis(stream);
                 
                 // Start recording
                 mediaRecorder.start();
@@ -139,8 +486,24 @@ with open(HTML_FILE, "w") as f:
                 buttonText.textContent = 'Start Recording';
                 statusText.textContent = 'Processing recording...';
                 
+                // Hide visualization container
+                visualizationContainer.style.display = 'none';
+                
                 // Stop all tracks in the stream to release microphone
                 mediaRecorder.stream.getTracks().forEach(track => track.stop());
+                
+                // Clean up audio processing
+                if (scriptProcessor) {
+                    scriptProcessor.disconnect();
+                }
+                
+                if (analyser) {
+                    analyser.disconnect();
+                }
+                
+                if (audioContext) {
+                    audioContext.close().catch(console.error);
+                }
             }
         }
         
@@ -161,6 +524,26 @@ with open(HTML_FILE, "w") as f:
             recordingDisplay.innerHTML = '';
             recordingDisplay.appendChild(audioPlayer);
             
+            // Create download button
+            const downloadButton = document.createElement('button');
+            downloadButton.textContent = 'Download Recording';
+            downloadButton.style.marginTop = '10px';
+            downloadButton.style.padding = '5px 10px';
+            downloadButton.style.borderRadius = '4px';
+            downloadButton.style.backgroundColor = '#2196F3';
+            downloadButton.style.color = 'white';
+            downloadButton.style.border = 'none';
+            downloadButton.style.cursor = 'pointer';
+            
+            downloadButton.addEventListener('click', () => {
+                const a = document.createElement('a');
+                a.href = audioUrl;
+                a.download = 'pronunciation-recording.wav';
+                a.click();
+            });
+            
+            recordingDisplay.appendChild(downloadButton);
+            
             // Convert to base64 for passing to Streamlit
             const reader = new FileReader();
             reader.readAsDataURL(audioBlob);
@@ -176,9 +559,9 @@ with open(HTML_FILE, "w") as f:
         function sendToStreamlit(base64AudioData) {
             if (window.Streamlit) {
                 window.Streamlit.setComponentValue({
+                    state: 'complete',
                     data: base64AudioData,
-                    format: 'audio/wav',
-                    status: 'complete'
+                    format: 'audio/wav'
                 });
             }
         }
@@ -187,432 +570,71 @@ with open(HTML_FILE, "w") as f:
         if (window.Streamlit) {
             window.Streamlit.componentReady();
         }
-            
-        // Add real-time visualization function
-function setupVisualization() {
-    // Create visualization canvas if it doesn't exist
-    if (!document.getElementById('audio-visualizer')) {
-        const canvas = document.createElement('canvas');
-        canvas.id = 'audio-visualizer';
-        canvas.width = 300;
-        canvas.height = 60;
-        canvas.style.marginTop = '10px';
-        canvas.style.width = '100%';
-        canvas.style.borderRadius = '4px';
-        canvas.style.backgroundColor = '#f0f0f0';
-        
-        // Add it to the container
-        recordingDisplay.appendChild(canvas);
-        
-        // Add volume level indicator
-        const volumeIndicator = document.createElement('div');
-        volumeIndicator.id = 'volume-level';
-        volumeIndicator.style.width = '100%';
-        volumeIndicator.style.height = '4px';
-        volumeIndicator.style.backgroundColor = '#e0e0e0';
-        volumeIndicator.style.position = 'relative';
-        volumeIndicator.style.marginTop = '5px';
-        volumeIndicator.style.borderRadius = '2px';
-        
-        const volumeMeter = document.createElement('div');
-        volumeMeter.id = 'volume-meter';
-        volumeMeter.style.height = '100%';
-        volumeMeter.style.width = '0%';
-        volumeMeter.style.backgroundColor = '#4CAF50';
-        volumeMeter.style.borderRadius = '2px';
-        volumeMeter.style.transition = 'width 0.1s ease';
-        
-        volumeIndicator.appendChild(volumeMeter);
-        recordingDisplay.appendChild(volumeIndicator);
-        
-        // Add feedback text area
-        const feedbackText = document.createElement('div');
-        feedbackText.id = 'feedback-text';
-        feedbackText.style.marginTop = '5px';
-        feedbackText.style.fontSize = '14px';
-        feedbackText.style.color = '#666';
-        feedbackText.style.textAlign = 'center';
-        feedbackText.textContent = 'Ready to record';
-        
-        recordingDisplay.appendChild(feedbackText);
-    }
-    
-    return document.getElementById('audio-visualizer');
-}
-
-// Start audio visualization
-function startVisualization(stream) {
-    const canvas = setupVisualization();
-    const canvasCtx = canvas.getContext('2d');
-    const volumeMeter = document.getElementById('volume-meter');
-    const feedbackText = document.getElementById('feedback-text');
-    
-    // Set up audio context and analyzer
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    const analyser = audioContext.createAnalyser();
-    analyser.fftSize = 256;
-    const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
-    
-    // Connect the audio stream
-    const source = audioContext.createMediaStreamSource(stream);
-    source.connect(analyser);
-    
-    // Visualization function
-    function draw() {
-        if (!isRecording) return;
-        
-        requestAnimationFrame(draw);
-        
-        // Get frequency data
-        analyser.getByteFrequencyData(dataArray);
-        
-        // Calculate volume level (0-100)
-        let sum = 0;
-        for(let i = 0; i < bufferLength; i++) {
-            sum += dataArray[i];
-        }
-        const average = sum / bufferLength;
-        const volumePercentage = (average / 255) * 100;
-        
-        // Update volume meter
-        volumeMeter.style.width = `${volumePercentage}%`;
-        
-        // Update feedback text based on volume
-        if (volumePercentage < 5) {
-            feedbackText.textContent = 'Speak louder...';
-            feedbackText.style.color = '#F44336';
-        } else if (volumePercentage > 80) {
-            feedbackText.textContent = 'Too loud!';
-            feedbackText.style.color = '#F44336';
-        } else if (volumePercentage > 40) {
-            feedbackText.textContent = 'Good volume!';
-            feedbackText.style.color = '#4CAF50';
-        } else {
-            feedbackText.textContent = 'Speak a bit louder';
-            feedbackText.style.color = '#FFC107';
-        }
-        
-        // Draw visualization
-        canvasCtx.fillStyle = 'rgb(240, 240, 240)';
-        canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
-        
-        const barWidth = (canvas.width / bufferLength) * 2.5;
-        let x = 0;
-        
-        for(let i = 0; i < bufferLength; i++) {
-            const barHeight = (dataArray[i] / 255) * canvas.height;
-            
-            // Create gradient color based on frequency
-            const hue = i / bufferLength * 240;
-            canvasCtx.fillStyle = `hsl(${hue}, 70%, 50%)`;
-            
-            canvasCtx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
-            x += barWidth + 1;
-        }
-        
-        // Send data to Streamlit
-        if (window.Streamlit && isRecording) {
-            window.Streamlit.setComponentValue({
-                status: 'recording',
-                volume: volumePercentage,
-                frequencyData: Array.from(dataArray).slice(0, 10) // Send just first 10 values
-            });
-        }
-    }
-    
-    // Start visualization
-    draw();
-    
-    // Save audio context for cleanup
-    window.audioContext = audioContext;
-    
-    return analyser;
-}
-
-// Modify startRecording to include visualization
-async function startRecording() {
-    audioChunks = [];
-    
-    // Clear previous recording display
-    recordingDisplay.innerHTML = '';
-    
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        mediaRecorder = new MediaRecorder(stream);
-        
-        mediaRecorder.ondataavailable = (event) => {
-            audioChunks.push(event.data);
-        };
-        
-        mediaRecorder.onstop = processRecording;
-        
-        // Start recording
-        mediaRecorder.start();
-        isRecording = true;
-        recordButton.classList.add('recording');
-        buttonText.textContent = 'Stop Recording';
-        statusText.textContent = 'Recording in progress...';
-        
-        // Start visualization
-        startVisualization(stream);
-    } catch (err) {
-        console.error('Error accessing microphone:', err);
-        statusText.textContent = 'Error: Could not access microphone';
-    }
-}
-
-// Modify stopRecording to clean up
-function stopRecording() {
-    if (mediaRecorder && isRecording) {
-        mediaRecorder.stop();
-        isRecording = false;
-        recordButton.classList.remove('recording');
-        buttonText.textContent = 'Start Recording';
-        statusText.textContent = 'Processing recording...';
-        
-        // Stop all tracks in the stream to release microphone
-        mediaRecorder.stream.getTracks().forEach(track => track.stop());
-        
-        // Clean up audio context
-        if (window.audioContext && window.audioContext.state !== 'closed') {
-            window.audioContext.close().catch(console.error);
-        }
-    }
-}
-
-
-        // Add real-time visualization function
-        function setupVisualization() {
-            // Create visualization canvas if it doesn't exist
-            if (!document.getElementById('audio-visualizer')) {
-                const canvas = document.createElement('canvas');
-                canvas.id = 'audio-visualizer';
-                canvas.width = 300;
-                canvas.height = 60;
-                canvas.style.marginTop = '10px';
-                canvas.style.width = '100%';
-                canvas.style.borderRadius = '4px';
-                canvas.style.backgroundColor = '#f0f0f0';
-                
-                // Add it to the container
-                recordingDisplay.appendChild(canvas);
-                
-                // Add volume level indicator
-                const volumeIndicator = document.createElement('div');
-                volumeIndicator.id = 'volume-level';
-                volumeIndicator.style.width = '100%';
-                volumeIndicator.style.height = '4px';
-                volumeIndicator.style.backgroundColor = '#e0e0e0';
-                volumeIndicator.style.position = 'relative';
-                volumeIndicator.style.marginTop = '5px';
-                volumeIndicator.style.borderRadius = '2px';
-                
-                const volumeMeter = document.createElement('div');
-                volumeMeter.id = 'volume-meter';
-                volumeMeter.style.height = '100%';
-                volumeMeter.style.width = '0%';
-                volumeMeter.style.backgroundColor = '#4CAF50';
-                volumeMeter.style.borderRadius = '2px';
-                volumeMeter.style.transition = 'width 0.1s ease';
-                
-                volumeIndicator.appendChild(volumeMeter);
-                recordingDisplay.appendChild(volumeIndicator);
-                
-                // Add feedback text area
-                const feedbackText = document.createElement('div');
-                feedbackText.id = 'feedback-text';
-                feedbackText.style.marginTop = '5px';
-                feedbackText.style.fontSize = '14px';
-                feedbackText.style.color = '#666';
-                feedbackText.style.textAlign = 'center';
-                feedbackText.textContent = 'Ready to record';
-                
-                recordingDisplay.appendChild(feedbackText);
-            }
-            
-            return document.getElementById('audio-visualizer');
-        }
-
-        // Start audio visualization
-        function startVisualization(stream) {
-            const canvas = setupVisualization();
-            const canvasCtx = canvas.getContext('2d');
-            const volumeMeter = document.getElementById('volume-meter');
-            const feedbackText = document.getElementById('feedback-text');
-            
-            // Set up audio context and analyzer
-            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            const analyser = audioContext.createAnalyser();
-            analyser.fftSize = 256;
-            const bufferLength = analyser.frequencyBinCount;
-            const dataArray = new Uint8Array(bufferLength);
-            
-            // Connect the audio stream
-            const source = audioContext.createMediaStreamSource(stream);
-            source.connect(analyser);
-            
-            // Visualization function
-            function draw() {
-                if (!isRecording) return;
-                
-                requestAnimationFrame(draw);
-                
-                // Get frequency data
-                analyser.getByteFrequencyData(dataArray);
-                
-                // Calculate volume level (0-100)
-                let sum = 0;
-                for(let i = 0; i < bufferLength; i++) {
-                    sum += dataArray[i];
-                }
-                const average = sum / bufferLength;
-                const volumePercentage = (average / 255) * 100;
-                
-                // Update volume meter
-                volumeMeter.style.width = `${volumePercentage}%`;
-                
-                // Update feedback text based on volume
-                if (volumePercentage < 5) {
-                    feedbackText.textContent = 'Speak louder...';
-                    feedbackText.style.color = '#F44336';
-                } else if (volumePercentage > 80) {
-                    feedbackText.textContent = 'Too loud!';
-                    feedbackText.style.color = '#F44336';
-                } else if (volumePercentage > 40) {
-                    feedbackText.textContent = 'Good volume!';
-                    feedbackText.style.color = '#4CAF50';
-                } else {
-                    feedbackText.textContent = 'Speak a bit louder';
-                    feedbackText.style.color = '#FFC107';
-                }
-                
-                // Draw visualization
-                canvasCtx.fillStyle = 'rgb(240, 240, 240)';
-                canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
-                
-                const barWidth = (canvas.width / bufferLength) * 2.5;
-                let x = 0;
-                
-                for(let i = 0; i < bufferLength; i++) {
-                    const barHeight = (dataArray[i] / 255) * canvas.height;
-                    
-                    // Create gradient color based on frequency
-                    const hue = i / bufferLength * 240;
-                    canvasCtx.fillStyle = `hsl(${hue}, 70%, 50%)`;
-                    
-                    canvasCtx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
-                    x += barWidth + 1;
-                }
-                
-                // Send data to Streamlit
-                if (window.Streamlit && isRecording) {
-                    window.Streamlit.setComponentValue({
-                        status: 'recording',
-                        volume: volumePercentage,
-                        frequencyData: Array.from(dataArray).slice(0, 10) // Send just first 10 values
-                    });
-                }
-            }
-            
-            // Start visualization
-            draw();
-            
-            // Save audio context for cleanup
-            window.audioContext = audioContext;
-            
-            return analyser;
-        }
-
-        // Modify startRecording to include visualization
-        async function startRecording() {
-            audioChunks = [];
-            
-            // Clear previous recording display
-            recordingDisplay.innerHTML = '';
-            
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                mediaRecorder = new MediaRecorder(stream);
-                
-                mediaRecorder.ondataavailable = (event) => {
-                    audioChunks.push(event.data);
-                };
-                
-                mediaRecorder.onstop = processRecording;
-                
-                // Start recording
-                mediaRecorder.start();
-                isRecording = true;
-                recordButton.classList.add('recording');
-                buttonText.textContent = 'Stop Recording';
-                statusText.textContent = 'Recording in progress...';
-                
-                // Start visualization
-                startVisualization(stream);
-            } catch (err) {
-                console.error('Error accessing microphone:', err);
-                statusText.textContent = 'Error: Could not access microphone';
-            }
-        }
-
-        // Modify stopRecording to clean up
-        function stopRecording() {
-            if (mediaRecorder && isRecording) {
-                mediaRecorder.stop();
-                isRecording = false;
-                recordButton.classList.remove('recording');
-                buttonText.textContent = 'Start Recording';
-                statusText.textContent = 'Processing recording...';
-                
-                // Stop all tracks in the stream to release microphone
-                mediaRecorder.stream.getTracks().forEach(track => track.stop());
-                
-                // Clean up audio context
-                if (window.audioContext && window.audioContext.state !== 'closed') {
-                    window.audioContext.close().catch(console.error);
-                }
-            }
-        }
-            
     </script>
 </body>
 </html>
     """)
 
 # Create the custom component function
-def audio_recorder():
-    """Custom audio recorder component with JavaScript"""
+def audio_recorder(target_word=None):
+    """Custom audio recorder component with real-time pronunciation feedback"""
     try:
+        # Create a unique height based on whether we're setting a target word
+        height = 400 if target_word else 320
+        
+        # Create parameters for passing to the component
+        component_params = {}
+        if target_word:
+            component_params["targetWord"] = target_word
+        
         # Get the component value
         component_value = components.html(
             open(HTML_FILE, "r").read(),
-            height=200
+            height=height,
+            **component_params
         )
         
-        # Process the returned value
-        if component_value and isinstance(component_value, dict) and 'data' in component_value:
-            # Decode the base64 audio data
-            audio_bytes = base64.b64decode(component_value['data'])
-            
-            # Store in session state for persistence
-            st.session_state.audio_data = audio_bytes
-            st.session_state.audio_data_received = True
-            
-            # Display the audio player in Streamlit
-            audio_container = st.container()
-            with audio_container:
-                st.audio(audio_bytes, format="audio/wav")
-                st.success("Recording saved! You can replay it using the player above.")
-            
-            # Return the audio bytes
-            return audio_bytes
+        # Handle real-time analysis data
+        if component_value and isinstance(component_value, dict):
+            # Check if this is real-time analysis data
+            if component_value.get('state') == 'analyzing':
+                # Store metrics in session state
+                metrics = component_value.get('metrics', {})
+                st.session_state.realtime_metrics = metrics
+                return None
+                
+            # Check if this is the completed recording
+            if component_value.get('state') == 'complete' and 'data' in component_value:
+                # Decode the base64 audio data
+                audio_bytes = base64.b64decode(component_value['data'])
+                
+                # Store in session state for persistence
+                st.session_state.audio_data = audio_bytes
+                st.session_state.audio_data_received = True
+                
+                # Display the audio player in Streamlit
+                audio_container = st.container()
+                with audio_container:
+                    st.audio(audio_bytes, format="audio/wav")
+                    st.success("Recording saved! You can replay it using the player above.")
+                
+                # Return the audio bytes
+                return audio_bytes
         
         # If we already have audio data in session state, display it
         elif 'audio_data' in st.session_state and st.session_state.audio_data_received:
             st.audio(st.session_state.audio_data, format="audio/wav")
             st.success("Previous recording available. You can replay it or record a new one.")
             return st.session_state.audio_data
+        
+        # If real-time metrics are available, show them
+        if 'realtime_metrics' in st.session_state:
+            metrics = st.session_state.realtime_metrics
+            
+            # Clean up old metrics after recording
+            if component_value and isinstance(component_value, dict) and component_value.get('state') == 'complete':
+                if 'realtime_metrics' in st.session_state:
+                    del st.session_state.realtime_metrics
         
         return None
     except Exception as e:
