@@ -153,14 +153,16 @@ st.markdown("## 🎤 Pronunciation Practice")
         
 
 # Add a debug expander (you can remove this later)
+# Fixed code:
 with st.expander("Debug Information", expanded=False):
     st.write("Session State Keys:", list(st.session_state.keys()))
-    if 'audio_data' in st.session_state:
-        if st.session_state.audio_data is not None:
-            st.write("Audio data exists in session state:", 
-                     f"Size: {len(st.session_state.audio_data)} bytes")
-        else:
-            st.write("Audio data exists in session state but is None")
+    if 'audio_data' in st.session_state and st.session_state.audio_data is not None:
+        st.write("Audio data exists in session state:", 
+                 f"Size: {len(st.session_state.audio_data)} bytes")
+    elif 'audio_data' in st.session_state:
+        st.write("Audio data exists in session state but is None")
+    if 'audio_data_received' in st.session_state:
+        st.write("Audio received flag:", st.session_state.audio_data_received)
     
     # Add a manual audio player for the existing recording
     if 'audio_data' in st.session_state and st.session_state.audio_data:
