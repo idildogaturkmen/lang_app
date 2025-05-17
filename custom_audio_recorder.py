@@ -1017,7 +1017,7 @@ function stopRecording() {
     """)
 
 # Create the custom component function
-def audio_recorder(target_word=None):
+def audio_recorder(target_word):
     """Custom audio recorder component with real-time pronunciation feedback"""
     try:
         # Create a unique height based on whether we're setting a target word
