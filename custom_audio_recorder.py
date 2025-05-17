@@ -110,7 +110,8 @@ with open(HTML_FILE, "w") as f:
         <!-- Real-time feedback -->
         <div id="feedback" class="pronunciation-feedback"></div>
         
-        <audio id="audioPlayback" controls style="display: none; margin-top: 10px; width: 100%;"></audio>
+        <!-- Update the audio player style in the HTML template -->
+        <audio id="audioPlayback" controls style="display: none; margin-top: 15px; width: 100%; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);"></audio>
     </div>
 
     <script>
@@ -298,6 +299,8 @@ with open(HTML_FILE, "w") as f:
         function processRecording() {
             audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
             const audioUrl = URL.createObjectURL(audioBlob);
+            
+            // Make sure the audio player is visible
             audioPlayback.src = audioUrl;
             audioPlayback.style.display = 'block';
             
@@ -309,7 +312,7 @@ with open(HTML_FILE, "w") as f:
                 // Send to Streamlit
                 sendToStreamlit(base64data);
                 statusText.textContent = 'Recording complete!';
-                feedbackElement.textContent = 'Processing your pronunciation...';
+                feedbackElement.textContent = 'Recording available for playback';
             };
         }
         
@@ -347,17 +350,17 @@ _recorder_counter = 0
 
 # Create the custom component function
 def audio_recorder():
-    """Custom audio recorder component with JavaScript"""
+    """Custom audio recorder component with JavaScript that ensures recording playback"""
     global _recorder_counter
     
     try:
         # Increment the counter
         _recorder_counter += 1
         
-        # Add a debug message to see what's happening
+        # Create container for debug messages if needed
         debug_container = st.empty()
         
-        # Get the component value - DO NOT USE THE KEY PARAMETER AT ALL
+        # Get the component value
         component_value = components.html(
             open(HTML_FILE, "r").read(),
             height=200
@@ -365,9 +368,6 @@ def audio_recorder():
         
         # Process the returned value
         if component_value and isinstance(component_value, dict) and 'data' in component_value:
-            # Show debug info
-            debug_container.info("Audio data received, processing...")
-            
             # Decode the base64 audio data
             audio_bytes = base64.b64decode(component_value['data'])
             
@@ -375,19 +375,17 @@ def audio_recorder():
             st.session_state.audio_data = audio_bytes
             st.session_state.audio_data_received = True
             
-            # Add a manual trigger for rerun to ensure the UI updates
-            st.session_state.recording_complete = True
-            
-            # Force a rerun
-            time.sleep(0.5)  # Short delay
-            st.experimental_rerun()
+            # IMPORTANT: Display the audio player directly here
+            st.audio(audio_bytes, format="audio/wav")
             
             # Return the audio bytes
             return audio_bytes
         
-        # Clear the processing message if no data received yet
-        if not component_value:
-            debug_container.empty()
+        # Check if we already have audio data from a previous run
+        elif st.session_state.get('audio_data') is not None and st.session_state.get('audio_data_received', False):
+            # Show the audio player for existing recording
+            st.audio(st.session_state.audio_data, format="audio/wav")
+            return st.session_state.audio_data
         
         return None
     except Exception as e:
