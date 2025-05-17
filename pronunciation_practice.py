@@ -150,15 +150,17 @@ RECOGNITION_LANGUAGES = {
 
 # At the top of your pronunciation practice page (before other content)
 st.markdown("## 🎤 Pronunciation Practice")
+        
 
 # Add a debug expander (you can remove this later)
 with st.expander("Debug Information", expanded=False):
     st.write("Session State Keys:", list(st.session_state.keys()))
     if 'audio_data' in st.session_state:
-        st.write("Audio data exists in session state:", 
-                 f"Size: {len(st.session_state.audio_data)} bytes")
-    if 'audio_data_received' in st.session_state:
-        st.write("Audio received flag:", st.session_state.audio_data_received)
+        if st.session_state.audio_data is not None:
+            st.write("Audio data exists in session state:", 
+                     f"Size: {len(st.session_state.audio_data)} bytes")
+        else:
+            st.write("Audio data exists in session state but is None")
     
     # Add a manual audio player for the existing recording
     if 'audio_data' in st.session_state and st.session_state.audio_data:
@@ -799,35 +801,75 @@ class SimplePronunciationPractice:
                 # Apply normalization for fairer scores (70-100 range)
                 normalized_score = 70 + similarity * 0.3
                 results['normalized_score'] = min(100, normalized_score)
-            else:
-                # Simple match without Levenshtein
-                if recognized_text and target_word:
-                    if recognized_text.lower() == target_word.lower():
-                        results['normalized_score'] = 95
-                    elif target_word.lower() in recognized_text.lower():
-                        results['normalized_score'] = 80
-                    else:
-                        results['normalized_score'] = 60
-                else:
-                    results['normalized_score'] = 50
-        else:
-            # If speech recognition not available
-            results['normalized_score'] = 60
-            results['recognized_text'] = ""
-        
-        # Add phonetic analysis if possible
-        phonetics_results = self._phonetic_analysis(target_word, results.get('recognized_text', ''), language_code)
-        if phonetics_results:
-            results.update(phonetics_results)
-        
-        # Store results in session state for display
-        st.session_state.last_pronunciation_results = results
-        
+                
+                # NEW: Try to use Google Cloud Speech-to-Text API for better analysis
+                try:
+                    gcloud_results = self._analyze_with_google_speech(audio_data, target_word, language_code)
+                    if gcloud_results:
+                        results.update(gcloud_results)
+                except Exception as e:
+                    print(f"Google Speech API error: {e}")
+                
         # Clear status message
         status.empty()
         
         # Return the normalized score (or a default if not available)
         return results.get('normalized_score', 60)
+
+    def _analyze_with_google_speech(self, audio_data, target_word, language_code):
+        """Use Google Cloud Speech API for pronunciation assessment"""
+        # This is a placeholder - you would need to implement the actual API call
+        # The Google Speech-to-Text API doesn't directly provide pronunciation scores,
+        # but you can use confidence scores and alternatives to assess pronunciation
+        
+        try:
+            from google.cloud import speech_v1p1beta1 as speech
+            client = speech.SpeechClient()
+            
+            # Convert audio to required format
+            audio = speech.RecognitionAudio(content=audio_data)
+            
+            # Configure request with enhanced models
+            config = speech.RecognitionConfig(
+                encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
+                sample_rate_hertz=44100,
+                language_code=RECOGNITION_LANGUAGES.get(language_code, "en-US"),
+                enable_automatic_punctuation=False,
+                model="default",
+                use_enhanced=True,
+                enable_word_confidence=True,
+            )
+            
+            # Detect speech
+            response = client.recognize(config=config, audio=audio)
+            
+            # Process results
+            if response.results:
+                alternatives = response.results[0].alternatives
+                if alternatives:
+                    transcript = alternatives[0].transcript
+                    confidence = alternatives[0].confidence
+                    
+                    # Calculate a score based on confidence and word match
+                    if target_word.lower() in transcript.lower():
+                        accuracy = confidence * 100
+                    else:
+                        # If target word not found, use word confidence
+                        word_confidences = []
+                        for word_info in alternatives[0].words:
+                            word_confidences.append(word_info.confidence)
+                        accuracy = sum(word_confidences) / len(word_confidences) * 100 if word_confidences else 50
+                    
+                    return {
+                        'api_recognized_text': transcript,
+                        'api_confidence': confidence,
+                        'api_accuracy': accuracy
+                    }
+            
+            return None
+        except Exception as e:
+            print(f"Google Speech analysis error: {e}")
+            return None
     
     def _clean_text_for_comparison(self, text):
         """Clean text for comparison by removing punctuation and lowercasing"""
@@ -1656,11 +1698,56 @@ class AudioAnalyzer:
             return "#F44336"  # Red
     
     def get_pitch_accuracy(self, audio_data, language_code):
-        """Analyze pitch accuracy (placeholder for more advanced implementation)"""
-        # This is a simplified placeholder - would require audio signal processing
-        # In a real implementation, this would analyze pitch patterns
-        import random
-        return random.randint(60, 100)
+        """Analyze pitch accuracy using audio processing"""
+        try:
+            # Convert audio bytes to numpy array for processing
+            import numpy as np
+            import wave
+            import io
+            
+            # Read the audio data
+            with wave.open(io.BytesIO(audio_data)) as wf:
+                # Get basic audio properties
+                frames = wf.readframes(wf.getnframes())
+                audio_array = np.frombuffer(frames, dtype=np.int16)
+                
+                # Simple pitch detection (this is a basic implementation)
+                # In a real app, you'd use a more sophisticated pitch tracking algorithm
+                fft_result = np.fft.fft(audio_array)
+                magnitude = np.abs(fft_result)
+                frequency = np.fft.fftfreq(len(audio_array), 1.0/wf.getframerate())
+                
+                # Find dominant frequencies
+                peak_indices = np.argmax(magnitude[:len(magnitude)//2])
+                dominant_freq = frequency[peak_indices]
+                
+                # Compare to expected frequency ranges for language
+                # (This would need language-specific expected ranges)
+                expected_range = self._get_expected_frequency_range(language_code)
+                
+                # Calculate accuracy based on how well dominant frequency matches expected range
+                # This is a simplified calculation
+                if expected_range[0] <= dominant_freq <= expected_range[1]:
+                    return min(100, 70 + 30 * (1 - abs(dominant_freq - (expected_range[0] + expected_range[1])/2) / 
+                                            ((expected_range[1] - expected_range[0])/2)))
+                else:
+                    return max(50, 70 - 20 * min(1, abs(dominant_freq - (expected_range[0] + expected_range[1])/2) / 
+                                            (expected_range[1] - expected_range[0])))
+        except Exception as e:
+            print(f"Error in pitch analysis: {e}")
+            # Fallback to default value
+            return 70
+            
+    def _get_expected_frequency_range(self, language_code):
+        """Get expected frequency range by language"""
+        # Different languages have different typical pitch ranges
+        ranges = {
+            "es": [100, 300],  # Spanish
+            "fr": [120, 350],  # French
+            "de": [90, 280],   # German
+            "it": [110, 320],  # Italian
+        }
+        return ranges.get(language_code, [100, 300])  # Default range
     
     def get_rhythm_accuracy(self, audio_data, language_code):
         """Analyze speaking rhythm accuracy (placeholder for more advanced implementation)"""

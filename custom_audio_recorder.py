@@ -284,7 +284,7 @@ with open(HTML_FILE, "w") as f:
             }
         }
         
-        // Calculate audio metrics for feedback
+        // Enhance the calculateAudioMetrics function in the JavaScript code
         function calculateAudioMetrics(timeDataArray, frequencyDataArray) {
             // Calculate volume (amplitude)
             let sumSquares = 0;
@@ -296,39 +296,91 @@ with open(HTML_FILE, "w") as f:
             const rms = Math.sqrt(sumSquares / timeDataArray.length);
             const volume = Math.min(100, Math.max(0, rms * 300)); // Scale to 0-100%
             
-            // Calculate clarity (signal-to-noise ratio approximation)
-            // For simplicity, we'll use the ratio of mid frequencies to high frequencies
-            const midFreqSum = frequencyDataArray.slice(10, 50).reduce((a, b) => a + b, 0);
-            const highFreqSum = frequencyDataArray.slice(100, 200).reduce((a, b) => a + b, 0) + 1; // Add 1 to avoid division by zero
-            const clarity = Math.min(100, Math.max(0, (midFreqSum / highFreqSum) * 50));
+            // Enhanced clarity calculation - analyze mid-frequency energy
+            const lowFreqSum = frequencyDataArray.slice(5, 20).reduce((a, b) => a + b, 0);
+            const midFreqSum = frequencyDataArray.slice(20, 80).reduce((a, b) => a + b, 0);
+            const highFreqSum = frequencyDataArray.slice(80, 200).reduce((a, b) => a + b, 0) + 1; // Add 1 to avoid division by zero
             
-            // Calculate pitch accuracy (simplified)
-            // In a real app, we'd compare to the target word's expected frequency distribution
-            // Here we'll just use a random value influenced by volume for demonstration
-            let pitchAccuracy;
-            if (targetWord) {
-                // With a real target word, we could do better analysis
-                // This is just a placeholder algorithm
-                const predictability = (Math.sin(Date.now() / 1000) + 1) / 2; // Oscillates between 0-1
-                pitchAccuracy = Math.min(100, Math.max(0, 70 + (volume / 10) * predictability));
-            } else {
-                // Without a target word, just provide an estimate based on volume
-                pitchAccuracy = Math.min(100, Math.max(0, 50 + (volume / 5)));
+            // Clarity is based on the balance of frequencies - speech needs good mid frequencies
+            const freqBalance = midFreqSum / (lowFreqSum + highFreqSum + 1);
+            const clarity = Math.min(100, Math.max(0, freqBalance * 200));
+            
+            // Enhanced pitch calculation - estimate based on zero-crossings in time domain
+            let zeroCrossings = 0;
+            let prevSample = timeDataArray[0];
+            for (let i = 1; i < timeDataArray.length; i++) {
+                if ((prevSample < 128 && timeDataArray[i] >= 128) || 
+                    (prevSample >= 128 && timeDataArray[i] < 128)) {
+                    zeroCrossings++;
+                }
+                prevSample = timeDataArray[i];
             }
             
-            // Generate feedback message
+            // Convert zero-crossings to a rough estimate of fundamental frequency
+            const sampleRate = 44100; // Typical sample rate
+            const audioLength = timeDataArray.length / sampleRate; // Length in seconds
+            const estimatedFreq = zeroCrossings / (2 * audioLength);
+            
+            // For pitch accuracy, we compare to an expected range based on the target word
+            // This is a simplified approach - in a real app, you'd use pre-computed expected pitch for each word
+            let targetFreqMin, targetFreqMax;
+            if (targetWord) {
+                // Set expected frequency range based on word properties
+                // This is just an example - ideally this would come from a database of target words
+                const firstChar = targetWord.charAt(0).toLowerCase();
+                if ('aeiou'.includes(firstChar)) {
+                    // Vowels typically have higher pitch
+                    targetFreqMin = 180;
+                    targetFreqMax = 300;
+                } else {
+                    // Consonants typically have lower pitch
+                    targetFreqMin = 120;
+                    targetFreqMax = 250;
+                }
+            } else {
+                // Default range
+                targetFreqMin = 100;
+                targetFreqMax = 400;
+            }
+            
+            // Calculate pitch accuracy based on estimated frequency
+            let pitchAccuracy;
+            if (estimatedFreq < targetFreqMin) {
+                // Too low
+                pitchAccuracy = Math.max(30, 70 - (targetFreqMin - estimatedFreq) / 10);
+            } else if (estimatedFreq > targetFreqMax) {
+                // Too high
+                pitchAccuracy = Math.max(30, 70 - (estimatedFreq - targetFreqMax) / 10);
+            } else {
+                // Within range - calculate how close to ideal center
+                const idealCenter = (targetFreqMin + targetFreqMax) / 2;
+                const distanceFromIdeal = Math.abs(estimatedFreq - idealCenter);
+                const rangeHalfWidth = (targetFreqMax - targetFreqMin) / 2;
+                pitchAccuracy = 80 + 20 * (1 - distanceFromIdeal / rangeHalfWidth);
+            }
+            
+            // Ensure values are in valid range
+            pitchAccuracy = Math.min(100, Math.max(0, pitchAccuracy));
+            
+            // Generate more specific feedback based on metrics
             let feedback = '';
             
             if (volume < 20) {
                 feedback = 'Speak louder for better recognition';
-            } else if (volume > 80) {
-                feedback = 'You\'re speaking too loudly';
+            } else if (volume > 85) {
+                feedback = 'Speaking too loudly, please lower your voice';
             } else if (clarity < 40) {
-                feedback = 'Try to speak more clearly';
+                feedback = 'Try to speak more clearly and articulate each sound';
             } else if (pitchAccuracy < 50) {
-                feedback = 'Focus on the correct pronunciation';
+                if (estimatedFreq < targetFreqMin) {
+                    feedback = 'Try speaking with a slightly higher pitch';
+                } else if (estimatedFreq > targetFreqMax) {
+                    feedback = 'Try speaking with a slightly lower pitch';
+                } else {
+                    feedback = 'Focus on the correct pronunciation';
+                }
             } else if (volume >= 20 && clarity >= 40 && pitchAccuracy >= 60) {
-                feedback = 'Good pronunciation! Keep going';
+                feedback = 'Great pronunciation! Keep it up';
             } else {
                 feedback = 'Continue speaking naturally';
             }
@@ -337,7 +389,8 @@ with open(HTML_FILE, "w") as f:
                 volume,
                 clarity,
                 pitchAccuracy,
-                feedback
+                feedback,
+                estimatedFrequency: estimatedFreq
             };
         }
         
