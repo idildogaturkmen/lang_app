@@ -1,95 +1,352 @@
 """
-Simplified but Guaranteed Example Sentence Generator
-----------------------------------------------------
-This implementation takes a different approach: using high-quality templates
-for all words to guarantee appropriate examples.
+API-First Example Sentence Generator with Strong Context Filtering
+-----------------------------------------------------------------
+This implementation prioritizes API examples but ensures they're relevant
 """
 
+import requests
 import os
 import json
 import random
+import re
+import time
 from functools import lru_cache
 
 class ExampleSentenceGenerator:
     def __init__(self, translate_func=None, debug=False):
-        """Initialize the example sentence generator."""
+        """
+        Initialize the example sentence generator.
+        
+        Args:
+            translate_func: A function that takes (text, target_language) and returns translated text
+            debug: Enable debug output
+        """
         self.translate_func = translate_func
         self.debug = debug
         self.setup_cache_dir()
+        self._initialize_word_data()
         
     def setup_cache_dir(self):
         """Create cache directory if it doesn't exist."""
         self.cache_dir = "sentence_cache"
         os.makedirs(self.cache_dir, exist_ok=True)
     
+    def _initialize_word_data(self):
+        """Initialize word-specific data for better filtering."""
+        # Words with special context requirements
+        self.special_word_contexts = {
+            # For each word, define required and forbidden context words
+            "glasses": {
+                "required_contexts": ["eye", "vision", "see", "wear", "read", "sight", "prescription", "lens", "optician"],
+                "forbidden_contexts": ["glass", "fibre", "fiber", "window", "bottle", "drink", "mirror", "cup"]
+            },
+            "glass": {
+                "required_contexts": ["drink", "window", "bottle", "cup", "mirror", "pour", "fill", "break"],
+                "forbidden_contexts": ["eye", "vision", "wear", "read", "prescription", "lens"]
+            },
+            "top": {
+                "required_contexts": ["wear", "shirt", "cloth", "outfit", "dress", "fashion", "bought", "blue", "red", "color", "colour"],
+                "forbidden_contexts": ["hill", "mountain", "stop", "desktop", "laptop", "spin", "topped", "topping"]
+            }
+        }
+        
+        # Words that commonly appear in wrong contexts
+        self.problematic_words = set(["glasses", "glass", "top", "fly", "bear", "chest", "box", "member"])
+        
+        # Base words that shouldn't be confused with their variants
+        self.base_words = {
+            "glasses": ["glass", "eyeglasses", "spectacles", "fiberglass", "fibreglass"],
+            "glass": ["glasses", "eyeglasses", "fiberglass", "fibreglass"],
+            "top": ["stop", "topped", "topping", "laptop", "desktop", "rooftop", "mountaintop"],
+        }
+        
+        # Words that are typically plural
+        self.plural_words = set([
+            "glasses", "pants", "shorts", "scissors", "jeans", "trousers", "tights",
+            "goggles", "eyeglasses", "spectacles", "sunglasses", "shades"
+        ])
+        
+        # Word-to-category mapping for context hints and fallback templates
+        self.word_to_category = {
+            # Eyewear
+            "glasses": "eyewear",
+            "sunglasses": "eyewear",
+            "spectacles": "eyewear",
+            "eyeglasses": "eyewear",
+            "goggles": "eyewear",
+            
+            # Clothing
+            "top": "clothing",
+            "shirt": "clothing",
+            "pants": "clothing",
+            "jeans": "clothing",
+            "dress": "clothing",
+            "shorts": "clothing",
+            "sweater": "clothing",
+            "jacket": "clothing",
+            "coat": "clothing",
+            "hat": "clothing",
+            
+            # Drink containers
+            "glass": "drinkware",
+            "cup": "drinkware",
+            "mug": "drinkware",
+            "bottle": "drinkware",
+            
+            # Additional mappings
+            "dog": "animals",
+            "cat": "animals",
+            "chair": "furniture",
+            "table": "furniture",
+            "phone": "electronics",
+            "computer": "electronics",
+            "car": "vehicles",
+            "bike": "vehicles"
+        }
+        
+        # Template categories for fallback
+        self.category_templates = {
+            # Eyewear templates
+            "eyewear": [
+                "I can't find my {word} anywhere.",
+                "These {word} help me see better.",
+                "She wears {word} for reading.",
+                "My {word} are scratched and need to be replaced.",
+                "He forgot his {word} at home today."
+            ],
+            
+            # Clothing templates
+            "clothing": [
+                "I bought a new {word} for the party.",
+                "This {word} is very comfortable to wear.",
+                "She likes wearing a blue {word} with jeans.",
+                "The {word} is hanging in the closet.",
+                "I need to wash my favorite {word}."
+            ],
+            
+            # Animals
+            "animals": [
+                "The {word} is sleeping under the tree.",
+                "I saw a {word} at the zoo yesterday.",
+                "My friend has a {word} as a pet.",
+                "The {word} was running in the park.",
+                "That {word} looks very friendly."
+            ],
+            
+            # Electronics
+            "electronics": [
+                "I need to charge my {word}.",
+                "This {word} has many useful features.",
+                "My {word} stopped working yesterday.",
+                "She bought a new {word} online.",
+                "The {word} comes with a one-year warranty."
+            ],
+            
+            # Furniture
+            "furniture": [
+                "We placed the {word} near the window.",
+                "This {word} is very comfortable.",
+                "The {word} doesn't fit in the living room.",
+                "We need to assemble the new {word}.",
+                "I bought this {word} at a garage sale."
+            ],
+            
+            # Vehicles
+            "vehicles": [
+                "I parked my {word} in the garage.",
+                "The {word} needs to be serviced.",
+                "She drives a blue {word} to work.",
+                "We rented a {word} for our vacation.",
+                "My brother's {word} is very fast."
+            ],
+            
+            # Drinkware
+            "drinkware": [
+                "I filled the {word} with water.",
+                "She dropped the {word} and it broke.",
+                "This {word} keeps my coffee hot for hours.",
+                "The {word} is made of ceramic.",
+                "I need to wash this {word}."
+            ],
+            
+            # General
+            "general": [
+                "I placed the {word} on the table.",
+                "Can you pass me that {word}, please?",
+                "The {word} is in the drawer.",
+                "She's looking for her {word}.",
+                "This {word} belongs to my brother."
+            ]
+        }
+    
     def get_example_sentence(self, word, target_language, category=None):
-        """Get an example sentence for a word with translation."""
+        """
+        Get an example sentence for a word with translation.
+        
+        Args:
+            word: The word to get an example for
+            target_language: The language code to translate to
+            category: Optional category hint for better templates
+            
+        Returns:
+            dict: {"english": "Example sentence.", "translated": "Translated example.", "source": "api_name"}
+        """
         try:
-            # Normalize word
-            original_word = word
+            # Clean and normalize the word
             word = word.strip().lower()
             
-            # Get appropriate template category
-            category = self._get_category(word, category)
+            if self.debug:
+                print(f"Getting example for: '{word}'")
             
-            # Generate example
-            english_example = self._get_template_example(word, category)
+            # Only use API for words that aren't known to cause problems
+            if word not in self.problematic_words:
+                # Get example from API (Free Dictionary or Wordnik)
+                api_example = self._get_api_example(word, target_language)
+                if api_example:
+                    return api_example
+            else:
+                if self.debug:
+                    print(f"'{word}' is a problematic word - looking for context-specific example")
+                    
+                # For problematic words, try to get context-specific examples
+                context_example = self._get_context_specific_example(word, target_language)
+                if context_example:
+                    return context_example
             
-            # Translate
-            translated_example = self._translate(english_example, target_language)
-            
-            return {
-                "english": english_example,
-                "translated": translated_example,
-                "source": f"{category}_template"
-            }
+            # If no API example or problematic word, use template
+            template_example = self._get_template_example(word, target_language)
+            return template_example
             
         except Exception as e:
             if self.debug:
                 print(f"Error getting example sentence: {e}")
             
-            # Simple fallback
+            # Fallback
             return {
                 "english": f"This is a {word}.",
                 "translated": self._translate(f"This is a {word}.", target_language),
                 "source": "basic_fallback"
             }
     
-    def _get_category(self, word, hint_category=None):
-        """Determine the appropriate category for the word."""
-        # Check explicit mappings first
-        if word in self.word_category_map:
-            return self.word_category_map[word]
+    def _get_api_example(self, word, target_language):
+        """Get example from APIs with basic filtering."""
+        # Try Free Dictionary first
+        example = self._get_free_dictionary_example(word, target_language)
+        if example:
+            return example
             
-        # Use hint if provided and valid
-        if hint_category and hint_category in self.template_map:
-            return hint_category
+        # Then try Wordnik
+        example = self._get_wordnik_example(word, target_language)
+        if example:
+            return example
             
-        # Default to general
-        return "general"
+        return None
     
-    def _get_template_example(self, word, category):
-        """Get a template example for the word."""
-        # Get templates for this category
-        templates = self.template_map.get(category, self.template_map["general"])
+    def _get_context_specific_example(self, word, target_language):
+        """
+        Get a context-specific example for problematic words.
+        This method applies stricter filtering based on context words.
+        """
+        # Try Free Dictionary with context filtering
+        example = self._get_free_dictionary_example_with_context(word, target_language)
+        if example:
+            return example
+            
+        # Try Wordnik with context filtering
+        example = self._get_wordnik_example_with_context(word, target_language)
+        if example:
+            return example
+            
+        return None
+    
+    def _get_template_example(self, word, target_language):
+        """Get a template example as fallback."""
+        category = self.word_to_category.get(word, "general")
+        templates = self.category_templates.get(category, self.category_templates["general"])
         
         # Select a random template
         template = random.choice(templates)
         
         # Handle plurals properly
         if word in self.plural_words:
-            # These words are typically plural
             english_example = template.replace("a {word}", "{word}").replace("the {word}", "the {word}").format(word=word)
         else:
             english_example = template.format(word=word)
         
-        return english_example
+        # Translate
+        translated_example = self._translate(english_example, target_language)
+        
+        return {
+            "english": english_example,
+            "translated": translated_example,
+            "source": "template_" + category
+        }
+    
+    def _contains_exact_word(self, text, word):
+        """Check if text contains the exact word with proper word boundaries."""
+        pattern = r'\b' + re.escape(word) + r'\b'
+        return re.search(pattern, text.lower()) is not None
+    
+    def _contains_any_word(self, text, words):
+        """Check if text contains any of the words in the list."""
+        text_lower = text.lower()
+        for word in words:
+            if self._contains_exact_word(text_lower, word):
+                return True
+        return False
+    
+    def _is_valid_sentence(self, text):
+        """Check if text is a valid, complete sentence."""
+        # Must end with sentence-ending punctuation
+        if not text.strip().endswith(('.', '!', '?')):
+            return False
+            
+        # Must be a reasonable length
+        words = text.split()
+        if len(words) < 3 or len(words) > 20:
+            return False
+            
+        # Shouldn't contain semicolons (often indicates a list, not a sentence)
+        if ';' in text:
+            return False
+            
+        # Shouldn't be metadata
+        if "example of" in text.lower() or "examples of" in text.lower():
+            return False
+            
+        return True
+    
+    def _check_context_requirements(self, text, word):
+        """
+        Check if a sentence meets the context requirements for a word.
+        For problematic words, we have specific required and forbidden contexts.
+        """
+        if word not in self.special_word_contexts:
+            return True
+            
+        context_rules = self.special_word_contexts[word]
+        text_lower = text.lower()
+        
+        # Check for required context words
+        required_contexts = context_rules.get("required_contexts", [])
+        if required_contexts:
+            if not any(context in text_lower for context in required_contexts):
+                if self.debug:
+                    print(f"Missing required context for '{word}' in: '{text}'")
+                return False
+                
+        # Check for forbidden context words
+        forbidden_contexts = context_rules.get("forbidden_contexts", [])
+        if forbidden_contexts:
+            if any(context in text_lower for context in forbidden_contexts):
+                if self.debug:
+                    print(f"Found forbidden context for '{word}' in: '{text}'")
+                return False
+                
+        return True
     
     def _translate(self, text, target_language):
         """Translate text using the provided translation function."""
-        if not text:
-            return ""
-            
         if self.translate_func:
             try:
                 return self.translate_func(text, target_language)
@@ -100,285 +357,204 @@ class ExampleSentenceGenerator:
         else:
             return f"[Translation to {target_language}]"
     
-    # Words that are typically plural
-    plural_words = {
-        "glasses", "pants", "shorts", "scissors", "jeans", "trousers",
-        "goggles", "sunglasses", "spectacles", "eyeglasses", "headphones"
-    }
+    def _get_free_dictionary_example(self, word, target_language):
+        """Get example from Free Dictionary API with basic filtering."""
+        try:
+            url = f"https://api.dictionaryapi.dev/api/v2/entries/en/{word}"
+            response = requests.get(url, timeout=5)
+            
+            if response.status_code != 200:
+                return None
+                
+            data = response.json()
+            
+            # Extract example sentences
+            examples = []
+            if isinstance(data, list) and len(data) > 0:
+                for meaning in data[0].get('meanings', []):
+                    for definition in meaning.get('definitions', []):
+                        if 'example' in definition and definition['example']:
+                            example = definition['example']
+                            if self._contains_exact_word(example, word) and self._is_valid_sentence(example):
+                                examples.append(example)
+            
+            if examples:
+                # Choose a random example
+                english_example = random.choice(examples)
+                
+                # Clean up the example
+                english_example = self._clean_example(english_example)
+                
+                # Translate
+                translated_example = self._translate(english_example, target_language)
+                
+                return {
+                    "english": english_example,
+                    "translated": translated_example,
+                    "source": "free_dictionary_api"
+                }
+            
+            return None
+        except Exception as e:
+            if self.debug:
+                print(f"Free Dictionary API error: {e}")
+            return None
     
-    # Comprehensive mapping of words to categories
-    word_category_map = {
-        # Eyewear
-        "glasses": "eyewear",
-        "sunglasses": "eyewear",
-        "spectacles": "eyewear",
-        "eyeglasses": "eyewear",
-        "goggles": "eyewear",
-        "contacts": "eyewear",
-        "shades": "eyewear",
-        
-        # Clothing
-        "top": "clothing",
-        "shirt": "clothing",
-        "pants": "clothing",
-        "jeans": "clothing",
-        "dress": "clothing",
-        "shorts": "clothing",
-        "sweater": "clothing",
-        "jacket": "clothing",
-        "coat": "clothing",
-        "hat": "clothing",
-        "gloves": "clothing",
-        "socks": "clothing",
-        "shoes": "clothing",
-        "boots": "clothing",
-        "scarf": "clothing",
-        "tie": "clothing",
-        "belt": "clothing",
-        "skirt": "clothing",
-        "blouse": "clothing",
-        "suit": "clothing",
-        
-        # Food
-        "apple": "food",
-        "banana": "food",
-        "orange": "food",
-        "bread": "food",
-        "cheese": "food",
-        "chicken": "food",
-        "meat": "food",
-        "fish": "food",
-        "pasta": "food",
-        "rice": "food",
-        "vegetable": "food",
-        "fruit": "food",
-        "pizza": "food",
-        "salad": "food",
-        "sandwich": "food",
-        "soup": "food",
-        "cake": "food",
-        "cookie": "food",
-        "chocolate": "food",
-        "candy": "food",
-        
-        # Animals
-        "dog": "animals",
-        "cat": "animals",
-        "bird": "animals",
-        "fish": "animals",
-        "horse": "animals",
-        "cow": "animals",
-        "sheep": "animals",
-        "pig": "animals",
-        "lion": "animals",
-        "tiger": "animals",
-        "bear": "animals",
-        "elephant": "animals",
-        "monkey": "animals",
-        "giraffe": "animals",
-        "zebra": "animals",
-        "rabbit": "animals",
-        
-        # Electronics
-        "phone": "electronics",
-        "computer": "electronics",
-        "laptop": "electronics",
-        "tablet": "electronics",
-        "television": "electronics",
-        "tv": "electronics",
-        "camera": "electronics",
-        "speaker": "electronics",
-        "headphones": "electronics",
-        "microphone": "electronics",
-        "keyboard": "electronics",
-        "mouse": "electronics",
-        
-        # Furniture
-        "chair": "furniture",
-        "table": "furniture",
-        "desk": "furniture",
-        "bed": "furniture",
-        "sofa": "furniture",
-        "couch": "furniture",
-        "bookshelf": "furniture",
-        "cabinet": "furniture",
-        "drawer": "furniture",
-        "wardrobe": "furniture",
-        "dresser": "furniture",
-        "lamp": "furniture",
-        
-        # Vehicles
-        "car": "vehicles",
-        "bike": "vehicles",
-        "bicycle": "vehicles",
-        "motorcycle": "vehicles",
-        "bus": "vehicles",
-        "train": "vehicles",
-        "airplane": "vehicles",
-        "boat": "vehicles",
-        "ship": "vehicles",
-        "truck": "vehicles",
-        "van": "vehicles",
-        "scooter": "vehicles",
-        
-        # Drinks/Containers
-        "cup": "drinkware",
-        "mug": "drinkware",
-        "glass": "drinkware",  # Singular glass, not eyewear
-        "bottle": "drinkware",
-        "thermos": "drinkware",
-        "flask": "drinkware",
-        "teacup": "drinkware",
-        "wineglass": "drinkware",
-        "water": "drinks",
-        "coffee": "drinks",
-        "tea": "drinks",
-        "juice": "drinks",
-        "milk": "drinks",
-        "soda": "drinks",
-        "wine": "drinks",
-        "beer": "drinks"
-    }
+    def _get_free_dictionary_example_with_context(self, word, target_language):
+        """Get example from Free Dictionary API with strict context filtering."""
+        try:
+            url = f"https://api.dictionaryapi.dev/api/v2/entries/en/{word}"
+            response = requests.get(url, timeout=5)
+            
+            if response.status_code != 200:
+                return None
+                
+            data = response.json()
+            
+            # Extract example sentences
+            examples = []
+            if isinstance(data, list) and len(data) > 0:
+                for meaning in data[0].get('meanings', []):
+                    for definition in meaning.get('definitions', []):
+                        if 'example' in definition and definition['example']:
+                            example = definition['example']
+                            # Apply all our filters
+                            if (self._contains_exact_word(example, word) and 
+                                self._is_valid_sentence(example) and
+                                self._check_context_requirements(example, word)):
+                                
+                                # For base words, make sure their variants don't appear
+                                if word in self.base_words:
+                                    # Skip if the example contains any of the variants
+                                    if not self._contains_any_word(example, self.base_words[word]):
+                                        examples.append(example)
+                                else:
+                                    examples.append(example)
+            
+            if examples:
+                # Choose a random example
+                english_example = random.choice(examples)
+                
+                # Clean up the example
+                english_example = self._clean_example(english_example)
+                
+                # Translate
+                translated_example = self._translate(english_example, target_language)
+                
+                return {
+                    "english": english_example,
+                    "translated": translated_example,
+                    "source": "free_dictionary_api_context_filtered"
+                }
+            
+            return None
+        except Exception as e:
+            if self.debug:
+                print(f"Free Dictionary API error: {e}")
+            return None
     
-    # Comprehensive template map organized by category
-    template_map = {
-        # Eyewear templates - specifically crafted for glasses
-        "eyewear": [
-            "I can't find my {word} anywhere.",
-            "These {word} help me see better.",
-            "She wears {word} for reading.",
-            "My {word} are scratched and need to be replaced.",
-            "He forgot his {word} at home today.",
-            "The doctor prescribed new {word} for my vision.",
-            "These {word} protect my eyes from the sun.",
-            "I bought new {word} at the optician yesterday.",
-            "The {word} are on the nightstand.",
-            "I need to clean my {word}."
-        ],
+    def _get_wordnik_example(self, word, target_language):
+        """Get example from Wordnik API with basic filtering."""
+        try:
+            url = f"https://api.wordnik.com/v4/word.json/{word}/examples"
+            response = requests.get(url, timeout=5)
+            
+            if response.status_code != 200:
+                return None
+                
+            data = response.json()
+            
+            examples = []
+            for example in data.get('examples', []):
+                if 'text' in example and example['text']:
+                    text = example['text']
+                    if self._contains_exact_word(text, word) and self._is_valid_sentence(text):
+                        examples.append(text)
+            
+            if examples:
+                # Choose a random example
+                english_example = random.choice(examples)
+                
+                # Clean up the example
+                english_example = self._clean_example(english_example)
+                
+                # Translate
+                translated_example = self._translate(english_example, target_language)
+                
+                return {
+                    "english": english_example,
+                    "translated": translated_example,
+                    "source": "wordnik_api"
+                }
+            
+            return None
+        except Exception as e:
+            if self.debug:
+                print(f"Wordnik API error: {e}")
+            return None
+    
+    def _get_wordnik_example_with_context(self, word, target_language):
+        """Get example from Wordnik API with strict context filtering."""
+        try:
+            url = f"https://api.wordnik.com/v4/word.json/{word}/examples"
+            response = requests.get(url, timeout=5)
+            
+            if response.status_code != 200:
+                return None
+                
+            data = response.json()
+            
+            examples = []
+            for example in data.get('examples', []):
+                if 'text' in example and example['text']:
+                    text = example['text']
+                    # Apply all our filters
+                    if (self._contains_exact_word(text, word) and 
+                        self._is_valid_sentence(text) and
+                        self._check_context_requirements(text, word)):
+                        
+                        # For base words, make sure their variants don't appear
+                        if word in self.base_words:
+                            # Skip if the example contains any of the variants
+                            if not self._contains_any_word(text, self.base_words[word]):
+                                examples.append(text)
+                        else:
+                            examples.append(text)
+            
+            if examples:
+                # Choose a random example
+                english_example = random.choice(examples)
+                
+                # Clean up the example
+                english_example = self._clean_example(english_example)
+                
+                # Translate
+                translated_example = self._translate(english_example, target_language)
+                
+                return {
+                    "english": english_example,
+                    "translated": translated_example,
+                    "source": "wordnik_api_context_filtered"
+                }
+            
+            return None
+        except Exception as e:
+            if self.debug:
+                print(f"Wordnik API error: {e}")
+            return None
+    
+    def _clean_example(self, example):
+        """Clean and format an example sentence."""
+        # Remove quotes, extra spaces, etc.
+        example = example.strip()
+        example = re.sub(r'\s+', ' ', example)
         
-        # Clothing templates - specifically for apparel
-        "clothing": [
-            "I bought a new {word} for the party.",
-            "This {word} is very comfortable to wear.",
-            "She likes wearing a blue {word} with jeans.",
-            "The {word} is hanging in the closet.",
-            "I need to wash my favorite {word}.",
-            "He gave me a {word} as a gift.",
-            "The store sells different styles of {word}.",
-            "My sister borrowed my {word} yesterday.",
-            "This {word} doesn't fit me anymore.",
-            "I spilled coffee on my {word} this morning."
-        ],
+        # Capitalize first letter
+        if example and not example[0].isupper():
+            example = example[0].upper() + example[1:]
         
-        # Food templates
-        "food": [
-            "This {word} tastes delicious.",
-            "I love eating {word} for breakfast.",
-            "My mother makes the best {word} I've ever tasted.",
-            "Would you like some {word} with your meal?",
-            "The {word} is fresh from the market.",
-            "She bought some {word} for dinner tonight.",
-            "We need more {word} for the recipe.",
-            "The {word} smells wonderful.",
-            "This restaurant serves excellent {word}.",
-            "I learned how to cook {word} last year."
-        ],
+        # Ensure ending punctuation
+        if example and not example[-1] in '.!?':
+            example += '.'
         
-        # Animal templates
-        "animals": [
-            "The {word} is sleeping under the tree.",
-            "I saw a {word} at the zoo yesterday.",
-            "My friend has a {word} as a pet.",
-            "The {word} was running in the park.",
-            "That {word} looks very friendly.",
-            "We watched the {word} playing in the garden.",
-            "The {word} was eating some food.",
-            "There's a {word} on the path ahead.",
-            "The children love watching the {word}.",
-            "The {word} is a fascinating animal."
-        ],
-        
-        # Electronics templates
-        "electronics": [
-            "I need to charge my {word}.",
-            "This {word} has many useful features.",
-            "My {word} stopped working yesterday.",
-            "She bought a new {word} online.",
-            "The {word} comes with a one-year warranty.",
-            "I use my {word} every day.",
-            "Can you help me set up this {word}?",
-            "The {word} is on sale this weekend.",
-            "My brother got a new {word} for his birthday.",
-            "This {word} is the latest model."
-        ],
-        
-        # Furniture templates
-        "furniture": [
-            "We placed the {word} near the window.",
-            "This {word} is very comfortable.",
-            "The {word} doesn't fit in the living room.",
-            "We need to assemble the new {word}.",
-            "I bought this {word} at a garage sale.",
-            "The {word} matches our other furniture.",
-            "Can you help me move this {word}?",
-            "This {word} has been in our family for generations.",
-            "The {word} needs to be cleaned.",
-            "We're looking for a new {word} for the bedroom."
-        ],
-        
-        # Vehicle templates
-        "vehicles": [
-            "I parked my {word} in the garage.",
-            "The {word} needs to be serviced.",
-            "She drives a blue {word} to work.",
-            "We rented a {word} for our vacation.",
-            "My brother's {word} is very fast.",
-            "The {word} ran out of fuel on the highway.",
-            "This {word} can fit five passengers.",
-            "I'm saving money to buy a new {word}.",
-            "The {word} has a powerful engine.",
-            "We took the {word} to the mountains last weekend."
-        ],
-        
-        # Drinkware templates
-        "drinkware": [
-            "I filled the {word} with water.",
-            "She dropped the {word} and it broke.",
-            "This {word} keeps my coffee hot for hours.",
-            "The {word} is made of ceramic.",
-            "I need to wash this {word}.",
-            "He drinks tea from his favorite {word}.",
-            "We have a set of six {word}s for guests.",
-            "The {word} is on the kitchen counter.",
-            "My {word} has a small chip on the rim.",
-            "This {word} can hold up to 12 ounces."
-        ],
-        
-        # Drinks templates
-        "drinks": [
-            "I like to drink {word} in the morning.",
-            "Would you like some {word}?",
-            "She prefers {word} without sugar.",
-            "This {word} tastes really good.",
-            "I spilled some {word} on my shirt.",
-            "We ran out of {word} yesterday.",
-            "The {word} is too hot to drink right now.",
-            "Can you pour me a glass of {word}, please?",
-            "The {word} in this restaurant is excellent.",
-            "My father drinks {word} every evening."
-        ],
-        
-        # General templates for any object
-        "general": [
-            "I placed the {word} on the table.",
-            "Can you pass me that {word}, please?",
-            "The {word} is in the drawer.",
-            "She's looking for her {word}.",
-            "This {word} belongs to my brother.",
-            "I found the {word} under the couch.",
-            "We need to buy a new {word}.",
-            "The {word} is very useful.",
-            "He keeps the {word} in his office.",
-            "I use this {word} almost every day."
-        ]
-    }
+        return example
