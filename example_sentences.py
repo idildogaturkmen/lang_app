@@ -1,13 +1,13 @@
 """
-Extra-Strict Example Sentence Generator
---------------------------------------
-Special hardcoded protection for the word "person" with explicit whitelist approach.
+Enhanced Example Sentence Generator
+-----------------------------------
+Provides more relevant, appropriate, and natural examples with improved context awareness.
 """
 
 import requests
 import os
 import json
-import numpy as np
+import random
 import re
 import time
 from functools import lru_cache
@@ -24,124 +24,198 @@ class ExampleSentenceGenerator:
         self.translate_func = translate_func
         self.debug = debug
         self.setup_cache_dir()
-        self._initialize_semantic_lists()
+        self._initialize_category_templates()
         
     def setup_cache_dir(self):
         """Create cache directory if it doesn't exist."""
         self.cache_dir = "sentence_cache"
         os.makedirs(self.cache_dir, exist_ok=True)
     
-    def _initialize_semantic_lists(self):
-        """Initialize comprehensive lists for semantic categorization."""
-        # CRITICAL: List of person-related words that need special handling
-        self.PERSON_WORDS = set([
-            # General person terms
-            "person", "man", "woman", "boy", "girl", "child", "adult", "teenager",
-            "baby", "toddler", "senior", "individual", "citizen", "human", "people",
-            
-            # Family terms
-            "mother", "father", "parent", "brother", "sister", "aunt", "uncle",
-            "grandfather", "grandmother", "grandparent", "cousin", "relative", "family",
-            
-            # Professions/roles
-            "doctor", "nurse", "teacher", "student", "professor", "lawyer", "chef",
-            "driver", "worker", "engineer", "artist", "musician", "actor", "actress",
-            "scientist", "researcher", "writer", "author", "athlete", "player", "coach",
-            "banker", "clerk", "cashier", "manager", "employee", "boss", "secretary",
-            "assistant", "guard", "officer", "police", "firefighter", "soldier", "pilot",
-            "captain", "sailor", "farmer", "gardener", "architect", "designer", "dentist",
-            "waiter", "waitress", "bartender", "cook", "baker", "butcher", "carpenter",
-            "plumber", "electrician", "mechanic", "technician", "programmer", "developer",
-            
-            # Relationship terms
-            "friend", "neighbor", "colleague", "partner", "spouse", "husband", "wife",
-            "boyfriend", "girlfriend", "fiancé", "fiancée", "companion", "roommate",
-            "guest", "host", "stranger", "acquaintance", "client", "customer", "patient",
-            
-            # General groups
-            "group", "crowd", "team", "staff", "crew", "audience", "community", "society"
-        ])
-        
-        # CRITICAL: List of forbidden patterns specifically for person words
-        self.FORBIDDEN_PERSON_PATTERNS = [
-            "need a new", "need new", "bought a new", "bought new", 
-            "is very useful", "are very useful", "is useful", "are useful",
-            "on the table", "in the kitchen", "in the house", "in the room",
-            "I bought", "I sold", "I own", "I have a", "I have an",
-            "I use", "I used", "I borrowed", "I returned", "I broke", "I fixed", 
-            "I cleaned", "I washed", "I replaced", "I ordered", "I want",
-            "I like this", "I like that", "I like the", "I need this", "I need that",
-            "very useful", "quite useful", "so useful", "really useful",
-            "this is a useful", "these are useful", "a useful",
-            "used for", "can be used", "using the", "used the", 
-            "belongs to", "new", "old", "fancy", "expensive", "cheap"
-        ]
-
-        # ABSOLUTELY GUARANTEED SAFE templates for person words
-        # Using a whitelist approach rather than a blacklist
-        self.PERSON_TEMPLATES = {
-            # Default templates for most person words
-            "default": [
-                "The {word} is standing near the entrance.",
-                "I saw a {word} at the park yesterday.",
-                "A {word} asked me for directions.",
-                "We met a friendly {word} on our trip.",
-                "The {word} was waiting at the bus stop.",
-                "My neighbor is a {word} who lives downtown.",
-                "She has been a {word} for five years.",
-                "The {word} waved hello to us.",
-                "A {word} helped me find my way.",
-                "The {word} was reading a book."
+    def _initialize_category_templates(self):
+        """Initialize templates organized by semantic category for better context matching."""
+        self.category_templates = {
+            # Clothing templates
+            "clothing": [
+                "I bought a new {word} for the party.",
+                "This {word} is very comfortable to wear.",
+                "She likes wearing a blue {word} with jeans.",
+                "The {word} is hanging in the closet.",
+                "I need to wash my favorite {word}.",
+                "He gave me a {word} as a gift.",
+                "We sell different styles of {word} in our store.",
+                "My sister borrowed my {word} yesterday.",
+                "This {word} doesn't fit me anymore.",
+                "I spilled coffee on my {word} this morning."
             ],
             
-            # Special handling for "person" specifically to guarantee no issues
-            "person": [
-                "I met a person who speaks five languages.",
-                "There was a person waiting at the reception desk.",
-                "A person called to ask about the schedule.",
-                "The person at the information desk was very helpful.",
-                "I saw a person walking their dog in the park.",
-                "There's a person here to see you.",
-                "The first person to arrive gets the prize.",
-                "A person from the company called earlier.",
-                "Each person has their own unique talents.",
-                "The person who found my wallet returned it to me."
+            # Food templates
+            "food": [
+                "This {word} tastes delicious.",
+                "I love eating {word} for breakfast.",
+                "My mother makes the best {word} I've ever tasted.",
+                "Would you like some {word} with your meal?",
+                "The {word} is fresh from the market.",
+                "She bought some {word} for tonight's dinner.",
+                "We need more {word} for the recipe.",
+                "The {word} smells wonderful.",
+                "This restaurant serves excellent {word}.",
+                "I learned how to cook {word} last year."
+            ],
+            
+            # Animal templates
+            "animals": [
+                "The {word} is sleeping under the tree.",
+                "I saw a {word} at the zoo yesterday.",
+                "My friend has a {word} as a pet.",
+                "The {word} was running in the park.",
+                "That {word} looks very friendly.",
+                "We watched the {word} playing in the garden.",
+                "The {word} was eating some food.",
+                "There's a {word} on the path ahead.",
+                "The children love watching the {word}.",
+                "The {word} is a fascinating animal."
+            ],
+            
+            # Electronics templates
+            "electronics": [
+                "I need to charge my {word}.",
+                "This {word} has many useful features.",
+                "My {word} stopped working yesterday.",
+                "She bought a new {word} online.",
+                "The {word} comes with a one-year warranty.",
+                "I use my {word} every day.",
+                "Can you help me set up this {word}?",
+                "The {word} is on sale this weekend.",
+                "My brother got a new {word} for his birthday.",
+                "This {word} is the latest model."
+            ],
+            
+            # Furniture templates
+            "furniture": [
+                "We placed the {word} near the window.",
+                "This {word} is very comfortable.",
+                "The {word} doesn't fit in the living room.",
+                "We need to assemble the new {word}.",
+                "I bought this {word} at a garage sale.",
+                "The {word} matches our other furniture.",
+                "Can you help me move this {word}?",
+                "This {word} has been in our family for generations.",
+                "The {word} needs to be cleaned.",
+                "We're looking for a new {word} for the bedroom."
+            ],
+            
+            # Vehicle templates
+            "vehicles": [
+                "I parked my {word} in the garage.",
+                "The {word} needs to be serviced.",
+                "She drives a blue {word} to work.",
+                "We rented a {word} for our vacation.",
+                "My brother's {word} is very fast.",
+                "The {word} ran out of fuel on the highway.",
+                "This {word} can fit five passengers.",
+                "I'm saving money to buy a new {word}.",
+                "The {word} has a powerful engine.",
+                "We took the {word} to the mountains last weekend."
+            ],
+            
+            # Drinkware templates
+            "drinkware": [
+                "I filled the {word} with water.",
+                "She dropped the {word} and it broke.",
+                "This {word} keeps my coffee hot for hours.",
+                "The {word} is made of glass.",
+                "I need to wash this {word}.",
+                "He drinks tea from his favorite {word}.",
+                "We have a set of six {word}s for guests.",
+                "The {word} is on the kitchen counter.",
+                "My {word} has a small chip on the rim.",
+                "This {word} can hold up to 12 ounces."
+            ],
+            
+            # Eyewear templates
+            "eyewear": [
+                "I can't find my {word} anywhere.",
+                "These {word} help me see clearly.",
+                "She wears {word} for reading.",
+                "My {word} are scratched and need to be replaced.",
+                "He forgot his {word} at home.",
+                "These {word} protect my eyes from the sun.",
+                "I bought new {word} last month.",
+                "The {word} are on the nightstand.",
+                "She looks great in those {word}.",
+                "I need to clean my {word}."
+            ],
+            
+            # General object templates
+            "object": [
+                "I placed the {word} on the table.",
+                "Can you pass me that {word}, please?",
+                "The {word} is in the drawer.",
+                "She's looking for her {word}.",
+                "This {word} belongs to my brother.",
+                "I found the {word} under the couch.",
+                "We need to buy a new {word}.",
+                "The {word} is very useful.",
+                "He keeps the {word} in his office.",
+                "I use this {word} almost every day."
             ]
         }
         
-        # Animals list
-        self.ANIMAL_WORDS = set([
-            "dog", "cat", "bird", "fish", "horse", "cow", "elephant", "lion", "tiger",
-            "bear", "rabbit", "monkey", "mouse", "rat", "frog", "turtle", "snake",
-            "lizard", "alligator", "crocodile", "zebra", "giraffe", "deer", "fox",
-            "wolf", "sheep", "goat", "pig", "chicken", "rooster", "duck", "goose",
-            "penguin", "eagle", "hawk", "owl", "parrot", "canary", "hamster", "guinea pig",
-            "squirrel", "butterfly", "bee", "ant", "spider", "scorpion", "crab", "lobster",
-            "shrimp", "whale", "dolphin", "shark", "octopus", "squid", "seal", "walrus",
-            "otter", "beaver", "hedgehog", "bat", "camel", "kangaroo", "koala", "panda"
-        ])
-
-        # Food list
-        self.FOOD_WORDS = set([
-            "apple", "banana", "orange", "grape", "strawberry", "blueberry", "raspberry",
-            "watermelon", "melon", "pineapple", "peach", "pear", "cherry", "plum", "kiwi",
-            "mango", "coconut", "avocado", "tomato", "potato", "carrot", "broccoli",
-            "spinach", "lettuce", "cucumber", "onion", "garlic", "pepper", "corn",
-            "rice", "wheat", "flour", "bread", "toast", "cake", "cookie", "pie",
-            "chocolate", "candy", "sugar", "salt", "pepper", "cinnamon", "spice",
-            "butter", "oil", "milk", "cheese", "yogurt", "cream", "egg", "meat",
-            "beef", "pork", "chicken", "turkey", "fish", "salmon", "tuna", "shrimp",
-            "soup", "stew", "salad", "sandwich", "hamburger", "pizza", "pasta", "noodle"
-        ])
-
-        # Uncountable nouns
-        self.UNCOUNTABLE_NOUNS = set([
-            "water", "air", "money", "food", "rice", "coffee", "tea", "milk", "bread", 
-            "sugar", "salt", "oil", "vinegar", "soup", "advice", "information", "news", 
-            "furniture", "luggage", "traffic", "weather", "homework", "work", "fun",
-            "knowledge", "wisdom", "happiness", "sadness", "anger", "fear", "courage",
-            "patience", "intelligence", "research", "education", "health", "safety", "time"
-        ])
+        # Map specific words to categories for better context matching
+        self.word_to_category = {
+            # Clothing
+            "shirt": "clothing", "pants": "clothing", "dress": "clothing", "jacket": "clothing",
+            "sweater": "clothing", "coat": "clothing", "hat": "clothing", "gloves": "clothing",
+            "socks": "clothing", "shoes": "clothing", "boots": "clothing", "scarf": "clothing",
+            "tie": "clothing", "belt": "clothing", "jeans": "clothing", "skirt": "clothing",
+            "blouse": "clothing", "suit": "clothing", "top": "clothing", "shorts": "clothing",
+            
+            # Food
+            "apple": "food", "banana": "food", "orange": "food", "bread": "food",
+            "cheese": "food", "chicken": "food", "meat": "food", "fish": "food",
+            "pasta": "food", "rice": "food", "vegetable": "food", "fruit": "food",
+            "pizza": "food", "salad": "food", "sandwich": "food", "soup": "food",
+            "cake": "food", "cookie": "food", "chocolate": "food", "candy": "food",
+            
+            # Animals
+            "dog": "animals", "cat": "animals", "bird": "animals", "fish": "animals",
+            "horse": "animals", "cow": "animals", "sheep": "animals", "pig": "animals",
+            "lion": "animals", "tiger": "animals", "bear": "animals", "elephant": "animals",
+            "monkey": "animals", "giraffe": "animals", "zebra": "animals", "rabbit": "animals",
+            
+            # Electronics
+            "phone": "electronics", "computer": "electronics", "laptop": "electronics", "tablet": "electronics",
+            "television": "electronics", "tv": "electronics", "camera": "electronics", "speaker": "electronics",
+            "headphones": "electronics", "microphone": "electronics", "keyboard": "electronics", "mouse": "electronics",
+            
+            # Furniture
+            "chair": "furniture", "table": "furniture", "desk": "furniture", "bed": "furniture",
+            "sofa": "furniture", "couch": "furniture", "bookshelf": "furniture", "cabinet": "furniture",
+            "drawer": "furniture", "wardrobe": "furniture", "dresser": "furniture", "lamp": "furniture",
+            
+            # Vehicles
+            "car": "vehicles", "bike": "vehicles", "bicycle": "vehicles", "motorcycle": "vehicles",
+            "bus": "vehicles", "train": "vehicles", "airplane": "vehicles", "boat": "vehicles",
+            "ship": "vehicles", "truck": "vehicles", "van": "vehicles", "scooter": "vehicles",
+            
+            # Drinkware
+            "cup": "drinkware", "glass": "drinkware", "mug": "drinkware", "bottle": "drinkware",
+            "thermos": "drinkware", "flask": "drinkware", "teacup": "drinkware", "wineglass": "drinkware",
+            
+            # Eyewear
+            "glasses": "eyewear", "sunglasses": "eyewear", "spectacles": "eyewear", "contacts": "eyewear",
+            "goggles": "eyewear", "eyeglasses": "eyewear", "shades": "eyewear"
+        }
+        
+        # List of inappropriate words to filter out
+        self.inappropriate_words = [
+            "sex", "sexy", "sexual", "naked", "nude", "porn", "adult", "xxx",
+            "fuck", "shit", "damn", "ass", "bitch", "cunt", "dick", "cock", "pussy",
+            "erotic", "intimate", "genital", "penis", "vagina", "breast", "intercourse",
+            "oral", "anal", "bondage", "fetish", "masturbate", "masturbation", "orgasm",
+            "gay", "lesbian", "transgender", "bisexual", "queer",  # These are not inappropriate on their own, but could lead to sensitive contexts
+            "top", "bottom", "versatile", "dominant", "submissive"  # These have specific meanings in certain contexts
+        ]
     
     def get_example_sentence(self, word, target_language, category=None):
         """
@@ -159,28 +233,16 @@ class ExampleSentenceGenerator:
             # Clean and normalize the word
             word = word.strip().lower()
             
-            # CRITICAL: Extra special handling for "person"
-            if word == "person":
-                if self.debug:
-                    print("USING HARDCODED SAFE EXAMPLE FOR 'PERSON'")
-                return self._get_person_specific_example(target_language)
+            # Special handling for potentially problematic words
+            if word in self.inappropriate_words:
+                return self._get_safe_example(word, target_language, category)
             
-            # Check if this is a person word that needs special handling
-            is_person_word = word in self.PERSON_WORDS
-            if self.debug and is_person_word:
-                print(f"PERSON WORD DETECTED: '{word}'")
+            # Check cache first
+            cached_example = self._get_cached_example(word, target_language)
+            if cached_example:
+                return cached_example
             
-            # Check cache first (except for person words - always generate fresh)
-            if not is_person_word:
-                cached_example = self._get_cached_example(word, target_language)
-                if cached_example:
-                    return cached_example
-            
-            # For person words, always use safe templates
-            if is_person_word:
-                return self._get_safe_person_example(word, target_language)
-            
-            # For non-person words, try API methods first
+            # Try API methods first
             methods = [
                 self._get_free_dictionary_example,
                 self._get_wordnik_example
@@ -188,209 +250,124 @@ class ExampleSentenceGenerator:
             
             for method in methods:
                 example = method(word, target_language, category)
-                if example and example["english"]:
-                    # Verify safety even for API examples
-                    if self._is_safe_example(example["english"], word):
-                        self._cache_example(word, target_language, example)
-                        return example
+                if example and example["english"] and self._is_safe_content(example["english"]):
+                    # Cache the example
+                    self._cache_example(word, target_language, example)
+                    return example
             
             # Fall back to template-based examples
-            if word in self.ANIMAL_WORDS:
-                example = self._get_animal_example(word, target_language)
-            elif word in self.FOOD_WORDS:
-                example = self._get_food_example(word, target_language)
-            elif word in self.UNCOUNTABLE_NOUNS:
-                example = self._get_uncountable_example(word, target_language)
-            else:
-                example = self._get_general_example(word, target_language, category)
-                
-            # Cache non-person examples
-            if example and example["english"] and not is_person_word:
+            example = self._get_template_example(word, target_language, category)
+            
+            # Cache the example
+            if example and example["english"]:
                 self._cache_example(word, target_language, example)
                 
             return example
             
         except Exception as e:
-            print(f"Error getting example sentence: {e}")
+            if self.debug:
+                print(f"Error getting example sentence: {e}")
+                
             # Ultimate fallback
-            if word == "person":
-                return {
-                    "english": "I met a person at the conference.",
-                    "translated": self._translate("I met a person at the conference.", target_language),
-                    "source": "error_fallback_person"
-                }
-            else:
-                return {
-                    "english": f"Here is the word '{word}'.",
-                    "translated": self._translate(f"Here is the word '{word}'.", target_language),
-                    "source": "error_fallback"
-                }
+            return {
+                "english": f"This is a {word}.",
+                "translated": self._translate(f"This is a {word}.", target_language),
+                "source": "basic_fallback"
+            }
     
-    def _get_person_specific_example(self, target_language):
-        """Get a guaranteed safe example specifically for the word 'person'."""
-        # Use only from the dedicated "person" templates
-        template = np.random.choice(self.PERSON_TEMPLATES["person"])
-        english_example = template.format(word="person")
-        translated_example = self._translate(english_example, target_language)
+    def _get_template_example(self, word, target_language, hint_category=None):
+        """Generate an example sentence using templates based on word category."""
+        # Determine the appropriate category
+        category = None
         
-        if self.debug:
-            print(f"PERSON-SPECIFIC EXAMPLE: '{english_example}'")
-            
-        return {
-            "english": english_example,
-            "translated": translated_example,
-            "source": "safe_person_specific"
-        }
-    
-    def _is_safe_example(self, example, word):
-        """Check if an example is safe to use, especially for person words."""
-        example_lower = example.lower()
+        # Use provided category hint if available
+        if hint_category and hint_category in self.category_templates:
+            category = hint_category
+        # Otherwise look up in our mapping
+        elif word in self.word_to_category:
+            category = self.word_to_category[word]
+        # Default to general object
+        else:
+            category = "object"
         
-        # Extra strict check for 'person'
-        if word == "person":
-            # For the word "person", ONLY allow examples from our explicit whitelist
-            return False
+        # Get templates for this category
+        templates = self.category_templates.get(category, self.category_templates["object"])
         
-        # Check if this is a person word
-        if word in self.PERSON_WORDS:
-            # For person words, check against forbidden patterns
-            for pattern in self.FORBIDDEN_PERSON_PATTERNS:
-                if pattern in example_lower:
-                    if self.debug:
-                        print(f"REJECTED PERSON EXAMPLE: '{example}' - contains '{pattern}'")
-                    return False
+        # Select a random template
+        template = random.choice(templates)
         
-        # General checks for all words
-        if "example of" in example_lower or "examples of" in example_lower:
-            return False
-            
-        if len(example.split()) < 3 or len(example.split()) > 20:
-            return False
-            
-        return True
-    
-    def _get_safe_person_example(self, word, target_language):
-        """Get a guaranteed safe example for a person word."""
-        # Select a random safe template
-        templates = self.PERSON_TEMPLATES["default"]  # Use default templates for most person words
-        template = np.random.choice(templates)
-        
-        # Apply the template
-        english_example = template.format(word=word)
+        # Handle plurals properly
+        if word.endswith('s') and (word in ["glasses", "pants", "shorts", "scissors", "jeans"] or 
+                                   category == "eyewear"):
+            # These words are typically plural
+            english_example = template.replace("a {word}", "{word}").replace("the {word}", "the {word}").format(word=word)
+        else:
+            english_example = template.format(word=word)
         
         # Translate to target language
         translated_example = self._translate(english_example, target_language)
         
-        if self.debug:
-            print(f"SAFE PERSON EXAMPLE GENERATED: '{english_example}'")
-            
         return {
             "english": english_example,
             "translated": translated_example,
-            "source": "safe_person_template"
+            "source": f"{category}_template"
         }
     
-    def _get_animal_example(self, word, target_language):
-        """Safe examples for animals."""
-        templates = [
-            f"The {word} is running in the park.",
-            f"I saw a {word} at the zoo yesterday.",
-            f"The {word} is sleeping under the tree.",
-            f"My friend has a {word} as a pet.",
-            f"That {word} looks very friendly.",
-            f"We watched the {word} playing in the garden.",
-            f"The {word} was eating some food.",
-            f"There's a {word} on the path ahead.",
-            f"The children love watching the {word}.",
-            f"Can you see the {word} over there?"
-        ]
-        
-        english_example = np.random.choice(templates)
-        translated_example = self._translate(english_example, target_language)
-        
-        return {
-            "english": english_example,
-            "translated": translated_example,
-            "source": "animal_template"
-        }
-    
-    def _get_food_example(self, word, target_language):
-        """Safe examples for food."""
-        templates = [
-            f"This {word} tastes delicious.",
-            f"I love eating {word} for breakfast.",
-            f"My mom makes the best {word}.",
-            f"Would you like some {word}?",
-            f"The {word} is fresh from the market.",
-            f"She bought some {word} yesterday.",
-            f"We need more {word} for the recipe.",
-            f"The {word} smells wonderful.",
-            f"I prefer {word} over other foods.",
-            f"They serve excellent {word} at that restaurant."
-        ]
-        
-        english_example = np.random.choice(templates)
-        translated_example = self._translate(english_example, target_language)
-        
-        return {
-            "english": english_example,
-            "translated": translated_example,
-            "source": "food_template"
-        }
-    
-    def _get_uncountable_example(self, word, target_language):
-        """Safe examples for uncountable nouns."""
-        templates = [
-            f"I need some {word}.",
-            f"There is {word} in the glass.",
-            f"Do you have enough {word}?",
-            f"We bought some {word} yesterday.",
-            f"I like {word} very much.",
-            f"She drinks {word} every morning.",
-            f"He asked for {word}.",
-            f"They don't have much {word} left.",
-            f"The {word} tastes good.",
-            f"We need more {word}."
-        ]
-        
-        english_example = np.random.choice(templates)
-        translated_example = self._translate(english_example, target_language)
-        
-        return {
-            "english": english_example,
-            "translated": translated_example,
-            "source": "uncountable_template"
-        }
-    
-    def _get_general_example(self, word, target_language, category=None):
-        """Safe general examples for other words."""
-        # Choose appropriate article
-        if word[0].lower() in 'aeiou':
-            article = "an"
-        else:
-            article = "a"
-            
-        templates = [
-            f"I see {article} {word} on the table.",
-            f"She has {article} {word} in her bag.",
+    def _get_safe_example(self, word, target_language, category=None):
+        """Generate a guaranteed safe example for potentially problematic words."""
+        # For words we've identified as potentially problematic, use extremely simple templates
+        safe_templates = [
+            f"The {word} is on the table.",
+            f"I need to buy a new {word}.",
             f"The {word} is blue.",
-            f"Can you give me the {word}?",
+            f"Can you see the {word}?",
+            f"I like this {word}.",
+            f"The {word} is in the room.",
+            f"She has a {word}.",
             f"Where is the {word}?",
-            f"This {word} belongs to my friend.",
-            f"I found {article} {word} in the drawer.",
-            f"The {word} is very nice.",
-            f"He likes that {word} very much.",
-            f"Look at this {word}!"
+            f"This is my {word}.",
+            f"The {word} looks nice."
         ]
         
-        english_example = np.random.choice(templates)
+        english_example = random.choice(safe_templates)
         translated_example = self._translate(english_example, target_language)
         
         return {
             "english": english_example,
             "translated": translated_example,
-            "source": "general_template"
+            "source": "safe_template"
         }
+    
+    def _is_safe_content(self, text):
+        """Check if content is appropriate and not offensive."""
+        text_lower = text.lower()
+        
+        # General profanity check
+        for word in self.inappropriate_words:
+            if word in text_lower:
+                if self.debug:
+                    print(f"Rejected example due to inappropriate word: '{word}' in '{text}'")
+                return False
+        
+        # Format check - avoid fragment examples like "Glass frog; glass shrimp"
+        if ";" in text or not text.strip().endswith(('.', '!', '?')):
+            if self.debug:
+                print(f"Rejected example due to formatting: '{text}'")
+            return False
+        
+        # Length check
+        if len(text.split()) < 3 or len(text.split()) > 20:
+            if self.debug:
+                print(f"Rejected example due to length: '{text}'")
+            return False
+            
+        # Basic relevance check
+        if "example of" in text_lower or "examples of" in text_lower:
+            if self.debug:
+                print(f"Rejected example due to meta-reference: '{text}'")
+            return False
+            
+        return True
     
     def _translate(self, text, target_language):
         """Translate text using the provided translation function."""
@@ -401,7 +378,8 @@ class ExampleSentenceGenerator:
             try:
                 return self.translate_func(text, target_language)
             except Exception as e:
-                print(f"Translation error: {e}")
+                if self.debug:
+                    print(f"Translation error: {e}")
                 return ""
         else:
             return f"[Translation to {target_language}]"
@@ -409,42 +387,36 @@ class ExampleSentenceGenerator:
     @lru_cache(maxsize=300)
     def _get_cached_example(self, word, target_language):
         """Get cached example if available."""
-        # Critical: Never use caching for "person" to be extra safe
-        if word == "person":
-            return None
-            
         cache_file = f"{self.cache_dir}/{word}_{target_language}.json"
         if os.path.exists(cache_file):
             try:
                 with open(cache_file, 'r', encoding='utf-8') as f:
                     example = json.load(f)
                     
-                    # Safety: Even for cached examples, verify they're safe
-                    if not self._is_safe_example(example["english"], word):
+                    # Double-check safety even for cached examples
+                    if not self._is_safe_content(example["english"]):
                         if self.debug:
-                            print(f"REJECTED CACHED EXAMPLE: '{example['english']}'")
+                            print(f"Rejected cached example as unsafe: '{example['english']}'")
                         return None
                         
                     return example
             except Exception as e:
-                print(f"Cache read error: {e}")
+                if self.debug:
+                    print(f"Cache read error: {e}")
         return None
     
     def _cache_example(self, word, target_language, example):
         """Cache an example for future use."""
-        # Never cache person examples to ensure we always use fresh, safe examples
-        if word in self.PERSON_WORDS or word == "person":
-            return
-            
         cache_file = f"{self.cache_dir}/{word}_{target_language}.json"
         try:
             with open(cache_file, 'w', encoding='utf-8') as f:
                 json.dump(example, f, ensure_ascii=False)
         except Exception as e:
-            print(f"Cache write error: {e}")
+            if self.debug:
+                print(f"Cache write error: {e}")
     
     def _get_free_dictionary_example(self, word, target_language, category=None):
-        """Get example from Free Dictionary API with safety checks."""
+        """Get example from Free Dictionary API with safety and relevance checks."""
         try:
             url = f"https://api.dictionaryapi.dev/api/v2/entries/en/{word}"
             
@@ -458,27 +430,49 @@ class ExampleSentenceGenerator:
             examples = []
             if isinstance(data, list) and len(data) > 0:
                 for meaning in data[0].get('meanings', []):
+                    # Check if the part of speech matches the expected category
+                    part_of_speech = meaning.get('partOfSpeech', '')
+                    
                     for definition in meaning.get('definitions', []):
                         if 'example' in definition and definition['example']:
-                            examples.append(definition['example'])
+                            example = definition['example']
+                            # Add context about part of speech
+                            examples.append((example, part_of_speech))
             
             if examples:
                 # Filter for safe examples
                 safe_examples = []
-                for example in examples:
-                    if self._is_safe_example(example, word):
-                        safe_examples.append(example)
+                for example, pos in examples:
+                    if self._is_safe_content(example) and word in example.lower():
+                        safe_examples.append((example, pos))
                 
                 if not safe_examples:
                     return None
                     
-                # Choose example with good length
-                good_examples = [ex for ex in safe_examples if 4 <= len(ex.split()) <= 12]
-                
-                if good_examples:
-                    english_example = np.random.choice(good_examples)
+                # Prioritize examples with part of speech matching the category
+                if category:
+                    # Try to find examples that match the category
+                    matched_examples = []
+                    category_pos_map = {
+                        "clothing": "noun", "food": "noun", "animals": "noun", 
+                        "electronics": "noun", "furniture": "noun", "vehicles": "noun",
+                        "drinkware": "noun", "eyewear": "noun", "object": "noun"
+                    }
+                    expected_pos = category_pos_map.get(category, None)
+                    
+                    if expected_pos:
+                        for example, pos in safe_examples:
+                            if pos == expected_pos:
+                                matched_examples.append(example)
+                        
+                        if matched_examples:
+                            english_example = random.choice(matched_examples)
+                        else:
+                            english_example = random.choice([ex for ex, _ in safe_examples])
+                    else:
+                        english_example = random.choice([ex for ex, _ in safe_examples])
                 else:
-                    english_example = np.random.choice(safe_examples)
+                    english_example = random.choice([ex for ex, _ in safe_examples])
                 
                 # Clean up the example
                 english_example = self._clean_example(english_example)
@@ -494,11 +488,12 @@ class ExampleSentenceGenerator:
             
             return None
         except Exception as e:
-            print(f"Free Dictionary API error: {e}")
+            if self.debug:
+                print(f"Free Dictionary API error: {e}")
             return None
     
     def _get_wordnik_example(self, word, target_language, category=None):
-        """Get example from Wordnik API with safety checks."""
+        """Get example from Wordnik API with safety and relevance checks."""
         try:
             # Public endpoint (no key needed)
             url = f"https://api.wordnik.com/v4/word.json/{word}/examples"
@@ -521,19 +516,21 @@ class ExampleSentenceGenerator:
                 # Filter for safe examples that contain the word
                 safe_examples = []
                 for example in examples:
-                    if word.lower() in example.lower() and self._is_safe_example(example, word):
+                    # Ensure the example contains the exact word (not just as part of another word)
+                    word_pattern = r'\b' + re.escape(word) + r'\b'
+                    if re.search(word_pattern, example.lower()) and self._is_safe_content(example):
                         safe_examples.append(example)
                 
                 if not safe_examples:
                     return None
                     
                 # Choose an example with good length
-                good_examples = [ex for ex in safe_examples if 5 <= len(ex.split()) <= 12]
+                good_examples = [ex for ex in safe_examples if 5 <= len(ex.split()) <= 15]
                 
                 if good_examples:
-                    english_example = np.random.choice(good_examples)
+                    english_example = random.choice(good_examples)
                 else:
-                    english_example = np.random.choice(safe_examples)
+                    english_example = random.choice(safe_examples)
                 
                 # Clean up the example
                 english_example = self._clean_example(english_example)
@@ -549,7 +546,8 @@ class ExampleSentenceGenerator:
             
             return None
         except Exception as e:
-            print(f"Wordnik API error: {e}")
+            if self.debug:
+                print(f"Wordnik API error: {e}")
             return None
     
     def _clean_example(self, example):
