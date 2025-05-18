@@ -1,7 +1,7 @@
 """
 Enhanced Example Sentence Generator
 -----------------------------------
-Provides more relevant, appropriate, and natural examples with improved context awareness.
+Fixed version with proper indentation for all methods
 """
 
 import requests
@@ -233,7 +233,14 @@ class ExampleSentenceGenerator:
             # Clean and normalize the word
             word = word.strip().lower()
             
-            # Special handling for potentially problematic words
+            # Special handling for known problematic words - ALWAYS use templates for these
+            problematic_words = ["top", "glasses", "glass", "bottom", "fly", "chest", "box", "member"]
+            if word in problematic_words:
+                if self.debug:
+                    print(f"Using template for known problematic word: {word}")
+                return self._get_template_example(word, target_language, category)
+            
+            # Special handling for potentially inappropriate words
             if word in self.inappropriate_words:
                 return self._get_safe_example(word, target_language, category)
             
@@ -250,7 +257,7 @@ class ExampleSentenceGenerator:
             
             for method in methods:
                 example = method(word, target_language, category)
-                if example and example["english"] and self._is_safe_content(example["english"]):
+                if example and example["english"] and self._is_safe_content(example["english"]) and self._contains_exact_word(example["english"], word):
                     # Cache the example
                     self._cache_example(word, target_language, example)
                     return example
@@ -274,6 +281,20 @@ class ExampleSentenceGenerator:
                 "translated": self._translate(f"This is a {word}.", target_language),
                 "source": "basic_fallback"
             }
+    
+    def _contains_exact_word(self, text, word):
+        """Check if text contains the exact word with proper word boundaries."""
+        # Create regex pattern with word boundaries
+        pattern = r'\b' + re.escape(word) + r'\b'
+        
+        # Check if the text contains the exact word (case insensitive)
+        matches = re.search(pattern, text.lower())
+        
+        # For debugging
+        if self.debug and not matches:
+            print(f"Text doesn't contain exact word '{word}': '{text}'")
+            
+        return matches is not None
     
     def _get_template_example(self, word, target_language, hint_category=None):
         """Generate an example sentence using templates based on word category."""
@@ -436,14 +457,16 @@ class ExampleSentenceGenerator:
                     for definition in meaning.get('definitions', []):
                         if 'example' in definition and definition['example']:
                             example = definition['example']
-                            # Add context about part of speech
-                            examples.append((example, part_of_speech))
+                            # Check if it contains the exact word
+                            if self._contains_exact_word(example, word):
+                                # Add context about part of speech
+                                examples.append((example, part_of_speech))
             
             if examples:
                 # Filter for safe examples
                 safe_examples = []
                 for example, pos in examples:
-                    if self._is_safe_content(example) and word in example.lower():
+                    if self._is_safe_content(example):
                         safe_examples.append((example, pos))
                 
                 if not safe_examples:
@@ -473,6 +496,12 @@ class ExampleSentenceGenerator:
                         english_example = random.choice([ex for ex, _ in safe_examples])
                 else:
                     english_example = random.choice([ex for ex, _ in safe_examples])
+                
+                # Double-check exact word matching
+                if not self._contains_exact_word(english_example, word):
+                    if self.debug:
+                        print(f"Rejecting example that passed initial check but failed second check: '{english_example}'")
+                    return None
                 
                 # Clean up the example
                 english_example = self._clean_example(english_example)
@@ -510,16 +539,13 @@ class ExampleSentenceGenerator:
                     text = example['text']
                     # Clean up the text
                     text = text.replace('"', '').replace('"', '')
-                    examples.append(text)
+                    # Check for exact word match using word boundaries
+                    if self._contains_exact_word(text, word):
+                        examples.append(text)
             
             if examples:
-                # Filter for safe examples that contain the word
-                safe_examples = []
-                for example in examples:
-                    # Ensure the example contains the exact word (not just as part of another word)
-                    word_pattern = r'\b' + re.escape(word) + r'\b'
-                    if re.search(word_pattern, example.lower()) and self._is_safe_content(example):
-                        safe_examples.append(example)
+                # Filter for safe examples
+                safe_examples = [ex for ex in examples if self._is_safe_content(ex)]
                 
                 if not safe_examples:
                     return None
@@ -531,6 +557,12 @@ class ExampleSentenceGenerator:
                     english_example = random.choice(good_examples)
                 else:
                     english_example = random.choice(safe_examples)
+                
+                # Double-check exact word matching
+                if not self._contains_exact_word(english_example, word):
+                    if self.debug:
+                        print(f"Rejecting Wordnik example that passed initial check but failed second check: '{english_example}'")
+                    return None
                 
                 # Clean up the example
                 english_example = self._clean_example(english_example)
