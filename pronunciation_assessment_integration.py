@@ -18,6 +18,9 @@ def initialize_pronunciation_assessment():
     
     This should be called in main.py after initializing the pronunciation_practice module
     """
+    print("=== PRONUNCIATION ASSESSMENT DEBUG: Initialization function called ===")
+    st.sidebar.markdown("DEBUG: Pronunciation assessment module loading...")
+    
     # Try to import the pronunciation assessment module
     try:
         # First check if the file exists in the current directory

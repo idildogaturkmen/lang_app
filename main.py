@@ -2673,6 +2673,17 @@ elif app_mode == "My Progress":
 elif app_mode == "Pronunciation Practice":
     style_title("🎤 Pronunciation Practice")
     st.markdown("Practice your pronunciation and get instant feedback on your speaking skills.")
+
+    # Add this at the beginning of the "Pronunciation Practice" section:
+    if 'pronunciation_practice' in st.session_state:
+        st.sidebar.markdown("DEBUG: Attempting direct integration")
+        try:
+            # Directly import and use the assessment module
+            import pronunciation_assessment
+            pronunciation_assessment.setup_pronunciation_assessment()
+            st.sidebar.success("Direct pronunciation assessment integration successful!")
+        except Exception as e:
+            st.sidebar.error(f"Direct integration error: {e}")
     
     # Session management
     col1, col2 = st.columns(2)
