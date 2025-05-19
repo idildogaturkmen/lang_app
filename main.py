@@ -28,66 +28,42 @@ from functools import lru_cache
 import inspect
 from example_sentences import ExampleSentenceGenerator
 
-# This function should be defined before st.set_page_config
-def create_circular_logo(image_path, output_path="circular_logo.png"):
-    """Create a circular version of the logo with transparent background"""
-    # Check if the circular logo already exists to avoid regenerating it
-    if os.path.exists(output_path):
-        return output_path
+# Function to convert image to base64 - place this before any st commands
+def get_image_as_base64(file_path):
+    try:
+        img = Image.open(file_path)
         
-    # Load the logo image
-    logo_img = Image.open(image_path)
-    
-    # Make it square first
-    width, height = logo_img.size
-    size = min(width, height)
-    left = (width - size) // 2
-    top = (height - size) // 2
-    right = left + size
-    bottom = top + size
-    square_img = logo_img.crop((left, top, right, bottom))
-    
-    # Create a circular mask with transparency
-    mask = Image.new('L', (size, size), 0)
-    draw = ImageDraw.Draw(mask)
-    draw.ellipse((0, 0, size, size), fill=255)
-    
-    # Ensure image has alpha channel
-    if square_img.mode != 'RGBA':
-        square_img = square_img.convert('RGBA')
-    
-    # Get image data as numpy array
-    img_array = np.array(square_img)
-    
-    # Create an empty RGBA image
-    circular_img_array = np.zeros((size, size, 4), dtype=np.uint8)
-    
-    # Get mask as numpy array and reshape for broadcasting
-    mask_array = np.array(mask).reshape(size, size, 1) / 255.0
-    
-    # Copy RGB channels
-    circular_img_array[..., :3] = img_array[..., :3]
-    
-    # Set alpha channel based on mask
-    if img_array.shape[2] == 4:  # Image already has alpha
-        circular_img_array[..., 3] = img_array[..., 3] * mask_array[..., 0]
-    else:  # No alpha channel
-        circular_img_array[..., 3] = mask_array[..., 0] * 255
-    
-    # Convert back to PIL image
-    circular_img = Image.fromarray(circular_img_array)
-    
-    # Save the circular logo
-    circular_img.save(output_path)
-    return output_path
+        # Make image circular
+        # Create a square image
+        width, height = img.size
+        size = min(width, height)
+        left = (width - size) // 2
+        top = (height - size) // 2
+        right = left + size
+        bottom = top + size
+        img = img.crop((left, top, right, bottom))
+        
+        # Convert to bytes
+        buffered = io.BytesIO()
+        img.save(buffered, format="PNG")
+        return base64.b64encode(buffered.getvalue()).decode()
+    except Exception as e:
+        print(f"Error processing logo: {e}")
+        return None
 
-# Create circular logo
-circular_logo_path = create_circular_logo("Vocam_logo.png")
+# Convert your logo to base64
+logo_base64 = get_image_as_base64("Vocam_logo.png")
 
-# Now set the page config with the circular logo
+# Use the base64 image in the page config
+if logo_base64:
+    page_icon = f"data:image/png;base64,{logo_base64}"
+else:
+    page_icon = "🌍"  # Fallback to emoji if image loading fails
+
+# Now set the page config
 st.set_page_config(
     page_title="Vocam",
-    page_icon=circular_logo_path,
+    page_icon=page_icon,
     layout="wide",
     initial_sidebar_state="expanded"
 )
