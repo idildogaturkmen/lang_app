@@ -27,6 +27,7 @@ import hashlib
 from functools import lru_cache
 import inspect
 from example_sentences import ExampleSentenceGenerator
+from pronunciation_assessment_integration import initialize_pronunciation_assessment
 
 # First, display Python version for
 st.set_page_config(
@@ -2286,6 +2287,10 @@ elif app_mode == "My Vocabulary":
                             if has_custom_recorder:
                                 st.session_state.pronunciation_practice.custom_recorder = audio_recorder
                                 st.session_state.pronunciation_practice.has_custom_recorder = True
+
+                            # Initialize pronunciation assessment (add these lines right here)
+                            if 'pronunciation_practice' in st.session_state:
+                                initialize_pronunciation_assessment()
                         
                         # Now use the initialized module
                         st.session_state.pronunciation_practice.render_practice_ui(word)
