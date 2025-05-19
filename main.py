@@ -1771,8 +1771,22 @@ if app_mode == "Camera Mode":
                 st.write("Select objects to save to your vocabulary:")
                     
                 # Group detections by category
-                categorized_detections = {}
+                # Group detections by label to avoid duplicates
+                unique_detections = {}
                 for i, detection in enumerate(detections):
+                    label = detection['label']
+                    confidence = detection['confidence']
+                    
+                    # If label already exists and new confidence is lower, skip
+                    if label in unique_detections and unique_detections[label][1]['confidence'] >= confidence:
+                        continue
+                    
+                    # Otherwise add/update this label with highest confidence detection
+                    unique_detections[label] = (i, detection)
+
+                # Now group the unique detections by category
+                categorized_detections = {}
+                for i, detection in unique_detections.values():
                     label = detection['label']
                     category = get_object_category(label)
                     

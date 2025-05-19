@@ -124,7 +124,46 @@ class ExampleSentenceGenerator:
                 "The article discusses {word} and its implications.",
                 "She has experience with {word}.",
                 "This relates to {word} in many ways."
-            ]
+            ],
+
+            "tools": [
+                "I use these {word} to cut paper.",
+                "These {word} are very sharp.",
+                "Can you hand me the {word}, please?",
+                "The {word} are in the drawer.",
+                "She's looking for her {word}.",
+                "I need to buy new {word}.",
+                "The {word} are perfect for this craft project.",
+                "Be careful with those {word}.",
+                "Do you have a pair of {word} I can borrow?",
+                "These {word} are getting dull and need sharpening."
+            ],
+            "jewelry": [
+                "She wore a beautiful {word} to the party.",
+                "This {word} was a gift from my grandmother.",
+                "The {word} matches her dress perfectly.",
+                "I love your new {word}.",
+                "That {word} looks expensive.",
+                "She keeps her favorite {word} in a special box.",
+                "He bought her a {word} for their anniversary.",
+                "This {word} is made of gold.",
+                "The {word} has a sparkling gemstone in the center.",
+                "She never takes off her lucky {word}."
+            ],
+            "toys": [
+                "The child loves playing with the {word}.",
+                "This {word} is my favorite toy.",
+                "She hugs her {word} when she sleeps.",
+                "The {word} sits on a shelf in the child's room.",
+                "He gave his little brother a {word} for his birthday.",
+                "This {word} is soft and cuddly.",
+                "My daughter won't go anywhere without her {word}.",
+                "The {word} has been in our family for generations.",
+                "We bought a new {word} at the toy store.",
+                "The children share their {word} with each other."
+            ],
+
+            
         }
         
         # Common words in each category
@@ -143,7 +182,20 @@ class ExampleSentenceGenerator:
             ],
             "eyewear": [
                 "glasses", "sunglasses", "contacts", "goggles", "spectacles", "eyeglasses"
-            ]
+            ],
+            # Add these after your existing category_words definitions
+            "jewelry": [
+                "necklace", "ring", "bracelet", "earrings", "watch", "pendant", 
+                "brooch", "pin", "chain", "locket", "anklet", "cufflinks"
+            ],
+            "tools": [
+                "scissors", "knife", "hammer", "screwdriver", "wrench", "pliers",
+                "saw", "drill", "tape measure", "level", "chisel", "clamp"
+            ],
+            "toys": [
+                "teddy bear", "doll", "ball", "blocks", "action figure", "puzzle",
+                "toy car", "stuffed animal", "plush toy", "game", "toy"
+            ],
         }
         
         # Words that are typically used in plural form
@@ -458,6 +510,39 @@ class ExampleSentenceGenerator:
             for context in objectifying_contexts:
                 if context in text_lower and abs(text_lower.find(context) - text_lower.find(word)) < 10:
                     return False
+        
+        # Special case for "scissors"
+        elif word == "scissors":
+            # Check for appropriate contexts
+            tool_contexts = ["cut", "cutting", "paper", "fabric", "hair", "sharp", "blade", "trim"]
+            inappropriate_contexts = ["executed", "jump", "kick", "position", "technique"]
+            
+            has_tool_context = any(context in text_lower for context in tool_contexts)
+            has_inappropriate_context = any(context in text_lower for context in inappropriate_contexts)
+            
+            return has_tool_context and not has_inappropriate_context
+
+        # Special case for jewelry items
+        elif word in self.category_words.get("jewelry", []):
+            # Check for appropriate contexts
+            jewelry_contexts = ["wear", "wore", "beautiful", "gold", "silver", "gift", "precious", "expensive", "jewelry", "accessory"]
+            inappropriate_contexts = ["need another", "project", "useful", "tool"]
+            
+            has_jewelry_context = any(context in text_lower for context in jewelry_contexts)
+            has_inappropriate_context = any(context in text_lower for context in inappropriate_contexts)
+            
+            return has_jewelry_context and not has_inappropriate_context
+
+        # Special case for toys like teddy bear
+        elif word in self.category_words.get("toys", []) or "teddy" in word or "toy" in word:
+            # Check for appropriate contexts
+            toy_contexts = ["play", "child", "soft", "cuddly", "stuffed", "toy", "kids", "gift", "hug"]
+            inappropriate_contexts = ["hunt", "wild", "attack", "killed", "animal", "zoo"]
+            
+            has_toy_context = any(context in text_lower for context in toy_contexts)
+            has_inappropriate_context = any(context in text_lower for context in inappropriate_contexts)
+            
+            return has_toy_context and not has_inappropriate_context
             
         # For most words, no special context check needed
         return True
