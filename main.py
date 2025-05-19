@@ -14,7 +14,7 @@ import re
 import threading
 import queue
 from concurrent.futures import ThreadPoolExecutor
-from PIL import Image
+from PIL import Image, ImageDraw
 from io import BytesIO
 from gamification import GamificationSystem
 import random
@@ -28,10 +28,66 @@ from functools import lru_cache
 import inspect
 from example_sentences import ExampleSentenceGenerator
 
-# First, display Python version for
+# This function should be defined before st.set_page_config
+def create_circular_logo(image_path, output_path="circular_logo.png"):
+    """Create a circular version of the logo with transparent background"""
+    # Check if the circular logo already exists to avoid regenerating it
+    if os.path.exists(output_path):
+        return output_path
+        
+    # Load the logo image
+    logo_img = Image.open(image_path)
+    
+    # Make it square first
+    width, height = logo_img.size
+    size = min(width, height)
+    left = (width - size) // 2
+    top = (height - size) // 2
+    right = left + size
+    bottom = top + size
+    square_img = logo_img.crop((left, top, right, bottom))
+    
+    # Create a circular mask with transparency
+    mask = Image.new('L', (size, size), 0)
+    draw = ImageDraw.Draw(mask)
+    draw.ellipse((0, 0, size, size), fill=255)
+    
+    # Ensure image has alpha channel
+    if square_img.mode != 'RGBA':
+        square_img = square_img.convert('RGBA')
+    
+    # Get image data as numpy array
+    img_array = np.array(square_img)
+    
+    # Create an empty RGBA image
+    circular_img_array = np.zeros((size, size, 4), dtype=np.uint8)
+    
+    # Get mask as numpy array and reshape for broadcasting
+    mask_array = np.array(mask).reshape(size, size, 1) / 255.0
+    
+    # Copy RGB channels
+    circular_img_array[..., :3] = img_array[..., :3]
+    
+    # Set alpha channel based on mask
+    if img_array.shape[2] == 4:  # Image already has alpha
+        circular_img_array[..., 3] = img_array[..., 3] * mask_array[..., 0]
+    else:  # No alpha channel
+        circular_img_array[..., 3] = mask_array[..., 0] * 255
+    
+    # Convert back to PIL image
+    circular_img = Image.fromarray(circular_img_array)
+    
+    # Save the circular logo
+    circular_img.save(output_path)
+    return output_path
+
+# Create circular logo
+circular_logo_path = create_circular_logo("Vocam_logo.png")
+
+# Now set the page config with the circular logo
 st.set_page_config(
     page_title="Vocam",
-    page_icon="🌍",
+    page_icon=circular_logo_path,
     layout="wide",
     initial_sidebar_state="expanded"
 )
