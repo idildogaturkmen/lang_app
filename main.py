@@ -2273,9 +2273,12 @@ elif app_mode == "My Vocabulary":
                         # Only initialize if not already initialized
                         if 'pronunciation_practice' not in st.session_state:
                             # Initialize the pronunciation practice module with the functions it needs
+                            # Initialize the pronunciation practice module with the functions it needs
                             st.session_state.pronunciation_practice = create_pronunciation_practice(
-                                text_to_speech_func=text_to_speech, get_audio_html_func=get_audio_html,
-                                translate_text_func=translate_text
+                                text_to_speech_func=text_to_speech, 
+                                get_audio_html_func=get_audio_html,
+                                translate_text_func=translate_text,
+                                get_example_sentence_func=get_example_sentence  # Add this line
                             )
                             print("Successfully initialized pronunciation practice module")
 

@@ -163,7 +163,7 @@ if st.button("Clear Audio Data"):
         st.session_state.audio_data_received = False
     st.rerun()
 
-def create_pronunciation_practice(text_to_speech_func=None, get_audio_html_func=None, translate_text_func=None):
+def create_pronunciation_practice(text_to_speech_func=None, get_audio_html_func=None, translate_text_func=None, get_example_sentence_func=None):
     """
     Create a pronunciation practice module.
     
@@ -171,6 +171,7 @@ def create_pronunciation_practice(text_to_speech_func=None, get_audio_html_func=
         text_to_speech_func: Function for text-to-speech conversion
         get_audio_html_func: Function to get audio HTML
         translate_text_func: Function to translate text
+        get_example_sentence_func: Function to get example sentences
         
     Returns:
         PronunciationPractice instance
@@ -185,7 +186,8 @@ def create_pronunciation_practice(text_to_speech_func=None, get_audio_html_func=
     return SimplePronunciationPractice(
         text_to_speech_func,
         get_audio_html_func,
-        translate_text_func
+        translate_text_func,
+        get_example_sentence_func
     )
 
 # Replace the entire SimplePronunciationPractice class with this implementation:
@@ -216,11 +218,12 @@ class SimplePronunciationPractice:
     Implementation of pronunciation practice with AI feedback
     """
     
-    def __init__(self, text_to_speech_func, get_audio_html_func, translate_text_func):
+    def __init__(self, text_to_speech_func, get_audio_html_func, translate_text_func, get_example_sentence_func=None):
         """Initialize the pronunciation practice module"""
         self.text_to_speech = text_to_speech_func
         self.get_audio_html = get_audio_html_func
         self.translate_text = translate_text_func
+        self.get_example_sentence_func = get_example_sentence_func
         self.difficult_sounds = DIFFICULT_SOUNDS
         
         # Initialize speech recognition if available
@@ -725,11 +728,14 @@ class SimplePronunciationPractice:
                 current_word.get('word_original', ''), 
                 current_word.get('language_translated', 'en')
             )
-            
+
             with st.expander("Example in Context"):
                 st.markdown(f"**English:** {example['english']}")
                 if example.get('translated'):
+                    source = example.get('source', 'unknown')
+                    source_name = source.replace('_', ' ').replace('api', 'API').title()
                     st.markdown(f"**{LANGUAGE_NAMES.get(language_code, language_code)}:** {example['translated']}")
+                    st.markdown(f"<small><i>Source: {source_name}</i></small>", unsafe_allow_html=True)
                     example_audio = self.text_to_speech(example['translated'], language_code)
                     if example_audio:
                         st.markdown(self.get_audio_html(example_audio), unsafe_allow_html=True)
@@ -1063,8 +1069,12 @@ class SimplePronunciationPractice:
         """)
     
     def _get_example_sentence(self, word, language_code):
-        """Get example sentence for a word"""
-        if self.translate_text:
+        """Get example sentence for a word using the provided generator function"""
+        if self.get_example_sentence_func:
+            # Use the external example sentence generator
+            return self.get_example_sentence_func(word, language_code)
+        else:
+            # Fallback to simple templates if no generator is provided
             import random
             
             # Simple English templates
@@ -1080,16 +1090,18 @@ class SimplePronunciationPractice:
             example = random.choice(templates)
             
             # Try to translate
-            try:
-                translated = self.translate_text(example, language_code)
-                return {
-                    "english": example,
-                    "translated": translated
-                }
-            except Exception:
-                return {"english": example, "translated": ""}
-        else:
-            return {"english": f"The {word} is on the table.", "translated": ""}
+            if self.translate_text:
+                try:
+                    translated = self.translate_text(example, language_code)
+                    return {
+                        "english": example,
+                        "translated": translated,
+                        "source": "fallback_template"
+                    }
+                except Exception:
+                    return {"english": example, "translated": "", "source": "fallback_template"}
+            else:
+                return {"english": example, "translated": "", "source": "fallback_template"}
     
     def _show_practice_results(self):
         """Show results of the practice session"""
