@@ -194,7 +194,7 @@ class ExampleSentenceGenerator:
                 ]
             },
             
-            # ANIMAL TEMPLATES - For animal words
+            # ANIMAL TEMPLATES - For animal words (more natural, everyday examples)
             "animal": {
                 "basic": [
                     "The {word} is sleeping.",
@@ -209,28 +209,28 @@ class ExampleSentenceGenerator:
                     "Can you see the {word}?"
                 ],
                 "intermediate": [
-                    "We observed a {word} in its natural habitat during our safari trip.",
-                    "My daughter is learning interesting facts about the {word} for her science project.",
-                    "The documentary showed how {word}s adapt to changing environmental conditions.",
-                    "The zoo's new exhibit features {word}s from the rainforest region.",
-                    "Scientists are working to protect the endangered {word} from extinction.",
-                    "The {word} we spotted on our hike yesterday was with its young.",
-                    "The photographer spent months tracking the elusive {word} in the mountains.",
-                    "The behavior of the {word} in captivity differs greatly from those in the wild.",
-                    "My neighbor's {word} escaped from their yard yesterday afternoon.",
-                    "The children were fascinated by the {word} at the wildlife sanctuary."
+                    "We saw a {word} during our visit to the wildlife park.",
+                    "My daughter loves learning about {word}s in her science class.",
+                    "The TV show featured baby {word}s playing with their mother.",
+                    "The zoo has three new {word}s in their collection this year.",
+                    "Be careful if you see a wild {word} while hiking in the mountains.",
+                    "The {word} we spotted on our hike was with its young.",
+                    "My son has a book with beautiful pictures of {word}s.",
+                    "The {word} at the zoo gets fed twice a day.",
+                    "My neighbor's pet {word} escaped from their yard yesterday.",
+                    "The children were excited to see the {word} at the zoo."
                 ],
                 "advanced": [
-                    "Researchers have documented unique communication patterns among {word}s that suggest a complex social structure.",
-                    "The conservation program has successfully increased the population of the endangered {word} in its native habitat.",
-                    "The migration patterns of the {word} have been significantly affected by climate change in recent decades.",
-                    "The documentary explores the fascinating symbiotic relationship between the {word} and its ecosystem.",
-                    "After decades of studying {word} behavior, the biologist published a comprehensive field guide.",
-                    "The ancient mythology of this region often features the {word} as a symbol of wisdom and strength.",
-                    "The unusual appearance of this rare {word} has evolved specifically to help it survive in harsh conditions.",
-                    "The wildlife photographer spent three years capturing the elusive {word} in its remote mountain habitat.",
-                    "Recent genetic studies have revealed that the {word} shares a common ancestor with several other species.",
-                    "The rehabilitation center works specifically with injured {word}s before releasing them back into the wild."
+                    "The documentary showed how {word}s care for their young in the wild.",
+                    "Our safari guide pointed out a family of {word}s near the watering hole.",
+                    "The {word} at the wildlife sanctuary has been trained to perform simple tricks.",
+                    "My favorite exhibit at the natural history museum features a giant {word}.",
+                    "We learned that {word}s are most active during the early morning hours.",
+                    "In many stories and fables, the {word} is portrayed as clever and cunning.",
+                    "The zoo provides special enrichment activities to keep their {word}s healthy and happy.",
+                    "The wildlife photographer showed us amazing close-up photos of a {word} in its natural habitat.",
+                    "She's studying to become a veterinarian specializing in treating {word}s and similar species.",
+                    "The nature park has created a special protected area for the local {word} population."
                 ]
             },
             
@@ -354,43 +354,43 @@ class ExampleSentenceGenerator:
                 ]
             },
             
-            # TOYS TEMPLATES - For toys, games, etc.
+            # TOYS TEMPLATES - For toys, games, etc. (more natural, child-focused examples)
             "toys": {
                 "basic": [
-                    "The child loves this {word}.",
-                    "I had a similar {word} when I was young.",
-                    "This {word} is very popular.",
-                    "She plays with her {word} every day.",
-                    "The {word} is broken.",
-                    "Where is your {word}?",
+                    "The child loves playing with the {word}.",
+                    "This {word} is my favorite toy.",
+                    "She sleeps with her {word} every night.",
+                    "The {word} is sitting on the shelf.",
                     "He got a new {word} for his birthday.",
-                    "The {word} is on the shelf.",
-                    "This {word} is for children over three.",
-                    "Can I play with your {word}?"
+                    "This {word} is so soft and cuddly.",
+                    "My daughter won't go anywhere without her {word}.",
+                    "The {word} has a button that makes sounds.",
+                    "We bought a new {word} at the toy store.",
+                    "The children share their {word} with each other."
                 ],
                 "intermediate": [
-                    "My daughter refuses to go to sleep without her favorite {word} beside her.",
-                    "The vintage {word} I found at the flea market is similar to one I had as a child.",
-                    "Educational {word}s like this one help develop important cognitive skills.",
-                    "The handmade {word} was passed down through several generations of our family.",
-                    "This interactive {word} responds to voice commands and movement.",
-                    "The children take turns playing with the {word} during recess.",
-                    "We donated gently used {word}s to the children's hospital last month.",
-                    "The popular {word} was sold out in stores for months after its release.",
-                    "The museum has a collection of {word}s from different historical periods.",
-                    "My son spends hours creating elaborate stories with his {word}."
+                    "My daughter takes her {word} with her everywhere she goes.",
+                    "The child's {word} was a gift from her grandparents last Christmas.",
+                    "When he can't find his {word}, he gets very upset at bedtime.",
+                    "The little boy dragged his {word} behind him as he walked through the store.",
+                    "She has a collection of {word}s displayed on her bedroom shelf.",
+                    "His favorite {word} is getting worn out from being hugged so much.",
+                    "The twins each have their own {word} that they take to preschool.",
+                    "We had to go back to the hotel to get her {word} before bedtime.",
+                    "The {word} has become his comfort object when he's feeling sad.",
+                    "You can see how much she loves her {word} by how well she takes care of it."
                 ],
                 "advanced": [
-                    "The exhibition showcases how {word}s have evolved over the centuries, reflecting changing attitudes toward childhood and education.",
-                    "Researchers study how children interact with {word}s like this one to better understand cognitive development and creativity.",
-                    "The handcrafted {word} combines traditional craftsmanship with modern safety standards and sustainable materials.",
-                    "The documentary explores how this iconic {word} has influenced generations of children across diverse cultures.",
-                    "Collectors value vintage {word}s from this era not only for nostalgia but as artifacts of cultural history.",
-                    "The therapeutic benefits of specialized {word}s have been documented in numerous studies with children on the autism spectrum.",
-                    "The company redesigned their classic {word} to incorporate feedback from child development specialists and parents.",
-                    "The family tradition involves giving each child a personalized {word} that reflects their unique interests and personality.",
-                    "The restoration of antique {word}s requires specialized knowledge to preserve their historical integrity while making them safe for display.",
-                    "The innovative {word} was designed by educators to support multiple learning styles and developmental stages."
+                    "The hospital gives each child a {word} to help them feel more comfortable during their stay.",
+                    "My son still keeps his childhood {word} even though he's now in college.",
+                    "The store specializes in handmade {word}s that are passed down through generations.",
+                    "The family tradition involves giving each newborn child a special {word} on their first birthday.",
+                    "The charity collects gently used {word}s to donate to children in need during the holidays.",
+                    "The display case holds her collection of vintage {word}s from around the world.",
+                    "Therapists often use {word}s to help children express their feelings during counseling sessions.",
+                    "When we moved to a new country, his familiar {word} helped him adjust to all the changes.",
+                    "The company designs {word}s specifically for children with sensory processing challenges.",
+                    "My grandmother kept her childhood {word} for over seventy years before passing it on to me."
                 ]
             },
             
@@ -852,35 +852,35 @@ class ExampleSentenceGenerator:
         """Enhanced context check that considers word category and typical usage patterns."""
         text_lower = text.lower()
         
-        # Special case for eyewear "glasses"
-        if category == "eyewear":
-            # Check if it has eyewear context
-            eyewear_contexts = ["see", "vision", "read", "eye", "wear", "sight", "prescription", 
-                              "lens", "optician", "frame", "vision", "optometrist", "sunglasses"]
-            wrong_contexts = ["fill", "empty", "drink", "beverage", "water", "wine", "window", 
-                            "fiber", "fibre", "cup", "mug", "liquid", "pour"]
-            
-            # Must have at least one eyewear context word or phrase
-            has_eyewear_context = any(context in text_lower for context in eyewear_contexts)
-            
-            # Must not have conflicting contexts
-            has_wrong_context = any(context in text_lower for context in wrong_contexts)
-            
-            return has_eyewear_context or not has_wrong_context
-            
-        # Special case for "bear" (animal vs. verb)
-        elif word == "bear" or category == "animal" and word == "bear":
+        # Special case for "bear" and other animals
+        if word == "bear" or category == "animal" and word == "bear":
             # Check for animal context
             animal_contexts = ["zoo", "animal", "wild", "fur", "cub", "paw", "den", "forest", 
-                             "grizzly", "polar", "teddy", "pet", "wildlife", "nature"]
+                             "grizzly", "polar", "pet", "wildlife", "nature", "animals"]
             verb_contexts = ["burden", "weight", "load", "responsibility", "stand", "support", 
                            "carry", "bore", "market", "stock", "bear with", "bear in mind"]
+            academic_contexts = ["research", "scientific", "theory", "journal", "symposium", 
+                              "academia", "philosophical", "evolution", "publication", "dissertation"]
             
             has_animal_context = any(context in text_lower for context in animal_contexts)
             has_verb_context = any(context in text_lower for context in verb_contexts)
+            has_academic_context = any(context in text_lower for context in academic_contexts)
             
-            # Prefer animal context, reject verb context
-            return has_animal_context and not has_verb_context
+            # Prefer animal context, reject verb context and academic contexts
+            return has_animal_context and not has_verb_context and not has_academic_context
+            
+        # Special case for teddy bear - ensure child-friendly context
+        elif "teddy" in word or word == "teddy bear":
+            child_contexts = ["child", "play", "toy", "soft", "cuddly", "sleep", "bed", "hug", 
+                            "stuffed", "plush", "gift", "favorite", "baby", "kid", "comfort"]
+            academic_contexts = ["research", "academic", "philosophical", "theory", "values", 
+                               "societal", "education", "cognitive", "development", "scholarly"]
+            
+            has_child_context = any(context in text_lower for context in child_contexts)
+            has_academic_context = any(context in text_lower for context in academic_contexts)
+            
+            # Strongly prefer child context for teddy bears, reject academic contexts
+            return has_child_context and not has_academic_context
             
         # Special case for "top" (clothing vs. position)
         elif word == "top" or category == "clothing" and word == "top":
@@ -921,6 +921,22 @@ class ExampleSentenceGenerator:
             has_tool_context = any(context in text_lower for context in tool_contexts)
             
             return has_tool_context or not has_wrong_context
+            
+        # Special case for eyewear "glasses"
+        elif category == "eyewear":
+            # Check if it has eyewear context
+            eyewear_contexts = ["see", "vision", "read", "eye", "wear", "sight", "prescription", 
+                              "lens", "optician", "frame", "vision", "optometrist", "sunglasses"]
+            wrong_contexts = ["fill", "empty", "drink", "beverage", "water", "wine", "window", 
+                            "fiber", "fibre", "cup", "mug", "liquid", "pour"]
+            
+            # Must have at least one eyewear context word or phrase
+            has_eyewear_context = any(context in text_lower for context in eyewear_contexts)
+            
+            # Must not have conflicting contexts
+            has_wrong_context = any(context in text_lower for context in wrong_contexts)
+            
+            return has_eyewear_context or not has_wrong_context
             
         # Special case for jewelry
         elif category == "jewelry":
@@ -1144,9 +1160,19 @@ class ExampleSentenceGenerator:
         else:
             subcats = ["basic", "intermediate", "advanced"]
         
-        # Weighted selection of complexity level (more beginner-focused)
-        # 50% basic, 30% intermediate, 20% advanced
-        weights = [0.5, 0.3, 0.2]
+        # Adjust weights for specific categories to prefer simpler examples
+        # For common everyday objects, animals and toys, prefer simpler examples
+        if category in ["animal", "toys"] or word in ["bear", "teddy bear"]:
+            # 60% basic, 30% intermediate, 10% advanced
+            weights = [0.6, 0.3, 0.1]
+        elif word in self.plural_words or len(word) <= 4:
+            # For simple or plural words, prefer simpler examples
+            # 60% basic, 30% intermediate, 10% advanced
+            weights = [0.6, 0.3, 0.1]
+        else:
+            # Default weights: 50% basic, 30% intermediate, 20% advanced
+            weights = [0.5, 0.3, 0.2]
+        
         complexity = random.choices(subcats, weights=weights[:len(subcats)])[0]
         
         # Get templates for this category and complexity
