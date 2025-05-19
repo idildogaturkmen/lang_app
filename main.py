@@ -46,6 +46,14 @@ if is_cloud:
     os.environ['IS_STREAMLIT_CLOUD'] = 'true'
     print("Running in Streamlit Cloud - some features may be limited")
 
+import sys
+import importlib
+# Remove old module from cache if it exists
+if 'example_sentences' in sys.modules:
+    del sys.modules['example_sentences']
+# Now import (will be fresh)
+from example_sentences import ExampleSentenceGenerator
+
 # Import the UI enhancement module
 from vocam_ui import (
     apply_custom_css, 

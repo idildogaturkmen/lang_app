@@ -21,8 +21,9 @@ class ExampleSentenceGenerator:
             translate_func: A function that takes (text, target_language) and returns translated text
             debug: Enable debug output
         """
+        print("********** NEW IMPLEMENTATION LOADED! **********")
         self.translate_func = translate_func
-        self.debug = debug
+        self.debug = True
         self.setup_cache_dir()
         self._initialize_word_data()
         
