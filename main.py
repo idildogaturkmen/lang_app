@@ -28,42 +28,10 @@ from functools import lru_cache
 import inspect
 from example_sentences import ExampleSentenceGenerator
 
-# Function to convert image to base64 - place this before any st commands
-def get_image_as_base64(file_path):
-    try:
-        img = Image.open(file_path)
-        
-        # Make image circular
-        # Create a square image
-        width, height = img.size
-        size = min(width, height)
-        left = (width - size) // 2
-        top = (height - size) // 2
-        right = left + size
-        bottom = top + size
-        img = img.crop((left, top, right, bottom))
-        
-        # Convert to bytes
-        buffered = io.BytesIO()
-        img.save(buffered, format="PNG")
-        return base64.b64encode(buffered.getvalue()).decode()
-    except Exception as e:
-        print(f"Error processing logo: {e}")
-        return None
-
-# Convert your logo to base64
-logo_base64 = get_image_as_base64("Vocam_logo.png")
-
-# Use the base64 image in the page config
-if logo_base64:
-    page_icon = f"data:image/png;base64,{logo_base64}"
-else:
-    page_icon = "🌍"  # Fallback to emoji if image loading fails
-
-# Now set the page config
+# First, display Python version for
 st.set_page_config(
     page_title="Vocam",
-    page_icon=page_icon,
+    page_icon="Vocam_logo.png",  # Simply use the filename directly
     layout="wide",
     initial_sidebar_state="expanded"
 )
