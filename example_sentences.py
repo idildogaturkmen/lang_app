@@ -12,7 +12,7 @@ import time
 import json
 from functools import lru_cache
 
-class EnhancedExampleGenerator:
+class ExampleSentenceGenerator:
     def __init__(self, translate_func=None, debug=False):
         """Initialize the generator with a multi-stage filter pipeline and diverse templates."""
         print("\n>>> ENHANCED SENTENCE GENERATOR LOADED <<<\n")
