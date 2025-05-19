@@ -1,7 +1,7 @@
 """
-API-First Example Sentence Generator with Strong Context Filtering
------------------------------------------------------------------
-This implementation prioritizes API examples but ensures they're relevant
+Context-Aware Example Sentence Generator
+----------------------------------------
+Prioritizes API examples with strong filtering, with specialized templates for different word types
 """
 
 import requests
@@ -23,7 +23,7 @@ class ExampleSentenceGenerator:
         """
         print("********** NEW IMPLEMENTATION LOADED! **********")
         self.translate_func = translate_func
-        self.debug = True
+        self.debug = debug
         self.setup_cache_dir()
         self._initialize_word_data()
         
@@ -33,7 +33,7 @@ class ExampleSentenceGenerator:
         os.makedirs(self.cache_dir, exist_ok=True)
     
     def _initialize_word_data(self):
-        """Initialize word-specific data for better filtering."""
+        """Initialize comprehensive word data for context-aware example generation."""
         # Words with special context requirements
         self.special_word_contexts = {
             # For each word, define required and forbidden context words
@@ -67,7 +67,19 @@ class ExampleSentenceGenerator:
             "goggles", "eyeglasses", "spectacles", "sunglasses", "shades"
         ])
         
-        # Word-to-category mapping for context hints and fallback templates
+        # Person-related words that need special handling
+        self.person_words = set([
+            "person", "man", "woman", "boy", "girl", "child", "adult", "teenager",
+            "baby", "toddler", "senior", "individual", "human", "people",
+            "mother", "father", "parent", "brother", "sister", "aunt", "uncle",
+            "grandfather", "grandmother", "cousin", "family", "friend", "neighbor",
+            "student", "teacher", "doctor", "nurse", "patient", "client", "customer",
+            "chef", "lawyer", "engineer", "scientist", "artist", "musician", "actor",
+            "actress", "writer", "author", "athlete", "player", "coach", "police",
+            "firefighter", "soldier", "pilot", "farmer", "gardener"
+        ])
+        
+        # Word-to-category mapping
         self.word_to_category = {
             # Eyewear
             "glasses": "eyewear",
@@ -94,7 +106,7 @@ class ExampleSentenceGenerator:
             "mug": "drinkware",
             "bottle": "drinkware",
             
-            # Additional mappings
+            # Additional mappings - we'll add person words dynamically
             "dog": "animals",
             "cat": "animals",
             "chair": "furniture",
@@ -105,15 +117,38 @@ class ExampleSentenceGenerator:
             "bike": "vehicles"
         }
         
-        # Template categories for fallback
+        # Add all person words to the category mapping
+        for word in self.person_words:
+            self.word_to_category[word] = "person"
+        
+        # Template categories for fallback - with specialized templates for each category
         self.category_templates = {
+            # Person templates - appropriate for humans
+            "person": [
+                "The {word} asked for directions to the station.",
+                "I met a {word} who speaks five languages.",
+                "A {word} was waiting at the bus stop.",
+                "She is a friendly {word} who always smiles.",
+                "The {word} helped me carry my groceries.",
+                "We saw a {word} walking in the park yesterday.",
+                "The {word} gave an interesting presentation.",
+                "A {word} called to ask about the opening hours.",
+                "The {word} at the reception desk was very helpful.",
+                "My neighbor is a {word} who works at the hospital."
+            ],
+            
             # Eyewear templates
             "eyewear": [
                 "I can't find my {word} anywhere.",
                 "These {word} help me see better.",
                 "She wears {word} for reading.",
                 "My {word} are scratched and need to be replaced.",
-                "He forgot his {word} at home today."
+                "He forgot his {word} at home today.",
+                "The doctor prescribed new {word} for my vision.",
+                "These {word} protect my eyes from the sun.",
+                "I bought new {word} at the optician yesterday.",
+                "The {word} are on the nightstand.",
+                "I need to clean my {word}."
             ],
             
             # Clothing templates
@@ -122,7 +157,12 @@ class ExampleSentenceGenerator:
                 "This {word} is very comfortable to wear.",
                 "She likes wearing a blue {word} with jeans.",
                 "The {word} is hanging in the closet.",
-                "I need to wash my favorite {word}."
+                "I need to wash my favorite {word}.",
+                "He gave me a {word} as a gift.",
+                "The store sells different styles of {word}.",
+                "My sister borrowed my {word} yesterday.",
+                "This {word} doesn't fit me anymore.",
+                "I spilled coffee on my {word} this morning."
             ],
             
             # Animals
@@ -131,7 +171,12 @@ class ExampleSentenceGenerator:
                 "I saw a {word} at the zoo yesterday.",
                 "My friend has a {word} as a pet.",
                 "The {word} was running in the park.",
-                "That {word} looks very friendly."
+                "That {word} looks very friendly.",
+                "We watched the {word} playing in the garden.",
+                "The {word} was eating some food.",
+                "There's a {word} on the path ahead.",
+                "The children love watching the {word}.",
+                "The {word} is a fascinating animal."
             ],
             
             # Electronics
@@ -140,7 +185,12 @@ class ExampleSentenceGenerator:
                 "This {word} has many useful features.",
                 "My {word} stopped working yesterday.",
                 "She bought a new {word} online.",
-                "The {word} comes with a one-year warranty."
+                "The {word} comes with a one-year warranty.",
+                "I use my {word} every day.",
+                "Can you help me set up this {word}?",
+                "The {word} is on sale this weekend.",
+                "My brother got a new {word} for his birthday.",
+                "This {word} is the latest model."
             ],
             
             # Furniture
@@ -149,7 +199,12 @@ class ExampleSentenceGenerator:
                 "This {word} is very comfortable.",
                 "The {word} doesn't fit in the living room.",
                 "We need to assemble the new {word}.",
-                "I bought this {word} at a garage sale."
+                "I bought this {word} at a garage sale.",
+                "The {word} matches our other furniture.",
+                "Can you help me move this {word}?",
+                "This {word} has been in our family for generations.",
+                "The {word} needs to be cleaned.",
+                "We're looking for a new {word} for the bedroom."
             ],
             
             # Vehicles
@@ -158,7 +213,12 @@ class ExampleSentenceGenerator:
                 "The {word} needs to be serviced.",
                 "She drives a blue {word} to work.",
                 "We rented a {word} for our vacation.",
-                "My brother's {word} is very fast."
+                "My brother's {word} is very fast.",
+                "The {word} ran out of fuel on the highway.",
+                "This {word} can fit five passengers.",
+                "I'm saving money to buy a new {word}.",
+                "The {word} has a powerful engine.",
+                "We took the {word} to the mountains last weekend."
             ],
             
             # Drinkware
@@ -167,7 +227,12 @@ class ExampleSentenceGenerator:
                 "She dropped the {word} and it broke.",
                 "This {word} keeps my coffee hot for hours.",
                 "The {word} is made of ceramic.",
-                "I need to wash this {word}."
+                "I need to wash this {word}.",
+                "He drinks tea from his favorite {word}.",
+                "We have a set of six {word}s for guests.",
+                "The {word} is on the kitchen counter.",
+                "My {word} has a small chip on the rim.",
+                "This {word} can hold up to 12 ounces."
             ],
             
             # General
@@ -175,8 +240,13 @@ class ExampleSentenceGenerator:
                 "I placed the {word} on the table.",
                 "Can you pass me that {word}, please?",
                 "The {word} is in the drawer.",
-                "She's looking for her {word}.",
-                "This {word} belongs to my brother."
+                "She's looking for the {word}.",
+                "This {word} belongs to my brother.",
+                "I found the {word} under the couch.",
+                "We need to buy a new {word}.",
+                "The {word} is very useful.",
+                "He keeps the {word} in his office.",
+                "This {word} works very well."
             ]
         }
     
@@ -199,35 +269,67 @@ class ExampleSentenceGenerator:
             if self.debug:
                 print(f"Getting example for: '{word}'")
             
-            # Only use API for words that aren't known to cause problems
-            if word not in self.problematic_words:
-                # Get example from API (Free Dictionary or Wordnik)
-                api_example = self._get_api_example(word, target_language)
+            # Determine the appropriate category for this word
+            determined_category = self._get_word_category(word)
+            
+            # For person words, prioritize templates or apply stricter filtering
+            if word in self.person_words:
+                # Try to get a quality API example first
+                api_example = self._get_api_example_with_human_context(word, target_language)
                 if api_example:
                     return api_example
-            else:
-                if self.debug:
-                    print(f"'{word}' is a problematic word - looking for context-specific example")
-                    
-                # For problematic words, try to get context-specific examples
+                
+                # Fall back to person-specific template
+                return self._get_template_example(word, target_language, "person")
+            
+            # For problematic words like "glasses", "top", etc.
+            elif word in self.problematic_words:
+                # Try context-specific API example
                 context_example = self._get_context_specific_example(word, target_language)
                 if context_example:
                     return context_example
+                
+                # Fall back to category-specific template
+                return self._get_template_example(word, target_language, determined_category)
             
-            # If no API example or problematic word, use template
-            template_example = self._get_template_example(word, target_language)
-            return template_example
+            # For regular words, try API first
+            else:
+                # Try regular API example
+                api_example = self._get_api_example(word, target_language)
+                if api_example:
+                    return api_example
+                
+                # Fall back to template
+                return self._get_template_example(word, target_language, determined_category)
             
         except Exception as e:
             if self.debug:
                 print(f"Error getting example sentence: {e}")
             
             # Fallback
+            if word in self.person_words:
+                fallback = f"The {word} is waiting outside."
+            else:
+                fallback = f"This is a {word}."
+                
             return {
-                "english": f"This is a {word}.",
-                "translated": self._translate(f"This is a {word}.", target_language),
-                "source": "basic_fallback"
+                "english": fallback,
+                "translated": self._translate(fallback, target_language),
+                "source": "error_fallback"
             }
+    
+    def _get_word_category(self, word):
+        """Determine the semantic category of a word."""
+        # Check explicit mapping first
+        if word in self.word_to_category:
+            return self.word_to_category[word]
+        
+        # Check if it's a person word
+        if word in self.person_words:
+            return "person"
+        
+        # Default category
+        return "general"
     
     def _get_api_example(self, word, target_language):
         """Get example from APIs with basic filtering."""
@@ -242,6 +344,117 @@ class ExampleSentenceGenerator:
             return example
             
         return None
+    
+    def _get_api_example_with_human_context(self, word, target_language):
+        """Get example from APIs with human context filtering."""
+        # Try to get examples from Free Dictionary
+        examples = self._get_all_free_dictionary_examples(word)
+        
+        # Filter for examples that have appropriate human context
+        good_examples = []
+        for example in examples:
+            # Check if the example uses the word in a human context
+            if self._has_human_context(example, word):
+                good_examples.append(example)
+        
+        if good_examples:
+            # Choose a random example
+            english_example = random.choice(good_examples)
+            
+            # Clean up the example
+            english_example = self._clean_example(english_example)
+            
+            # Translate
+            translated_example = self._translate(english_example, target_language)
+            
+            return {
+                "english": english_example,
+                "translated": translated_example,
+                "source": "free_dictionary_api_human_context"
+            }
+        
+        # If no good examples from Free Dictionary, try Wordnik
+        examples = self._get_all_wordnik_examples(word)
+        
+        # Filter for examples that have appropriate human context
+        good_examples = []
+        for example in examples:
+            # Check if the example uses the word in a human context
+            if self._has_human_context(example, word):
+                good_examples.append(example)
+                
+        if good_examples:
+            # Choose a random example
+            english_example = random.choice(good_examples)
+            
+            # Clean up the example
+            english_example = self._clean_example(english_example)
+            
+            # Translate
+            translated_example = self._translate(english_example, target_language)
+            
+            return {
+                "english": english_example,
+                "translated": translated_example,
+                "source": "wordnik_api_human_context"
+            }
+        
+        return None
+    
+    def _has_human_context(self, text, word):
+        """Check if text has appropriate human context for person words."""
+        # Skip examples that objectify people
+        objectifying_patterns = [
+            r"use.{0,10}" + re.escape(word),
+            r"uses.{0,10}" + re.escape(word),
+            r"using.{0,10}" + re.escape(word),
+            r"need.{0,10}" + re.escape(word),
+            r"needs.{0,10}" + re.escape(word),
+            r"buy.{0,10}" + re.escape(word),
+            r"buys.{0,10}" + re.escape(word),
+            r"bought.{0,10}" + re.escape(word),
+            r"sell.{0,10}" + re.escape(word),
+            r"sells.{0,10}" + re.escape(word),
+            r"sold.{0,10}" + re.escape(word),
+        ]
+        
+        for pattern in objectifying_patterns:
+            if re.search(pattern, text.lower()):
+                if self.debug:
+                    print(f"Rejected human example due to objectification: '{text}'")
+                return False
+        
+        # Look for positive human context
+        human_action_patterns = [
+            r"" + re.escape(word) + r".{0,10}talk",
+            r"" + re.escape(word) + r".{0,10}speak",
+            r"" + re.escape(word) + r".{0,10}said",
+            r"" + re.escape(word) + r".{0,10}asked",
+            r"" + re.escape(word) + r".{0,10}help",
+            r"" + re.escape(word) + r".{0,10}walk",
+            r"" + re.escape(word) + r".{0,10}met",
+            r"" + re.escape(word) + r".{0,10}saw",
+            r"talk.{0,10}to.{0,10}" + re.escape(word),
+            r"speak.{0,10}to.{0,10}" + re.escape(word),
+            r"meet.{0,10}" + re.escape(word),
+            r"saw.{0,10}" + re.escape(word),
+            r"met.{0,10}" + re.escape(word),
+            r"know.{0,10}" + re.escape(word),
+            r"ask.{0,10}" + re.escape(word),
+            r"help.{0,10}" + re.escape(word),
+        ]
+        
+        # If we find any positive human context pattern, it's probably a good example
+        for pattern in human_action_patterns:
+            if re.search(pattern, text.lower()):
+                return True
+        
+        # Check if the sentence is generally appropriate
+        # (doesn't contain obviously objectifying language)
+        if self._is_valid_sentence(text) and self._contains_exact_word(text, word):
+            return True
+            
+        return False
     
     def _get_context_specific_example(self, word, target_language):
         """
@@ -260,9 +473,13 @@ class ExampleSentenceGenerator:
             
         return None
     
-    def _get_template_example(self, word, target_language):
-        """Get a template example as fallback."""
-        category = self.word_to_category.get(word, "general")
+    def _get_template_example(self, word, target_language, category=None):
+        """Get a template example based on word category."""
+        # Determine category if not provided
+        if not category:
+            category = self._get_word_category(word)
+        
+        # Get templates for this category
         templates = self.category_templates.get(category, self.category_templates["general"])
         
         # Select a random template
@@ -280,7 +497,7 @@ class ExampleSentenceGenerator:
         return {
             "english": english_example,
             "translated": translated_example,
-            "source": "template_" + category
+            "source": f"template_{category}"
         }
     
     def _contains_exact_word(self, text, word):
@@ -358,14 +575,14 @@ class ExampleSentenceGenerator:
         else:
             return f"[Translation to {target_language}]"
     
-    def _get_free_dictionary_example(self, word, target_language):
-        """Get example from Free Dictionary API with basic filtering."""
+    def _get_all_free_dictionary_examples(self, word):
+        """Get all examples from Free Dictionary API."""
         try:
             url = f"https://api.dictionaryapi.dev/api/v2/entries/en/{word}"
             response = requests.get(url, timeout=5)
             
             if response.status_code != 200:
-                return None
+                return []
                 
             data = response.json()
             
@@ -379,89 +596,20 @@ class ExampleSentenceGenerator:
                             if self._contains_exact_word(example, word) and self._is_valid_sentence(example):
                                 examples.append(example)
             
-            if examples:
-                # Choose a random example
-                english_example = random.choice(examples)
-                
-                # Clean up the example
-                english_example = self._clean_example(english_example)
-                
-                # Translate
-                translated_example = self._translate(english_example, target_language)
-                
-                return {
-                    "english": english_example,
-                    "translated": translated_example,
-                    "source": "free_dictionary_api"
-                }
-            
-            return None
+            return examples
         except Exception as e:
             if self.debug:
                 print(f"Free Dictionary API error: {e}")
-            return None
+            return []
     
-    def _get_free_dictionary_example_with_context(self, word, target_language):
-        """Get example from Free Dictionary API with strict context filtering."""
-        try:
-            url = f"https://api.dictionaryapi.dev/api/v2/entries/en/{word}"
-            response = requests.get(url, timeout=5)
-            
-            if response.status_code != 200:
-                return None
-                
-            data = response.json()
-            
-            # Extract example sentences
-            examples = []
-            if isinstance(data, list) and len(data) > 0:
-                for meaning in data[0].get('meanings', []):
-                    for definition in meaning.get('definitions', []):
-                        if 'example' in definition and definition['example']:
-                            example = definition['example']
-                            # Apply all our filters
-                            if (self._contains_exact_word(example, word) and 
-                                self._is_valid_sentence(example) and
-                                self._check_context_requirements(example, word)):
-                                
-                                # For base words, make sure their variants don't appear
-                                if word in self.base_words:
-                                    # Skip if the example contains any of the variants
-                                    if not self._contains_any_word(example, self.base_words[word]):
-                                        examples.append(example)
-                                else:
-                                    examples.append(example)
-            
-            if examples:
-                # Choose a random example
-                english_example = random.choice(examples)
-                
-                # Clean up the example
-                english_example = self._clean_example(english_example)
-                
-                # Translate
-                translated_example = self._translate(english_example, target_language)
-                
-                return {
-                    "english": english_example,
-                    "translated": translated_example,
-                    "source": "free_dictionary_api_context_filtered"
-                }
-            
-            return None
-        except Exception as e:
-            if self.debug:
-                print(f"Free Dictionary API error: {e}")
-            return None
-    
-    def _get_wordnik_example(self, word, target_language):
-        """Get example from Wordnik API with basic filtering."""
+    def _get_all_wordnik_examples(self, word):
+        """Get all examples from Wordnik API."""
         try:
             url = f"https://api.wordnik.com/v4/word.json/{word}/examples"
             response = requests.get(url, timeout=5)
             
             if response.status_code != 200:
-                return None
+                return []
                 
             data = response.json()
             
@@ -472,77 +620,123 @@ class ExampleSentenceGenerator:
                     if self._contains_exact_word(text, word) and self._is_valid_sentence(text):
                         examples.append(text)
             
-            if examples:
-                # Choose a random example
-                english_example = random.choice(examples)
-                
-                # Clean up the example
-                english_example = self._clean_example(english_example)
-                
-                # Translate
-                translated_example = self._translate(english_example, target_language)
-                
-                return {
-                    "english": english_example,
-                    "translated": translated_example,
-                    "source": "wordnik_api"
-                }
-            
-            return None
+            return examples
         except Exception as e:
             if self.debug:
                 print(f"Wordnik API error: {e}")
-            return None
+            return []
+    
+    def _get_free_dictionary_example(self, word, target_language):
+        """Get example from Free Dictionary API with basic filtering."""
+        examples = self._get_all_free_dictionary_examples(word)
+        
+        if examples:
+            # Choose a random example
+            english_example = random.choice(examples)
+            
+            # Clean up the example
+            english_example = self._clean_example(english_example)
+            
+            # Translate
+            translated_example = self._translate(english_example, target_language)
+            
+            return {
+                "english": english_example,
+                "translated": translated_example,
+                "source": "free_dictionary_api"
+            }
+        
+        return None
+    
+    def _get_free_dictionary_example_with_context(self, word, target_language):
+        """Get example from Free Dictionary API with strict context filtering."""
+        examples = self._get_all_free_dictionary_examples(word)
+        
+        # Filter for examples that meet context requirements
+        good_examples = []
+        for example in examples:
+            if self._check_context_requirements(example, word):
+                # For base words, make sure their variants don't appear
+                if word in self.base_words:
+                    # Skip if the example contains any of the variants
+                    if not self._contains_any_word(example, self.base_words[word]):
+                        good_examples.append(example)
+                else:
+                    good_examples.append(example)
+        
+        if good_examples:
+            # Choose a random example
+            english_example = random.choice(good_examples)
+            
+            # Clean up the example
+            english_example = self._clean_example(english_example)
+            
+            # Translate
+            translated_example = self._translate(english_example, target_language)
+            
+            return {
+                "english": english_example,
+                "translated": translated_example,
+                "source": "free_dictionary_api_context_filtered"
+            }
+        
+        return None
+    
+    def _get_wordnik_example(self, word, target_language):
+        """Get example from Wordnik API with basic filtering."""
+        examples = self._get_all_wordnik_examples(word)
+        
+        if examples:
+            # Choose a random example
+            english_example = random.choice(examples)
+            
+            # Clean up the example
+            english_example = self._clean_example(english_example)
+            
+            # Translate
+            translated_example = self._translate(english_example, target_language)
+            
+            return {
+                "english": english_example,
+                "translated": translated_example,
+                "source": "wordnik_api"
+            }
+        
+        return None
     
     def _get_wordnik_example_with_context(self, word, target_language):
         """Get example from Wordnik API with strict context filtering."""
-        try:
-            url = f"https://api.wordnik.com/v4/word.json/{word}/examples"
-            response = requests.get(url, timeout=5)
+        examples = self._get_all_wordnik_examples(word)
+        
+        # Filter for examples that meet context requirements
+        good_examples = []
+        for example in examples:
+            if self._check_context_requirements(example, word):
+                # For base words, make sure their variants don't appear
+                if word in self.base_words:
+                    # Skip if the example contains any of the variants
+                    if not self._contains_any_word(example, self.base_words[word]):
+                        good_examples.append(example)
+                else:
+                    good_examples.append(example)
+        
+        if good_examples:
+            # Choose a random example
+            english_example = random.choice(good_examples)
             
-            if response.status_code != 200:
-                return None
-                
-            data = response.json()
+            # Clean up the example
+            english_example = self._clean_example(english_example)
             
-            examples = []
-            for example in data.get('examples', []):
-                if 'text' in example and example['text']:
-                    text = example['text']
-                    # Apply all our filters
-                    if (self._contains_exact_word(text, word) and 
-                        self._is_valid_sentence(text) and
-                        self._check_context_requirements(text, word)):
-                        
-                        # For base words, make sure their variants don't appear
-                        if word in self.base_words:
-                            # Skip if the example contains any of the variants
-                            if not self._contains_any_word(text, self.base_words[word]):
-                                examples.append(text)
-                        else:
-                            examples.append(text)
+            # Translate
+            translated_example = self._translate(english_example, target_language)
             
-            if examples:
-                # Choose a random example
-                english_example = random.choice(examples)
-                
-                # Clean up the example
-                english_example = self._clean_example(english_example)
-                
-                # Translate
-                translated_example = self._translate(english_example, target_language)
-                
-                return {
-                    "english": english_example,
-                    "translated": translated_example,
-                    "source": "wordnik_api_context_filtered"
-                }
-            
-            return None
-        except Exception as e:
-            if self.debug:
-                print(f"Wordnik API error: {e}")
-            return None
+            return {
+                "english": english_example,
+                "translated": translated_example,
+                "source": "wordnik_api_context_filtered"
+            }
+        
+        return None
     
     def _clean_example(self, example):
         """Clean and format an example sentence."""
