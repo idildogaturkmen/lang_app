@@ -1588,7 +1588,23 @@ def safe_button(label, **kwargs):
 
 
 # Main sidebar for navigation
-st.sidebar.title("🌍 Vocam")
+# Check if the logo file exists
+logo_path = "Vocam_logo.png"
+if os.path.exists(logo_path):
+    # First, create two columns in the sidebar
+    logo_col, title_col = st.sidebar.columns([1, 4])
+    
+    # Display the logo in the first column
+    with logo_col:
+        st.image(logo_path, width=50)  # Adjust width as needed
+    
+    # Display the title in the second column
+    with title_col:
+        st.markdown("<h1 style='margin-top: 10px; color: white;'>Vocam</h1>", unsafe_allow_html=True)
+else:
+    # Fallback to the original title if logo not found
+    st.sidebar.title("🌍 Vocam")
+    
 app_mode_options = ["Camera Mode", "My Vocabulary", "Quiz Mode", "Statistics", "My Progress", "Pronunciation Practice"]
 if 'app_mode' in st.session_state:
     # Use the session state value as the default index for the selectbox

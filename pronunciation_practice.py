@@ -148,34 +148,20 @@ RECOGNITION_LANGUAGES = {
     "en": "en-US"   # English
 }
 
-# At the top of your pronunciation practice page (before other content)
-st.markdown("## 🎤 Pronunciation Practice")
-        
-
 # Add a debug expander (you can remove this later)
-# Fixed code:
-with st.expander("Debug Information", expanded=False):
-    st.write("Session State Keys:", list(st.session_state.keys()))
-    if 'audio_data' in st.session_state and st.session_state.audio_data is not None:
-        st.write("Audio data exists in session state:", 
-                 f"Size: {len(st.session_state.audio_data)} bytes")
-    elif 'audio_data' in st.session_state:
-        st.write("Audio data exists in session state but is None")
-    if 'audio_data_received' in st.session_state:
-        st.write("Audio received flag:", st.session_state.audio_data_received)
     
     # Add a manual audio player for the existing recording
-    if 'audio_data' in st.session_state and st.session_state.audio_data:
-        st.write("Debug Player:")
-        st.audio(st.session_state.audio_data, format="audio/wav")
+if 'audio_data' in st.session_state and st.session_state.audio_data:
+    st.write("Debug Player:")
+    st.audio(st.session_state.audio_data, format="audio/wav")
     
     # Add a button to clear session state
-    if st.button("Clear Audio Data"):
-        if 'audio_data' in st.session_state:
-            del st.session_state.audio_data
-        if 'audio_data_received' in st.session_state:
-            st.session_state.audio_data_received = False
-        st.rerun()
+if st.button("Clear Audio Data"):
+    if 'audio_data' in st.session_state:
+        del st.session_state.audio_data
+    if 'audio_data_received' in st.session_state:
+        st.session_state.audio_data_received = False
+    st.rerun()
 
 def create_pronunciation_practice(text_to_speech_func=None, get_audio_html_func=None, translate_text_func=None):
     """
