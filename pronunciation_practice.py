@@ -540,6 +540,31 @@ class SimplePronunciationPractice:
             
             # Display the word to practice
             st.subheader(f"Practice: {translated_word}")
+
+            # Add example sentence directly (no nested expander)
+            example = self._get_example_sentence(original_word, language_code)
+            st.markdown("**Example:**")
+            st.markdown(f"EN: {example['english']}")
+
+            # Only display translated example if available
+            if example['translated']:
+                source = example.get('source', 'unknown')
+                # Only show source if it's NOT a fallback template
+                if source != 'fallback_template':
+                    source_name = source.replace('_', ' ').replace('api', 'API').title()
+                    st.markdown(f"{LANGUAGE_NAMES.get(language_code, language_code)}: {example['translated']}")
+                    st.markdown(f"<small><i>Source: {source_name}</i></small>", unsafe_allow_html=True)
+                else:
+                    # Just show the translation without source for fallback templates
+                    st.markdown(f"{LANGUAGE_NAMES.get(language_code, language_code)}: {example['translated']}")
+                
+                # Only generate audio if there's text to speak
+                example_audio = self.text_to_speech(example['translated'], language_code)
+                if example_audio:
+                    st.markdown(self.get_audio_html(example_audio), unsafe_allow_html=True)
+            else:
+                st.markdown("*Translation not available. Please install deep-translator package.*")
+
             
             # Play the pronunciation
             st.markdown("**Listen to correct pronunciation:**")
@@ -732,10 +757,17 @@ class SimplePronunciationPractice:
             with st.expander("Example in Context"):
                 st.markdown(f"**English:** {example['english']}")
                 if example.get('translated'):
+                    # Only show source if it's NOT a fallback template
                     source = example.get('source', 'unknown')
-                    source_name = source.replace('_', ' ').replace('api', 'API').title()
-                    st.markdown(f"**{LANGUAGE_NAMES.get(language_code, language_code)}:** {example['translated']}")
-                    st.markdown(f"<small><i>Source: {source_name}</i></small>", unsafe_allow_html=True)
+                    if source != 'fallback_template':
+                        source_name = source.replace('_', ' ').replace('api', 'API').title()
+                        st.markdown(f"**{LANGUAGE_NAMES.get(language_code, language_code)}:** {example['translated']}")
+                        st.markdown(f"<small><i>Source: {source_name}</i></small>", unsafe_allow_html=True)
+                    else:
+                        # Just show the translation without source for fallback templates
+                        st.markdown(f"**{LANGUAGE_NAMES.get(language_code, language_code)}:** {example['translated']}")
+                    
+                    # Play audio regardless of source
                     example_audio = self.text_to_speech(example['translated'], language_code)
                     if example_audio:
                         st.markdown(self.get_audio_html(example_audio), unsafe_allow_html=True)
