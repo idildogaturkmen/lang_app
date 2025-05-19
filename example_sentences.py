@@ -162,6 +162,18 @@ class ExampleSentenceGenerator:
                 "We bought a new {word} at the toy store.",
                 "The children share their {word} with each other."
             ],
+            "uncountable_clothing": [
+                "The {word} she wore was stylish.",
+                "This {word} is perfect for cold weather.",
+                "I need to buy new {word} for the season.",
+                "The {word} in the store window caught my eye.",
+                "She designs {word} for a fashion company.",
+                "The {word} feels soft and comfortable.",
+                "We sell {word} for all occasions.",
+                "This {word} is made of high-quality material.",
+                "The {word} comes in various colors and styles.",
+                "They import {word} from Italy."
+            ]
 
             
         }
@@ -196,6 +208,11 @@ class ExampleSentenceGenerator:
                 "teddy bear", "doll", "ball", "blocks", "action figure", "puzzle",
                 "toy car", "stuffed animal", "plush toy", "game", "toy"
             ],
+            # Add to category_words dictionary in _initialize_templates method
+            "uncountable_clothing": [
+                "clothing", "outerwear", "underwear", "sportswear", 
+                "footwear", "swimwear", "knitwear", "loungewear", "sleepwear"
+            ]
         }
         
         # Words that are typically used in plural form
@@ -214,6 +231,19 @@ class ExampleSentenceGenerator:
             if self.debug:
                 print(f"\n>>> Getting example for: '{word}' <<<\n")
             
+            # Get template and generate example
+            templates = self.templates.get(template_category, self.templates["general"])
+            template = random.choice(templates)
+
+            # Handle plurals and uncountable nouns
+            if word in self.plural_words:
+                example = template.replace("a {word}", "{word}").replace("the {word}", "the {word}").format(word=word)
+            elif template_category == "uncountable_clothing":
+                # Remove "a" and "an" articles for uncountable nouns
+                example = template.replace("a {word}", "{word}").replace("an {word}", "{word}").format(word=word)
+            else:
+                example = template.format(word=word)
+
             # Try to get example from API with filter pipeline
             examples = self._get_api_examples_with_pipeline(word)
             
@@ -543,27 +573,59 @@ class ExampleSentenceGenerator:
             has_inappropriate_context = any(context in text_lower for context in inappropriate_contexts)
             
             return has_toy_context and not has_inappropriate_context
+        # Modify this existing special case for "top"
+        elif word == "top":
+            # Check for clothing context
+            clothing_contexts = ["wear", "wearing", "shirt", "outfit", "fashion", "dress", "color", "colour", "style", 
+                                "clothes", "clothing", "wardrobe", "buy", "bought", "new", "blouse", "garment", 
+                                "fitted", "loose", "tight", "comfortable"]
+            position_contexts = ["mountain", "hill", "climb", "reached", "leadership", "ranked", "ceiling", 
+                                "position", "over", "above", "surface", "lawyer", "manager", "level", "best", "highest"]
+            
+            has_clothing_context = any(context in text_lower for context in clothing_contexts)
+            has_position_context = any(context in text_lower for context in position_contexts)
+            
+            # If we can clearly identify it as clothing context, accept it
+            if has_clothing_context and not has_position_context:
+                return True
+            # If it's clearly about position/ranking, reject it
+            elif has_position_context and not has_clothing_context:
+                return False
+            # If we can't tell, default to assuming it's clothing
+            else:
+                return True
             
         # For most words, no special context check needed
         return True
     
     def _get_template_category(self, word):
         """Determine the most appropriate template category for a word."""
-        # Check predefined categories
+        # First check explicit word categories
         for category, words in self.category_words.items():
             if word in words:
                 return category
-                
-        # Heuristic guesses based on common patterns
-        if word in self.plural_words:
-            return "noun"
-        elif word.endswith('ing') and len(word) > 5:
-            return "verb"
-        elif word.endswith(('er', 'est')) and len(word) > 4:
-            return "adjective"
-        else:
-            # Default to noun for most words
-            return "noun"
+        
+        # Check special cases
+        if "teddy" in word and "bear" in word:
+            return "toys"
+        if "scissors" in word:
+            return "tools"
+        if "necklace" in word:
+            return "jewelry"
+        if word in ["clothing", "outerwear", "underwear", "sportswear", "footwear"]:
+            return "uncountable_clothing"
+        if word == "top":
+            return "clothing"
+        
+        # Get more general part of speech
+        pos = self._get_part_of_speech(word)
+        
+        # If we have templates for this part of speech, use them
+        if pos in self.templates:
+            return pos
+        
+        # Default to noun for most words
+        return "noun"
     
     def _get_free_dictionary_examples(self, word):
         """Get all examples from Free Dictionary API."""
@@ -639,3 +701,41 @@ class ExampleSentenceGenerator:
                 return ""
         else:
             return f"[Translation to {target_language}]"
+        
+    def _get_part_of_speech(self, word):
+        """Determine the part of speech for a word based on rules and lists."""
+        # Check known categories
+        for category, words in self.category_words.items():
+            if word in words:
+                # Convert category to part of speech
+                if category in ["person", "animal", "clothing", "eyewear", "jewelry", "toys", "tools"]:
+                    return "noun"
+                return category
+        
+        # Special case handling
+        if word in self.category_words.get("uncountable_clothing", []):
+            return "uncountable_clothing"
+        
+        # Explicit mappings for problematic words
+        explicit_mappings = {
+            "clothing": "uncountable_clothing",
+            "outerwear": "uncountable_clothing",
+            "underwear": "uncountable_clothing",
+            "top": "clothing",
+            "glasses": "eyewear"
+        }
+        
+        if word in explicit_mappings:
+            return explicit_mappings[word]
+        
+        # Ending-based guesses
+        if word.endswith('ing') and len(word) > 5:
+            # But exclude clothing-related words that end in "ing"
+            if word in ["clothing"]:
+                return "uncountable_clothing"
+            return "verb"
+        elif word.endswith(('er', 'est')) and len(word) > 4:
+            return "adjective"
+        
+        # Default fallback
+        return "noun"
