@@ -155,13 +155,6 @@ if 'audio_data' in st.session_state and st.session_state.audio_data:
     st.write("Debug Player:")
     st.audio(st.session_state.audio_data, format="audio/wav")
     
-    # Add a button to clear session state
-if st.button("Clear Audio Data"):
-    if 'audio_data' in st.session_state:
-        del st.session_state.audio_data
-    if 'audio_data_received' in st.session_state:
-        st.session_state.audio_data_received = False
-    st.rerun()
 
 def create_pronunciation_practice(text_to_speech_func=None, get_audio_html_func=None, translate_text_func=None, get_example_sentence_func=None):
     """

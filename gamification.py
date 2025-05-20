@@ -25,9 +25,10 @@ import io
 import sqlite3
 
 class GamificationSystem:
-    def __init__(self, db_path="language_learning.db"):
+    def __init__(self, db_path="language_learning.db", translate_func=None):
         """Initialize the gamification system."""
         self.db_path = db_path
+        self.translate_func = translate_func  # Store the translation function
         self.initialize_state()
         self.load_game_state()
         
@@ -1165,13 +1166,21 @@ class GamificationSystem:
         return language_map.get(language_code, language_code)
     
     def translate_placeholder(self, text, target_language):
-        """Create a placeholder translation when real translation is unavailable."""
-        # This is a placeholder. In real usage, this would call the actual translation API
+        """Translate text using the provided translation function or fallback to placeholders."""
+        # If we have a translation function, use it
+        if self.translate_func:
+            try:
+                return self.translate_func(text, target_language)
+            except Exception as e:
+                print(f"Translation error: {e}")
+                # Fall through to placeholder if translation fails
+        
+        # Fallback to simple dictionary for common words
         language_examples = {
-            "es": {"hello": "hola", "thank you": "gracias", "please": "por favor"},
-            "fr": {"hello": "bonjour", "thank you": "merci", "please": "s'il vous plaît"},
-            "de": {"hello": "hallo", "thank you": "danke", "please": "bitte"},
-            "it": {"hello": "ciao", "thank you": "grazie", "please": "per favore"}
+            "es": {"hello": "hola", "thank you": "gracias", "please": "por favor", "book": "libro"},
+            "fr": {"hello": "bonjour", "thank you": "merci", "please": "s'il vous plaît", "book": "livre"},
+            "de": {"hello": "hallo", "thank you": "danke", "please": "bitte", "book": "Buch"},
+            "it": {"hello": "ciao", "thank you": "grazie", "please": "per favore", "book": "libro"}
         }
         
         # Try to get a canned translation

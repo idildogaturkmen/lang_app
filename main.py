@@ -1070,7 +1070,8 @@ if 'saved_items' not in st.session_state:
 
 
 def get_gamification():
-    return GamificationSystem()
+    # Pass the translation function to the GamificationSystem
+    return GamificationSystem(translate_func=translate_text)
 
 # Initialize gamification
 gamification = get_gamification()
