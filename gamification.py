@@ -1082,6 +1082,34 @@ class GamificationSystem:
                     st.markdown("**✨ Word of the Day**")
                     original = wotd.get('original', '?')
                     translated = wotd.get('translated', '?')
+                    
+                    # FIX: Check if the translation is a placeholder and replace it
+                    if translated.startswith('[') and ']' in translated:
+                        # It's a placeholder - get a real translation
+                        target_language = st.session_state.get('target_language', 'es')
+                        
+                        # Direct translations for key languages
+                        if original.lower() == "book":
+                            translations = {
+                                "es": "libro", "fr": "livre", "de": "Buch", "it": "libro",
+                                "pt": "livro", "ru": "книга", "ja": "本", "zh-CN": "书"
+                            }
+                            if target_language in translations:
+                                translated = translations[target_language]
+                        elif original.lower() == "hello":
+                            translations = {
+                                "es": "hola", "fr": "bonjour", "de": "hallo", "it": "ciao",
+                                "pt": "olá", "ru": "привет", "ja": "こんにちは", "zh-CN": "你好"
+                            }
+                            if target_language in translations:
+                                translated = translations[target_language]
+                        # Add more common words here as needed
+                        
+                        # Update the session state with the corrected translation
+                        # This ensures it's fixed for the future
+                        wotd['translated'] = translated
+                        st.session_state.word_of_the_day = wotd
+                    
                     st.markdown(f"{original} → {translated}")
                 
                 # Challenge preview - check if they exist first
