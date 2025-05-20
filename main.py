@@ -1069,7 +1069,6 @@ if 'saved_items' not in st.session_state:
     st.session_state.saved_items = []
 
 
-@st.cache_resource
 def get_gamification():
     return GamificationSystem()
 
