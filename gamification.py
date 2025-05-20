@@ -1081,35 +1081,114 @@ class GamificationSystem:
                 if wotd and isinstance(wotd, dict):  # Ensure it's a valid dictionary
                     st.markdown("**✨ Word of the Day**")
                     original = wotd.get('original', '?')
-                    translated = wotd.get('translated', '?')
                     
-                    # FIX: Check if the translation is a placeholder and replace it
-                    if translated.startswith('[') and ']' in translated:
-                        # It's a placeholder - get a real translation
-                        target_language = st.session_state.get('target_language', 'es')
-                        
-                        # Direct translations for key languages
-                        if original.lower() == "book":
-                            translations = {
+                    # Get current target language
+                    current_language = st.session_state.get('target_language', 'es')
+                    
+                    # Check if language has changed since word of the day was generated
+                    wotd_language = wotd.get('language', None)
+                    
+                    # If language changed or translation is a placeholder, get fresh translation
+                    translated = wotd.get('translated', '?')
+                    if wotd_language != current_language or translated.startswith('['):
+                        # Translation dictionary for common words
+                        translations = {
+                            "book": {
                                 "es": "libro", "fr": "livre", "de": "Buch", "it": "libro",
                                 "pt": "livro", "ru": "книга", "ja": "本", "zh-CN": "书"
-                            }
-                            if target_language in translations:
-                                translated = translations[target_language]
-                        elif original.lower() == "hello":
-                            translations = {
+                            },
+                            "hello": {
                                 "es": "hola", "fr": "bonjour", "de": "hallo", "it": "ciao",
                                 "pt": "olá", "ru": "привет", "ja": "こんにちは", "zh-CN": "你好"
+                            },
+                            "thank you": {
+                                "es": "gracias", "fr": "merci", "de": "danke", "it": "grazie", 
+                                "pt": "obrigado", "ru": "спасибо", "ja": "ありがとう", "zh-CN": "谢谢"
+                            },
+                            "please": {
+                                "es": "por favor", "fr": "s'il vous plaît", "de": "bitte", "it": "per favore",
+                                "pt": "por favor", "ru": "пожалуйста", "ja": "お願いします", "zh-CN": "请"
+                            },
+                            "friend": {
+                                "es": "amigo", "fr": "ami", "de": "Freund", "it": "amico",
+                                "pt": "amigo", "ru": "друг", "ja": "友達", "zh-CN": "朋友"
+                            },
+                            "food": {
+                                "es": "comida", "fr": "nourriture", "de": "Essen", "it": "cibo",
+                                "pt": "comida", "ru": "еда", "ja": "食べ物", "zh-CN": "食物"
+                            },
+                            "water": {
+                                "es": "agua", "fr": "eau", "de": "Wasser", "it": "acqua",
+                                "pt": "água", "ru": "вода", "ja": "水", "zh-CN": "水"
+                            },
+                            "help": {
+                                "es": "ayuda", "fr": "aide", "de": "Hilfe", "it": "aiuto",
+                                "pt": "ajuda", "ru": "помощь", "ja": "助けて", "zh-CN": "帮助"
+                            },
+                            "good": {
+                                "es": "bueno", "fr": "bon", "de": "gut", "it": "buono",
+                                "pt": "bom", "ru": "хороший", "ja": "良い", "zh-CN": "好"
+                            },
+                            "bad": {
+                                "es": "malo", "fr": "mauvais", "de": "schlecht", "it": "cattivo",
+                                "pt": "mau", "ru": "плохой", "ja": "悪い", "zh-CN": "坏"
+                            },
+                            "yes": {
+                                "es": "sí", "fr": "oui", "de": "ja", "it": "sì",
+                                "pt": "sim", "ru": "да", "ja": "はい", "zh-CN": "是"
+                            },
+                            "no": {
+                                "es": "no", "fr": "non", "de": "nein", "it": "no",
+                                "pt": "não", "ru": "нет", "ja": "いいえ", "zh-CN": "不"
+                            },
+                            "goodbye": {
+                                "es": "adiós", "fr": "au revoir", "de": "auf Wiedersehen", "it": "arrivederci",
+                                "pt": "adeus", "ru": "до свидания", "ja": "さようなら", "zh-CN": "再见"
+                            },
+                            "sorry": {
+                                "es": "lo siento", "fr": "désolé", "de": "Entschuldigung", "it": "scusa",
+                                "pt": "desculpe", "ru": "извините", "ja": "すみません", "zh-CN": "对不起"
+                            },
+                            "excuse me": {
+                                "es": "disculpe", "fr": "excusez-moi", "de": "Entschuldigung", "it": "scusi",
+                                "pt": "com licença", "ru": "извините", "ja": "すみません", "zh-CN": "打扰了"
+                            },
+                            "love": {
+                                "es": "amor", "fr": "amour", "de": "Liebe", "it": "amore",
+                                "pt": "amor", "ru": "любовь", "ja": "愛", "zh-CN": "爱"
+                            },
+                            "car": {
+                                "es": "coche", "fr": "voiture", "de": "Auto", "it": "macchina",
+                                "pt": "carro", "ru": "машина", "ja": "車", "zh-CN": "车"
+                            },
+                            "house": {
+                                "es": "casa", "fr": "maison", "de": "Haus", "it": "casa",
+                                "pt": "casa", "ru": "дом", "ja": "家", "zh-CN": "房子"
+                            },
+                            "family": {
+                                "es": "familia", "fr": "famille", "de": "Familie", "it": "famiglia",
+                                "pt": "família", "ru": "семья", "ja": "家族", "zh-CN": "家庭"
+                            },
+                            "work": {
+                                "es": "trabajo", "fr": "travail", "de": "Arbeit", "it": "lavoro",
+                                "pt": "trabalho", "ru": "работа", "ja": "仕事", "zh-CN": "工作"
                             }
-                            if target_language in translations:
-                                translated = translations[target_language]
-                        # Add more common words here as needed
+                        }
                         
-                        # Update the session state with the corrected translation
-                        # This ensures it's fixed for the future
+                        # Get translation for the current word and language
+                        if original.lower() in translations and current_language in translations[original.lower()]:
+                            translated = translations[original.lower()][current_language]
+                        else:
+                            # Fallback to a friendly format
+                            language_name = self.get_language_name(current_language)
+                            translated = f"{original} ({language_name})"
+                        
+                        # Update the word of the day with the new translation and language
                         wotd['translated'] = translated
+                        wotd['language'] = current_language
                         st.session_state.word_of_the_day = wotd
                     
+                    # Display the word of the day with its (now correct) translation
                     st.markdown(f"{original} → {translated}")
                 
                 # Challenge preview - check if they exist first
