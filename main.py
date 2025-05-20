@@ -1070,13 +1070,14 @@ if 'saved_items' not in st.session_state:
 
 
 def get_gamification():
-    # Pass the translation function to the GamificationSystem
-    return GamificationSystem(translate_func=translate_text)
+    # Initialize GamificationSystem without the translate function for now
+    return GamificationSystem()
 
 # Initialize gamification
 gamification = get_gamification()
 # Make sure state is explicitly initialized
 gamification.initialize_state()
+
 
 
 # Function to translate text
@@ -1131,6 +1132,9 @@ def translate_worker(texts, target_language, task_id):
         st.session_state.processing_results[task_id] = {
             'error': str(e)
         }
+
+# Connect the translation function to gamification system after both are initialized
+gamification.set_translate_func(translate_text)
 
 @st.cache_resource
 def get_example_generator():

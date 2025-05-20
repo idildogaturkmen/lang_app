@@ -28,7 +28,7 @@ class GamificationSystem:
     def __init__(self, db_path="language_learning.db", translate_func=None):
         """Initialize the gamification system."""
         self.db_path = db_path
-        self.translate_func = translate_func  # Store the translation function
+        self.translate_func = translate_func  # Can be None initially
         self.initialize_state()
         self.load_game_state()
         
@@ -1164,6 +1164,10 @@ class GamificationSystem:
             "zh-CN": "Chinese"
         }
         return language_map.get(language_code, language_code)
+    
+    def set_translate_func(self, translate_func):
+        """Set or update the translation function after initialization."""
+        self.translate_func = translate_func
     
     def translate_placeholder(self, text, target_language):
         """Translate text using the provided translation function or fallback to placeholders."""
