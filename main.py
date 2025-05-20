@@ -1637,6 +1637,43 @@ selected_language = st.sidebar.selectbox(
     list(languages.keys()),
     index=list(languages.values()).index(st.session_state.target_language) if st.session_state.target_language in languages.values() else 0
 )
+# Add this right after your language selection code
+# Force update word of the day when language changes
+if 'previous_language' not in st.session_state:
+    st.session_state.previous_language = st.session_state.target_language
+    
+# Check if language has changed
+if st.session_state.previous_language != st.session_state.target_language:
+    # Language changed - force update word of the day
+    if 'word_of_the_day' in st.session_state and st.session_state.word_of_the_day:
+        wotd = st.session_state.word_of_the_day
+        original = wotd.get('original', '')
+        
+        # Translation dictionary for common words
+        translations = {
+            "book": {
+                "es": "libro", "fr": "livre", "de": "Buch", "it": "libro",
+                "pt": "livro", "ru": "книга", "ja": "本", "zh-CN": "书"
+            },
+            "hello": {
+                "es": "hola", "fr": "bonjour", "de": "hallo", "it": "ciao",
+                "pt": "olá", "ru": "привет", "ja": "こんにちは", "zh-CN": "你好"
+            },
+            # Include all other translations from the previous solution
+        }
+        
+        # Get updated translation for current language
+        new_lang = st.session_state.target_language
+        if original.lower() in translations and new_lang in translations[original.lower()]:
+            wotd['translated'] = translations[original.lower()][new_lang]
+            wotd['language'] = new_lang
+            st.session_state.word_of_the_day = wotd
+    
+    # Update previous language to current
+    st.session_state.previous_language = st.session_state.target_language
+    # Force rerun to update UI
+    st.rerun()
+    
 # Add help section to the sidebar
 with st.sidebar.expander("ℹ️ Need Help?"):
     st.markdown("""
