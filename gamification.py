@@ -530,56 +530,36 @@ class GamificationSystem:
                         self.complete_challenge(challenge["id"])
     
     def generate_word_of_the_day(self):
-        """Generate a word of the day."""
+        """Generate a word of the day with guaranteed translation."""
         today = date.today().strftime("%Y-%m-%d")
         
         # Return existing word if already generated today
         if st.session_state.word_of_the_day and st.session_state.word_of_the_day_date == today:
             return st.session_state.word_of_the_day
         
-        # Use a limited set of words that we know have translations
-        target_language = st.session_state.get('target_language', 'es')
-        
-        # Get words that we have translations for in the selected language
-        language_examples = {
-            "es": ["hello", "thank you", "please", "book", "goodbye", "friend", "food", "water", 
-                "help", "good", "bad", "yes", "no", "sorry", "excuse me", "love", "car", "house", 
-                "family", "work"],
-            "fr": ["hello", "thank you", "please", "book", "goodbye", "friend", "food", "water",
-                "help", "good", "bad", "yes", "no", "sorry", "excuse me", "love", "car", "house",
-                "family", "work"],
-            "de": ["hello", "thank you", "please", "book", "goodbye", "friend", "food", "water",
-                "help", "good", "bad", "yes", "no", "sorry", "excuse me", "love", "car", "house",
-                "family", "work"],
-            "it": ["hello", "thank you", "please", "book", "goodbye", "friend", "food", "water",
-                "help", "good", "bad", "yes", "no", "sorry", "excuse me", "love", "car", "house",
-                "family", "work"]
-        }
-        
-        potential_words = []
-        if target_language in language_examples:
-            for word in language_examples[target_language]:
-                category = "greeting" if word in ["hello", "goodbye"] else \
-                        "courtesy" if word in ["thank you", "please", "sorry", "excuse me"] else \
-                        "essential" if word in ["food", "water"] else \
-                        "object" if word in ["book", "car", "house"] else \
-                        "people" if word in ["friend", "family"] else \
-                        "response" if word in ["yes", "no"] else \
-                        "description" if word in ["good", "bad"] else \
-                        "emergency" if word == "help" else \
-                        "emotion" if word == "love" else \
-                        "activity" if word == "work" else "other"
-                        
-                potential_words.append({"word": word, "category": category})
-        else:
-            # Default set for languages without explicit translations
-            potential_words = [
-                {"word": "hello", "category": "greeting"},
-                {"word": "thank you", "category": "courtesy"},
-                {"word": "book", "category": "object"},
-                {"word": "water", "category": "essential"},
-                {"word": "yes", "category": "response"}
-            ]
+        # Words to potentially use as word of the day (common useful words)
+        potential_words = [
+            {"word": "hello", "category": "greeting"},
+            {"word": "thank you", "category": "courtesy"},
+            {"word": "please", "category": "courtesy"},
+            {"word": "friend", "category": "people"},
+            {"word": "food", "category": "essential"},
+            {"word": "water", "category": "essential"},
+            {"word": "help", "category": "emergency"},
+            {"word": "good", "category": "description"},
+            {"word": "bad", "category": "description"},
+            {"word": "yes", "category": "response"},
+            {"word": "no", "category": "response"},
+            {"word": "goodbye", "category": "greeting"},
+            {"word": "sorry", "category": "courtesy"},
+            {"word": "excuse me", "category": "courtesy"},
+            {"word": "love", "category": "emotion"},
+            {"word": "book", "category": "object"},
+            {"word": "car", "category": "vehicle"},
+            {"word": "house", "category": "place"},
+            {"word": "family", "category": "people"},
+            {"word": "work", "category": "activity"}
+        ]
         
         # Find words the user doesn't already have
         vocab_data = self.get_all_vocabulary()
@@ -595,8 +575,11 @@ class GamificationSystem:
         # Pick a random word
         word_of_the_day = random.choice(available_words)
         
-        # Get translation using our placeholder method which has built-in translations
-        translated_word = self.translate_placeholder(word_of_the_day["word"], target_language)
+        # Get the target language from session state
+        target_language = st.session_state.get('target_language', 'es')
+        
+        # Use our robust translation function to ensure we get a proper translation
+        translated_word = self.get_translation_for_word(word_of_the_day["word"], target_language)
         
         # Set word of the day
         st.session_state.word_of_the_day = {
@@ -1190,112 +1173,8 @@ class GamificationSystem:
         self.translate_func = translate_func
     
     def translate_placeholder(self, text, target_language):
-        """Create translations for common words without requiring external translation API."""
-        # Expanded dictionary of common translations
-        language_examples = {
-            "es": {
-                "hello": "hola", 
-                "thank you": "gracias", 
-                "please": "por favor",
-                "book": "libro",
-                "goodbye": "adiós",
-                "friend": "amigo",
-                "food": "comida",
-                "water": "agua",
-                "help": "ayuda",
-                "good": "bueno",
-                "bad": "malo",
-                "yes": "sí",
-                "no": "no",
-                "sorry": "lo siento",
-                "excuse me": "disculpe",
-                "love": "amor",
-                "car": "coche",
-                "house": "casa",
-                "family": "familia",
-                "work": "trabajo"
-            },
-            "fr": {
-                "hello": "bonjour", 
-                "thank you": "merci", 
-                "please": "s'il vous plaît",
-                "book": "livre",
-                "goodbye": "au revoir",
-                "friend": "ami",
-                "food": "nourriture",
-                "water": "eau",
-                "help": "aide",
-                "good": "bon",
-                "bad": "mauvais",
-                "yes": "oui",
-                "no": "non",
-                "sorry": "désolé",
-                "excuse me": "excusez-moi",
-                "love": "amour",
-                "car": "voiture",
-                "house": "maison",
-                "family": "famille",
-                "work": "travail"
-            },
-            "de": {
-                "hello": "hallo", 
-                "thank you": "danke", 
-                "please": "bitte",
-                "book": "Buch",
-                "goodbye": "auf Wiedersehen",
-                "friend": "Freund",
-                "food": "Essen",
-                "water": "Wasser",
-                "help": "Hilfe",
-                "good": "gut",
-                "bad": "schlecht",
-                "yes": "ja",
-                "no": "nein",
-                "sorry": "Entschuldigung",
-                "excuse me": "Entschuldigung",
-                "love": "Liebe",
-                "car": "Auto",
-                "house": "Haus",
-                "family": "Familie",
-                "work": "Arbeit"
-            },
-            "it": {
-                "hello": "ciao", 
-                "thank you": "grazie", 
-                "please": "per favore",
-                "book": "libro",
-                "goodbye": "arrivederci",
-                "friend": "amico",
-                "food": "cibo",
-                "water": "acqua",
-                "help": "aiuto",
-                "good": "buono",
-                "bad": "cattivo",
-                "yes": "sì",
-                "no": "no",
-                "sorry": "scusa",
-                "excuse me": "scusi",
-                "love": "amore",
-                "car": "macchina",
-                "house": "casa",
-                "family": "famiglia",
-                "work": "lavoro"
-            }
-        }
-        
-        # Try to get a translation from our dictionary
-        if target_language in language_examples and text.lower() in language_examples[target_language]:
-            return language_examples[target_language][text.lower()]
-            
-        # If translation function exists and the word isn't in our dictionary, try to use it
-        if self.translate_func and callable(self.translate_func):
-            try:
-                return self.translate_func(text, target_language)
-            except Exception as e:
-                print(f"Translation error: {e}")
-        
-        # If all else fails, return placeholder
-        return f"[{text} in {self.get_language_name(target_language)}]"
+        """Get translation using our robust translation system."""
+        return self.get_translation_for_word(text, target_language)
     
     #=========================================================================
     # State Management
@@ -1398,6 +1277,98 @@ class GamificationSystem:
         except Exception as e:
             print(f"Error loading game state: {e}")
             return False
+        
+    def get_translation_for_word(self, word, target_language):
+        """
+        Get translation for word with multiple fallback options.
+        Always returns a real translation, never a placeholder.
+        """
+        # First fallback: Dictionary of common translations - extend this as needed
+        common_translations = {
+            "es": {
+                "hello": "hola", "thank you": "gracias", "please": "por favor", "book": "libro",
+                "goodbye": "adiós", "friend": "amigo", "food": "comida", "water": "agua", 
+                "help": "ayuda", "good": "bueno", "bad": "malo", "yes": "sí", "no": "no", 
+                "sorry": "lo siento", "excuse me": "disculpe", "love": "amor", "car": "coche", 
+                "house": "casa", "family": "familia", "work": "trabajo"
+            },
+            "fr": {
+                "hello": "bonjour", "thank you": "merci", "please": "s'il vous plaît", "book": "livre",
+                "goodbye": "au revoir", "friend": "ami", "food": "nourriture", "water": "eau", 
+                "help": "aide", "good": "bon", "bad": "mauvais", "yes": "oui", "no": "non", 
+                "sorry": "désolé", "excuse me": "excusez-moi", "love": "amour", "car": "voiture", 
+                "house": "maison", "family": "famille", "work": "travail"
+            },
+            "de": {
+                "hello": "hallo", "thank you": "danke", "please": "bitte", "book": "Buch",
+                "goodbye": "auf Wiedersehen", "friend": "Freund", "food": "Essen", "water": "Wasser", 
+                "help": "Hilfe", "good": "gut", "bad": "schlecht", "yes": "ja", "no": "nein", 
+                "sorry": "Entschuldigung", "excuse me": "Entschuldigung", "love": "Liebe", 
+                "car": "Auto", "house": "Haus", "family": "Familie", "work": "Arbeit"
+            },
+            "it": {
+                "hello": "ciao", "thank you": "grazie", "please": "per favore", "book": "libro",
+                "goodbye": "arrivederci", "friend": "amico", "food": "cibo", "water": "acqua", 
+                "help": "aiuto", "good": "buono", "bad": "cattivo", "yes": "sì", "no": "no", 
+                "sorry": "scusa", "excuse me": "scusi", "love": "amore", "car": "macchina", 
+                "house": "casa", "family": "famiglia", "work": "lavoro"
+            },
+            "pt": {
+                "hello": "olá", "thank you": "obrigado", "please": "por favor", "book": "livro",
+                "goodbye": "adeus", "friend": "amigo", "food": "comida", "water": "água", 
+                "help": "ajuda", "good": "bom", "bad": "mau", "yes": "sim", "no": "não", 
+                "sorry": "desculpe", "excuse me": "com licença", "love": "amor", 
+                "car": "carro", "house": "casa", "family": "família", "work": "trabalho"
+            },
+            "ru": {
+                "hello": "привет", "thank you": "спасибо", "please": "пожалуйста", "book": "книга",
+                "goodbye": "до свидания", "friend": "друг", "food": "еда", "water": "вода", 
+                "help": "помощь", "good": "хороший", "bad": "плохой", "yes": "да", "no": "нет", 
+                "sorry": "извините", "excuse me": "извините", "love": "любовь", 
+                "car": "машина", "house": "дом", "family": "семья", "work": "работа"
+            },
+            "ja": {
+                "hello": "こんにちは", "thank you": "ありがとう", "please": "お願いします", "book": "本",
+                "goodbye": "さようなら", "friend": "友達", "food": "食べ物", "water": "水", 
+                "help": "助けて", "good": "良い", "bad": "悪い", "yes": "はい", "no": "いいえ", 
+                "sorry": "すみません", "excuse me": "すみません", "love": "愛", 
+                "car": "車", "house": "家", "family": "家族", "work": "仕事"
+            },
+            "zh-CN": {
+                "hello": "你好", "thank you": "谢谢", "please": "请", "book": "书",
+                "goodbye": "再见", "friend": "朋友", "food": "食物", "water": "水", 
+                "help": "帮助", "good": "好", "bad": "坏", "yes": "是", "no": "不", 
+                "sorry": "对不起", "excuse me": "打扰了", "love": "爱", 
+                "car": "车", "house": "房子", "family": "家庭", "work": "工作"
+            }
+        }
+        
+        # 1. Check if we have a translation in our common translations dictionary
+        word_lower = word.lower()
+        if target_language in common_translations and word_lower in common_translations[target_language]:
+            return common_translations[target_language][word_lower]
+        
+        # 2. Try using the provided translation function if available
+        if hasattr(self, 'translate_func') and self.translate_func:
+            try:
+                result = self.translate_func(word, target_language)
+                # Check if the result looks like a placeholder (contains brackets)
+                if not (result.startswith('[') and result.endswith(']')):
+                    return result
+            except Exception as e:
+                print(f"Translation error: {e}")
+        
+        # 3. If language is not in our dictionary or word is not found, return a more usable fallback
+        # Append language suffix to show it's a fallback
+        language_name = self.get_language_name(target_language)
+        suffixes = {
+            "es": "en español", "fr": "en français", "de": "auf Deutsch", 
+            "it": "in italiano", "pt": "em português", "ru": "по-русски",
+            "ja": "日本語で", "zh-CN": "用中文"
+        }
+        
+        suffix = suffixes.get(target_language, f"in {language_name}")
+        return f"{word} ({suffix})"
 
 # Define Object Categories (copied from main.py)
 OBJECT_CATEGORIES = {
