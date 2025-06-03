@@ -22,7 +22,6 @@ from streamlit.components.v1 import components
 import hashlib
 from functools import lru_cache
 from example_sentences import ExampleSentenceGenerator
-from pronunciation_assessment_integration import initialize_pronunciation_assessment
 import tensorflow as tf
 import tensorflow_hub as hub
 import requests
@@ -77,14 +76,13 @@ if is_cloud:
     os.environ['IS_STREAMLIT_CLOUD'] = 'true'
     print("Running in Streamlit Cloud - some features may be limited")
 
-
-# Fix the typo in the import statement
 try:
     from pronunciation_practice import create_pronunciation_practice
     has_pronunciation_practice = True
-except ImportError:
+    print("✅ Enhanced pronunciation practice with AI feedback loaded")
+except ImportError as e:
     has_pronunciation_practice = False
-
+    print(f"❌ Pronunciation practice not available: {e}")
     
 # Try importing OCR with fallback
 try:
@@ -202,6 +200,47 @@ except ImportError as e:
     has_custom_recorder = False
     print(f"Custom audio recorder not available: {e}")
 
+def check_pronunciation_dependencies():
+    """Check and report pronunciation practice dependencies"""
+    dependencies = {
+        'streamlit_webrtc': False,
+        'speech_recognition': False,
+        'librosa': False,
+        'Levenshtein': False,
+        'av': False
+    }
+    
+    try:
+        import streamlit_webrtc
+        dependencies['streamlit_webrtc'] = True
+    except ImportError:
+        pass
+    
+    try:
+        import speech_recognition
+        dependencies['speech_recognition'] = True
+    except ImportError:
+        pass
+    
+    try:
+        import librosa
+        dependencies['librosa'] = True
+    except ImportError:
+        pass
+    
+    try:
+        import Levenshtein
+        dependencies['Levenshtein'] = True
+    except ImportError:
+        pass
+    
+    try:
+        import av
+        dependencies['av'] = True
+    except ImportError:
+        pass
+    
+    return dependencies
 
 def draw_detections(image_np, detections):
     """Draw bounding boxes and labels on the image."""
@@ -1053,6 +1092,18 @@ def prepare_vocabulary_for_diverse_questions(vocabulary, languages):
         st.sidebar.markdown(f"With examples: {words_with_examples}")
     
     return vocabulary
+
+if st.sidebar.checkbox("Show Pronunciation Dependencies"):
+    deps = check_pronunciation_dependencies()
+    st.sidebar.markdown("### Pronunciation Practice Dependencies")
+    for dep, available in deps.items():
+        status = "✅" if available else "❌"
+        st.sidebar.markdown(f"{status} {dep}")
+    
+    missing = [dep for dep, avail in deps.items() if not avail]
+    if missing:
+        st.sidebar.markdown("**To install missing dependencies:**")
+        st.sidebar.code(f"pip install {' '.join(missing)}")
 
 if 'db_checked' not in st.session_state:
     st.session_state.db_checked = check_database_setup()
@@ -2446,41 +2497,35 @@ elif app_mode == "My Vocabulary":
                     try:
                         # Only initialize if not already initialized
                         if 'pronunciation_practice' not in st.session_state:
-                            # Initialize the pronunciation practice module with the functions it needs
-                            # Initialize the pronunciation practice module with the functions it needs
+                            # Initialize the enhanced pronunciation practice module
                             st.session_state.pronunciation_practice = create_pronunciation_practice(
                                 text_to_speech_func=text_to_speech, 
                                 get_audio_html_func=get_audio_html,
                                 translate_text_func=translate_text,
-                                get_example_sentence_func=get_example_sentence  # Add this line
+                                get_example_sentence_func=get_example_sentence
                             )
-                            print("Successfully initialized pronunciation practice module")
+                            print("✅ Enhanced pronunciation practice initialized with AI feedback")
 
-                            # If you've imported the custom recorder, make it available to the module
-                            if has_custom_recorder:
-                                st.session_state.pronunciation_practice.custom_recorder = audio_recorder
-                                st.session_state.pronunciation_practice.has_custom_recorder = True
-
-                            # Initialize pronunciation assessment (add these lines right here)
-                            if 'pronunciation_practice' in st.session_state:
-                                initialize_pronunciation_assessment()
-                        
-                        # Now use the initialized module
-                        st.session_state.pronunciation_practice.render_practice_ui(word)
+                            # Add pronunciation practice capabilities to session state
+                            st.session_state.pronunciation_capabilities = {
+                                'realtime_feedback': True,
+                                'ai_analysis': True,
+                                'visual_feedback': True,
+                                'progress_tracking': True
+                            }
+                            
+                        # Check for custom recorder availability
+                        try:
+                            from custom_audio_recorder import audio_recorder
+                            st.session_state.pronunciation_practice.has_custom_recorder = True
+                            print("✅ Custom audio recorder available")
+                        except ImportError:
+                            st.session_state.pronunciation_practice.has_custom_recorder = False
+                            print("ℹ️ Using fallback recording methods")
+                            
                     except Exception as e:
-                        # Gracefully handle any errors
-                        print(f"Error in pronunciation module: {str(e)}")
-                        with st.expander("🎤 Practice Pronunciation"):
-                            warning_message("Pronunciation practice is temporarily unavailable.")
-                            info_message("This feature may not be supported in the current environment.")
-                else:
-                    # Show a message if pronunciation practice is not available
-                    with st.expander("🎤 Practice Pronunciation"):
-                        warning_message("Pronunciation practice requires additional packages.")
-                        info_message("To enable pronunciation practice, install the following packages:")
-                        st.code("pip install SpeechRecognition pydub PyAudio python-Levenshtein")
-                        st.markdown("After installing, restart the application to use pronunciation practice.")
-
+                        print(f"❌ Error initializing pronunciation practice: {str(e)}")
+                        has_pronunciation_practice = False
                         
                 # Add example sentence directly (no expander)
                 example = get_example_sentence(word.get('word_original', ''), word.get('language_translated', ''))
@@ -2844,103 +2889,284 @@ elif app_mode == "My Progress":
         print(f"Dashboard error: {e}")
 
 elif app_mode == "Pronunciation Practice":
-    style_title("🎤 Pronunciation Practice")
-    st.markdown("Practice your pronunciation and get instant feedback on your speaking skills.")
+    style_title("🤖 AI-Powered Pronunciation Practice")
+    st.markdown("Practice your pronunciation with real-time AI feedback and comprehensive analysis.")
 
-    # Add this at the beginning of the "Pronunciation Practice" section:
-    if 'pronunciation_practice' in st.session_state:
-        st.sidebar.markdown("DEBUG: Attempting direct integration")
-        try:
-            # Directly import and use the assessment module
-            import pronunciation_assessment
-            pronunciation_assessment.setup_pronunciation_assessment()
-            st.sidebar.success("Direct pronunciation assessment integration successful!")
-        except Exception as e:
-            st.sidebar.error(f"Direct integration error: {e}")
-    
     # Session management
     col1, col2 = st.columns(2)
     with col1:
         if st.session_state.session_id is None:
-            if st.button("Start Learning Session"):
+            if st.button("Start Learning Session", key="start_pron_session"):
                 if manage_session("start"):
                     st.rerun()
         else:
             info_message(f"Session in progress - Words studied: {st.session_state.words_studied}")
     with col2:
         if st.session_state.session_id is not None:
-            if st.button("End Session"):
+            if st.button("End Session", key="end_pron_session"):
                 if manage_session("end"):
                     st.rerun()
     
     if has_pronunciation_practice:
         try:
-            # Only initialize if not already initialized
-            if 'pronunciation_practice' not in st.session_state:
-                # Initialize the pronunciation practice module
-                st.session_state.pronunciation_practice = create_pronunciation_practice(
-                    text_to_speech_func=text_to_speech,
-                    get_audio_html_func=get_audio_html,
-                    translate_text_func=translate_text
-                )
-                
-                # If you've imported the custom recorder, make it available to the module
-                if has_custom_recorder:
-                    st.session_state.pronunciation_practice.custom_recorder = audio_recorder
-                    st.session_state.pronunciation_practice.has_custom_recorder = True
+            # Enhanced pronunciation practice interface
+            st.markdown("""
+            ### 🎯 Features Available:
+            - **Real-time feedback** during recording
+            - **AI-powered analysis** of your pronunciation 
+            - **Visual spectrograms** showing sound patterns
+            - **Progress tracking** across practice sessions
+            - **Language-specific tips** for difficult sounds
+            """)
             
             # Get vocabulary from database
             vocabulary = get_all_vocabulary_direct()
             
-            # Let user select language
+            # Language selection
             practice_language = st.selectbox(
                 "Select practice language:",
                 list(languages.keys()),
                 index=list(languages.values()).index(st.session_state.target_language) 
-                    if st.session_state.target_language in languages.values() else 0
+                    if st.session_state.target_language in languages.values() else 0,
+                key="pron_lang_select"
             )
             practice_language_code = languages[practice_language]
             
-            # Filtered vocabulary for the selected language
+            # Filter vocabulary for the selected language
             filtered_vocab = [word for word in vocabulary if word['language_translated'] == practice_language_code]
             
             if filtered_vocab:
-                # Run the practice session if words are selected
-                if 'practice_words' in st.session_state:
-                    st.session_state.pronunciation_practice.render_practice_session(
-                        vocabulary, practice_language_code)
-                else:
-                    # Start a new practice session button
-                    info_message(f"Found {len(filtered_vocab)} words in {practice_language}. Start a practice session to improve your pronunciation.")
-                    if st.button("Start Practice Session"):
-                        # Import standard library random (not numpy)
-                        import random
-                        # Select 5 random words for practice (or fewer if not enough words)
-                        practice_size = min(5, len(filtered_vocab))
-                        st.session_state.practice_words = random.sample(filtered_vocab, practice_size)
-                        st.session_state.current_practice_index = 0
-                        st.session_state.practice_scores = []
-                        st.rerun()
+                # Practice mode selection
+                practice_mode = st.radio(
+                    "Choose practice mode:",
+                    [
+                        "📚 Individual Word Practice", 
+                        "🎯 Focused Practice Session",
+                        "🏆 Challenge Mode"
+                    ],
+                    key="practice_mode_select"
+                )
+                
+                if practice_mode == "📚 Individual Word Practice":
+                    # Individual word practice
+                    word_index = st.selectbox(
+                        "Select a word to practice:",
+                        range(len(filtered_vocab)),
+                        format_func=lambda i: f"{filtered_vocab[i].get('word_translated', '')} ({filtered_vocab[i].get('word_original', '')})",
+                        key="word_select"
+                    )
+                    
+                    selected_word = filtered_vocab[word_index]
+                    st.session_state.pronunciation_practice.render_practice_ui(selected_word)
+                
+                elif practice_mode == "🎯 Focused Practice Session":
+                    # Focused session mode
+                    if 'practice_session_words' not in st.session_state:
+                        session_size = st.slider("Number of words to practice:", 3, 10, 5)
+                        
+                        if st.button("🚀 Start Focused Session", type="primary"):
+                            import random
+                            st.session_state.practice_session_words = random.sample(
+                                filtered_vocab, min(session_size, len(filtered_vocab))
+                            )
+                            st.session_state.current_session_index = 0
+                            st.session_state.session_scores = []
+                            st.rerun()
+                    else:
+                        # Session in progress
+                        current_index = st.session_state.current_session_index
+                        total_words = len(st.session_state.practice_session_words)
+                        
+                        # Progress display
+                        progress = current_index / total_words
+                        st.progress(progress)
+                        st.markdown(f"**Word {current_index + 1} of {total_words}**")
+                        
+                        if current_index < total_words:
+                            current_word = st.session_state.practice_session_words[current_index]
+                            st.session_state.pronunciation_practice.render_practice_ui(current_word)
+                            
+                            # Session navigation
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                if current_index > 0:
+                                    if st.button("⬅️ Previous Word"):
+                                        st.session_state.current_session_index -= 1
+                                        st.rerun()
+                            
+                            with col2:
+                                if st.button("⏭️ Skip Word"):
+                                    st.session_state.current_session_index += 1
+                                    st.rerun()
+                            
+                            with col3:
+                                if current_index < total_words - 1:
+                                    if st.button("➡️ Next Word"):
+                                        st.session_state.current_session_index += 1
+                                        st.rerun()
+                        else:
+                            # Session completed
+                            st.success("🎉 Practice session completed!")
+                            
+                            # Show session results
+                            if 'session_scores' in st.session_state and st.session_state.session_scores:
+                                avg_score = sum(st.session_state.session_scores) / len(st.session_state.session_scores)
+                                st.metric("Average Score", f"{avg_score:.0f}%")
+                                
+                                # Progress chart
+                                fig, ax = plt.subplots(figsize=(8, 4))
+                                ax.plot(range(1, len(st.session_state.session_scores) + 1), 
+                                       st.session_state.session_scores, 
+                                       marker='o', linestyle='-')
+                                ax.set_xlabel('Word Number')
+                                ax.set_ylabel('Score (%)')
+                                ax.set_title('Session Progress')
+                                ax.grid(True, alpha=0.3)
+                                st.pyplot(fig)
+                            
+                            # Reset session
+                            if st.button("🔄 Start New Session"):
+                                for key in ['practice_session_words', 'current_session_index', 'session_scores']:
+                                    if key in st.session_state:
+                                        del st.session_state[key]
+                                st.rerun()
+                
+                elif practice_mode == "🏆 Challenge Mode":
+                    # Challenge mode - rapid pronunciation assessment
+                    st.markdown("### 🏆 Pronunciation Challenge")
+                    st.markdown("Quick-fire pronunciation assessment - get scored on speed and accuracy!")
+                    
+                    if 'challenge_mode' not in st.session_state:
+                        difficulty = st.selectbox(
+                            "Select difficulty:",
+                            ["🟢 Easy (3 words)", "🟡 Medium (5 words)", "🔴 Hard (8 words)"]
+                        )
+                        
+                        word_count = {"🟢 Easy (3 words)": 3, "🟡 Medium (5 words)": 5, "🔴 Hard (8 words)": 8}[difficulty]
+                        
+                        if st.button("🚀 Start Challenge!", type="primary"):
+                            import random
+                            st.session_state.challenge_words = random.sample(
+                                filtered_vocab, min(word_count, len(filtered_vocab))
+                            )
+                            st.session_state.challenge_index = 0
+                            st.session_state.challenge_scores = []
+                            st.session_state.challenge_start_time = time.time()
+                            st.session_state.challenge_mode = True
+                            st.rerun()
+                    else:
+                        # Challenge in progress
+                        current_index = st.session_state.challenge_index
+                        total_words = len(st.session_state.challenge_words)
+                        
+                        if current_index < total_words:
+                            # Timer display
+                            elapsed_time = time.time() - st.session_state.challenge_start_time
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.metric("Time Elapsed", f"{elapsed_time:.1f}s")
+                            with col2:
+                                st.metric("Words Remaining", total_words - current_index)
+                            
+                            # Current word practice
+                            current_word = st.session_state.challenge_words[current_index]
+                            st.markdown(f"### Challenge Word: {current_word.get('word_translated', '')}")
+                            
+                            # Quick practice interface
+                            st.session_state.pronunciation_practice.render_practice_ui(current_word)
+                            
+                        else:
+                            # Challenge completed
+                            total_time = time.time() - st.session_state.challenge_start_time
+                            st.success(f"🏆 Challenge completed in {total_time:.1f} seconds!")
+                            
+                            # Challenge results
+                            if st.session_state.challenge_scores:
+                                avg_score = sum(st.session_state.challenge_scores) / len(st.session_state.challenge_scores)
+                                speed_bonus = max(0, 100 - total_time)  # Bonus for speed
+                                final_score = (avg_score * 0.8) + (speed_bonus * 0.2)
+                                
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.metric("Average Accuracy", f"{avg_score:.0f}%")
+                                with col2:
+                                    st.metric("Speed Bonus", f"{speed_bonus:.0f}")
+                                with col3:
+                                    st.metric("Final Score", f"{final_score:.0f}%")
+                                
+                                # Achievement badges
+                                if final_score >= 90:
+                                    st.markdown("🏆 **PRONUNCIATION MASTER!**")
+                                elif final_score >= 80:
+                                    st.markdown("🥇 **EXCELLENT PERFORMANCE!**")
+                                elif final_score >= 70:
+                                    st.markdown("🥈 **GREAT JOB!**")
+                                else:
+                                    st.markdown("🥉 **KEEP PRACTICING!**")
+                            
+                            # Reset challenge
+                            if st.button("🔄 New Challenge"):
+                                for key in ['challenge_words', 'challenge_index', 'challenge_scores', 
+                                          'challenge_start_time', 'challenge_mode']:
+                                    if key in st.session_state:
+                                        del st.session_state[key]
+                                st.rerun()
             else:
                 warning_message(f"No vocabulary words found for {practice_language}. Go to Camera Mode to add words first.")
             
-        
         except Exception as e:
-            error_message(f"Error initializing pronunciation practice: {str(e)}")
-            warning_message("Pronunciation practice is temporarily unavailable.")
-            info_message("This feature may not be supported in the current environment.")
+            error_message(f"Error in pronunciation practice: {str(e)}")
+            st.info("Try refreshing the page or check the pronunciation practice module.")
     else:
-        warning_message("Pronunciation practice requires additional packages.")
-        info_message("To enable pronunciation practice, install the following packages:")
+        # Installation guide for missing dependencies
+        st.warning("🎤 Enhanced pronunciation practice requires additional packages.")
         
-        st.markdown("### Python Packages:")
-        st.code("pip install SpeechRecognition pydub PyAudio python-Levenshtein")
+        st.markdown("### 📋 Installation Guide")
         
-        st.markdown("After installing, restart the application to use pronunciation practice.")
+        # Check which packages are missing
+        missing_packages = []
+        package_status = {}
         
-        # Add a sample of what the feature will look like
-        st.markdown("### Sample Pronunciation Feature")
-        st.image("https://i.ibb.co/GTxfJsQ/pronunciation-practice-sample.png", caption="Sample pronunciation practice interface")
+        packages_to_check = {
+            'streamlit-webrtc': 'Real-time audio recording',
+            'speech-recognition': 'Speech-to-text conversion', 
+            'librosa': 'Advanced audio analysis',
+            'python-Levenshtein': 'Text similarity comparison',
+            'av': 'Audio/video processing'
+        }
+        
+        for package, description in packages_to_check.items():
+            try:
+                if package == 'streamlit-webrtc':
+                    import streamlit_webrtc
+                elif package == 'speech-recognition':
+                    import speech_recognition
+                elif package == 'librosa':
+                    import librosa
+                elif package == 'python-Levenshtein':
+                    import Levenshtein
+                elif package == 'av':
+                    import av
+                package_status[package] = (True, description)
+            except ImportError:
+                package_status[package] = (False, description)
+                missing_packages.append(package)
+        
+        # Display package status
+        for package, (available, description) in package_status.items():
+            status_icon = "✅" if available else "❌"
+            st.markdown(f"{status_icon} **{package}**: {description}")
+        
+        if missing_packages:
+            st.markdown("### 🛠️ Installation Commands")
+            st.code(f"pip install {' '.join(missing_packages)}")
+            
+            st.markdown("### 🔄 After Installation")
+            st.markdown("1. Restart your Streamlit application")
+            st.markdown("2. Refresh this page")
+            st.markdown("3. Enjoy AI-powered pronunciation practice!")
+        else:
+            st.success("✅ All packages are installed! Restart the app to enable pronunciation practice.")
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Session Info")
