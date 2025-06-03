@@ -13,7 +13,6 @@ streamlit-webrtc==0.47.1
 av>=9.0.0
 SpeechRecognition>=3.8.1
 python-Levenshtein
-google-auth>=2.3.3
 soundfile>=0.13.1
 librosa>=0.9.0
 tensorflow==2.15.0

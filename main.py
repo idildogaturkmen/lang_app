@@ -8,10 +8,7 @@ import time
 import sqlite3
 import datetime
 import sys
-import json
-import tempfile
 import re
-import threading
 import queue
 from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
@@ -24,11 +21,13 @@ from vocam_ui import apply_custom_css
 from streamlit.components.v1 import components
 import hashlib
 from functools import lru_cache
-import inspect
 from example_sentences import ExampleSentenceGenerator
 from pronunciation_assessment_integration import initialize_pronunciation_assessment
 import tensorflow as tf
 import tensorflow_hub as hub
+import requests
+from deep_translator import GoogleTranslator
+from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM
 
 # First, display Python version for
 st.set_page_config(
@@ -48,13 +47,6 @@ if is_cloud:
     os.environ['IS_STREAMLIT_CLOUD'] = 'true'
     print("Running in Streamlit Cloud - some features may be limited")
 
-import sys
-import importlib
-# Remove old module from cache if it exists
-if 'example_sentences' in sys.modules:
-    del sys.modules['example_sentences']
-# Now import (will be fresh)
-from example_sentences import ExampleSentenceGenerator
 
 # Import the UI enhancement module
 from vocam_ui import (
@@ -170,31 +162,6 @@ except ImportError as e:
             
     torch = DummyTorch()
 
-# Try importing Google Cloud libraries
-try:
-    from google.cloud import translate_v2 as translate
-except ImportError as e:
-    # Dummy translate for fallback
-    class DummyTranslate:
-        class Client:
-            def __init__(self):
-                pass
-                
-            def translate(self, text, target_language=None):
-                return {"translatedText": f"[Translation to {target_language} would appear here]"}
-    
-    translate = DummyTranslate()
-
-# Try importing deep translator with fallback
-try:
-    from deep_translator import GoogleTranslator
-    has_deep_translator = True
-except ImportError as e:
-    has_deep_translator = False
-    # Fallback function
-    def dummy_translator(*args, **kwargs):
-        return "Could not generate example. Install deep-translator package."
-    GoogleTranslator = dummy_translator
 
 # Try importing gTTS
 try:
@@ -434,31 +401,6 @@ def convert_to_dict(obj):
     else:
         return obj
 
-# Handle Google Cloud credentials with proper type handling
-try:
-    if 'gcp_service_account' in st.secrets:
-        # Create a temporary file to store credentials
-        credentials_temp = tempfile.NamedTemporaryFile(delete=False, suffix='.json')
-        credentials_path = credentials_temp.name
-        
-        # Get a copy of all secret key-value pairs
-        credentials_dict = {}
-        for key in st.secrets["gcp_service_account"]:
-            credentials_dict[key] = st.secrets["gcp_service_account"][key]
-        
-        # Write the credentials to the temporary file
-        with open(credentials_path, 'w') as f:
-            json.dump(credentials_dict, f)
-        
-        # Set environment variable to point to this file
-        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_path
-    else:
-        # Local development fallback
-        credentials_path = r'C:\Users\HP\Desktop\Senior Proj\credentials.json'
-        if os.path.exists(credentials_path):
-            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_path
-except Exception as e:
-    pass
 
 # Define object categories for better organization
 OBJECT_CATEGORIES = {
@@ -713,7 +655,6 @@ def detect_text_in_image(image):
         return f"Text detection error: {e}"
 
 # Function to get example sentence
-# If deep-translator isn't available, we can use Google Translate API directly
 def get_example_sentence(word, target_language):
     """Generate an example sentence using the word via the example generator."""
     # Try to determine category from OBJECT_CATEGORIES
@@ -1275,57 +1216,148 @@ def display_model_status():
                 st.error(f"❌ Error: {e}")
 
 # Function to translate text
-def translate_text(text, target_language):
-    """Translate text with multiple fallback options."""
-    try:
-        # First try: Google Cloud Translation API
-        from google.cloud import translate_v2 as translate
-        try:
-            # Get credentials directly from secrets
-            from google.oauth2 import service_account
-            credentials_info = dict(st.secrets["gcp_service_account"])
-            credentials = service_account.Credentials.from_service_account_info(credentials_info)
-            
-            translate_client = translate.Client(credentials=credentials)
-            result = translate_client.translate(text, target_language=target_language)
-            return result["translatedText"]
-        except Exception as e:
-            print(f"Google Translate API error: {e}")
-            raise e  # Pass to next fallback
-
-    except Exception:
-        # Second try: deep-translator library (doesn't require API key)
-        try:
-            from deep_translator import GoogleTranslator
-            translator = GoogleTranslator(source='en', target=target_language)
-            return translator.translate(text)
-        except Exception as e:
-            print(f"Deep translator error: {e}")
-            
-            # Last resort fallback
-            return f"[Translation to {target_language}]"
-
-# Background worker function for translation
-def translate_worker(texts, target_language, task_id):
-    """Worker function to translate multiple texts in background."""
-    try:
-        translate_client = translate.Client()
-        results = {}
+class FreeTranslationService:
+    def __init__(self):
+        self.translation_cache = {}
+        self.last_request_time = 0
+        self.rate_limit_delay = 1.0  # seconds between requests
         
-        for key, text in texts.items():
-            try:
-                result = translate_client.translate(text, target_language=target_language)
-                results[key] = result["translatedText"]
-            except Exception as e:
-                results[key] = f"[Translation error: {str(e)}]"
+    def translate_text(self, text, target_language, source_language='en'):
+        """
+        Translate text using multiple free services with fallbacks
+        """
+        # Check cache first
+        cache_key = f"{text}_{source_language}_{target_language}"
+        if cache_key in self.translation_cache:
+            return self.translation_cache[cache_key]
         
-        # Store results
-        st.session_state.processing_results[task_id] = results
-    except Exception as e:
-        # Store error
-        st.session_state.processing_results[task_id] = {
-            'error': str(e)
+        # Rate limiting
+        current_time = time.time()
+        if current_time - self.last_request_time < self.rate_limit_delay:
+            time.sleep(self.rate_limit_delay - (current_time - self.last_request_time))
+        
+        translation = None
+        
+        # Method 1: Deep Translator (Free Google Translate web interface)
+        try:
+            translator = GoogleTranslator(source=source_language, target=target_language)
+            translation = translator.translate(text)
+            if translation and translation != text:
+                self.translation_cache[cache_key] = translation
+                self.last_request_time = time.time()
+                return translation
+        except Exception as e:
+            print(f"Deep Translator failed: {e}")
+        
+        # Method 2: MyMemory Translation API (Free tier: 10,000 chars/day)
+        try:
+            translation = self._translate_with_mymemory(text, source_language, target_language)
+            if translation:
+                self.translation_cache[cache_key] = translation
+                self.last_request_time = time.time()
+                return translation
+        except Exception as e:
+            print(f"MyMemory failed: {e}")
+        
+        # Method 3: LibreTranslate (if you have a server)
+        try:
+            translation = self._translate_with_libretranslate(text, source_language, target_language)
+            if translation:
+                self.translation_cache[cache_key] = translation
+                self.last_request_time = time.time()
+                return translation
+        except Exception as e:
+            print(f"LibreTranslate failed: {e}")
+        
+        # Method 4: Hugging Face models (for specific language pairs)
+        try:
+            translation = self._translate_with_huggingface(text, source_language, target_language)
+            if translation:
+                self.translation_cache[cache_key] = translation
+                self.last_request_time = time.time()
+                return translation
+        except Exception as e:
+            print(f"Hugging Face translation failed: {e}")
+        
+        # Fallback: Return formatted message
+        return f"[Translation to {target_language} unavailable]"
+    
+    def _translate_with_mymemory(self, text, source_lang, target_lang):
+        """MyMemory Translation API - Free tier"""
+        url = "https://api.mymemory.translated.net/get"
+        params = {
+            'q': text,
+            'langpair': f"{source_lang}|{target_lang}"
         }
+        
+        response = requests.get(url, params=params, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('responseStatus') == 200:
+                return data['responseData']['translatedText']
+        return None
+    
+    def _translate_with_libretranslate(self, text, source_lang, target_lang):
+        """LibreTranslate - Free self-hosted option"""
+        # You can use the free public instance (limited) or host your own
+        url = "https://libretranslate.de/translate"  # Public instance
+        
+        data = {
+            'q': text,
+            'source': source_lang,
+            'target': target_lang,
+            'format': 'text'
+        }
+        
+        response = requests.post(url, data=data, timeout=10)
+        if response.status_code == 200:
+            result = response.json()
+            return result.get('translatedText')
+        return None
+    
+    def _translate_with_huggingface(self, text, source_lang, target_lang):
+        """Hugging Face translation models - Completely free"""
+        try:
+            # Map language codes to model names (add more as needed)
+            model_map = {
+                ('en', 'es'): 'Helsinki-NLP/opus-mt-en-es',
+                ('en', 'fr'): 'Helsinki-NLP/opus-mt-en-fr',
+                ('en', 'de'): 'Helsinki-NLP/opus-mt-en-de',
+                ('en', 'it'): 'Helsinki-NLP/opus-mt-en-it',
+                ('en', 'pt'): 'Helsinki-NLP/opus-mt-en-pt',
+                ('en', 'ru'): 'Helsinki-NLP/opus-mt-en-ru',
+                # Add reverse translations
+                ('es', 'en'): 'Helsinki-NLP/opus-mt-es-en',
+                ('fr', 'en'): 'Helsinki-NLP/opus-mt-fr-en',
+                ('de', 'en'): 'Helsinki-NLP/opus-mt-de-en',
+            }
+            
+            model_name = model_map.get((source_lang, target_lang))
+            if not model_name:
+                return None
+            
+            # Load model and tokenizer
+            translator = pipeline(
+                "translation", 
+                model=model_name,
+                return_all_scores=False,
+                max_length=512
+            )
+            
+            result = translator(text)
+            return result[0]['translation_text']
+            
+        except Exception as e:
+            print(f"Hugging Face model error: {e}")
+            return None
+
+# Initialize the service
+free_translator = FreeTranslationService()
+
+# Replace your translate_text function with this:
+def translate_text(text, target_language, source_language='en'):
+    return free_translator.translate_text(text, target_language, source_language)
+
 
 # Connect the translation function to gamification system after both are initialized
 gamification.set_translate_func(translate_text)
@@ -1359,7 +1391,7 @@ def get_audio_html(audio_bytes):
     return audio_tag
 
 
-# Function to load Google Vision model
+# Function to load RCNN Model
 @st.cache_resource
 def load_faster_rcnn_model():
     """Load and cache the Faster R-CNN model from TensorFlow Hub."""
@@ -1375,9 +1407,9 @@ def load_faster_rcnn_model():
 
 # Background worker function for object detection
 def detect_objects_worker(image, confidence_threshold, iou_threshold, task_id):
-    """Worker function to run Google Vision API detection in background."""
+    """Worker function to run detection in background."""
     try:
-        # Run detection using the Vision API
+        # Run detection
         detections, rendered_image = detect_objects(image, confidence_threshold, iou_threshold)
         
         # Store results
@@ -1395,25 +1427,6 @@ def detect_objects_worker(image, confidence_threshold, iou_threshold, task_id):
         }
         st.session_state.processing_complete = True
 
-def safe_vision_call(image, detect_func):
-    """Safely make a Vision API call with proper error handling."""
-    try:
-        return detect_func(image)
-    except Exception as e:
-        error_type = str(type(e).__name__)
-        
-        if "Quota" in str(e) or "Rate" in str(e):
-            error_message("API quota exceeded. Please try again later.")
-            return None, np.array(image)
-        elif "Permission" in str(e) or "credential" in str(e).lower():
-            error_message("API authentication error. Please check your Google Cloud credentials.")
-            return None, np.array(image)
-        elif "Network" in str(e) or "Timeout" in str(e):
-            error_message("Network error connecting to Google Cloud. Please check your connection.")
-            return None, np.array(image)
-        else:
-            error_message(f"Vision API error: {error_type}: {e}")
-            return None, np.array(image)
 
 
 # Function to start or end a learning session
