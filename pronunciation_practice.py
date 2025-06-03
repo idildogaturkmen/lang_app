@@ -631,10 +631,39 @@ class ComprehensivePronunciationPractice:
         # Recording interface with real-time feedback
         audio_recorded = self._render_recording_interface(translated_word, language_code)
         
-        # AI analysis and feedback
-        if audio_recorded and 'audio_data' in st.session_state and st.session_state.audio_data:
-            self._render_ai_feedback(translated_word, language_code)
-    
+        # AI analysis and feedback - IMPROVED DETECTION
+        if (audio_recorded or 
+            (hasattr(st.session_state, 'audio_data') and st.session_state.audio_data is not None) or
+            (hasattr(st.session_state, 'audio_data_received') and st.session_state.audio_data_received)):
+            
+            # Check if we already analyzed this recording
+            if 'last_pronunciation_results' not in st.session_state:
+                self._render_ai_feedback(translated_word, language_code)
+            else:
+                # Show existing results
+                st.markdown("---")
+                results = st.session_state.last_pronunciation_results
+                results['language_code'] = language_code  # Ensure language code is set
+                self._display_ai_feedback(translated_word, results)
+                
+                # Add action buttons
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("📚 Save to Vocabulary", key=f"save_result_{translated_word}"):
+                        st.session_state.save_pronunciation_word = {
+                            'original': translated_word,
+                            'translated': translated_word,
+                            'language': language_code,
+                            'score': results.get('overall_score', 0),
+                            'recognized': results.get('recognized_text', '')
+                        }
+                        st.success("✅ Word will be saved to vocabulary!")
+                        st.rerun()
+                
+                with col2:
+                    if st.button("🔄 Record Again", key=f"retry_result_{translated_word}"):
+                        self._clear_audio_and_retry()
+
     def _show_example_sentence(self, word, language_code):
         """Show example sentence with translation"""
         example = self._get_example_sentence(word, language_code)
@@ -832,146 +861,109 @@ class ComprehensivePronunciationPractice:
     
     def _render_ai_feedback(self, target_word, language_code):
         """Render comprehensive AI-powered feedback"""
+        
+        # Add a visual separator
+        st.markdown("---")
+        st.markdown("### 🤖 AI Analysis in Progress...")
+        
+        # Create a progress indicator
         with st.spinner("🤖 AI is analyzing your pronunciation..."):
-            # Speech recognition
-            recognized_text = self._recognize_speech(st.session_state.audio_data, language_code)
-            
-            # AI analysis
-            results = self.assessor.analyze_pronunciation(
-                st.session_state.audio_data,
-                target_word,
-                recognized_text,
-                language_code
-            )
-            
-            # Store results
-            st.session_state.last_pronunciation_results = results
+            try:
+                # Speech recognition
+                recognized_text = self._recognize_speech(st.session_state.audio_data, language_code)
+                
+                # AI analysis
+                results = self.assessor.analyze_pronunciation(
+                    st.session_state.audio_data,
+                    target_word,
+                    recognized_text,
+                    language_code
+                )
+                
+                # Store results
+                st.session_state.last_pronunciation_results = results
+                
+                # Add language code to results for saving
+                results['language_code'] = language_code
+                
+            except Exception as e:
+                st.error(f"Error during AI analysis: {str(e)}")
+                # Provide fallback results
+                results = {
+                    'overall_score': 50,
+                    'text_similarity': 30,
+                    'rhythm_score': 60,
+                    'intonation_score': 60,
+                    'fluency_score': 60,
+                    'recognized_text': '',
+                    'feedback': ['Unable to complete full analysis. Please try again.'],
+                    'errors': [{'type': 'general', 'message': 'Analysis error occurred'}],
+                    'improvement_suggestions': ['Try speaking more clearly', 'Ensure good microphone quality'],
+                    'language_code': language_code
+                }
+        
+        # Clear the spinner and show results
+        st.empty()
         
         # Display comprehensive feedback
         self._display_ai_feedback(target_word, results)
-    
-    def _display_ai_feedback(self, target_word, results):
-        """Display comprehensive AI feedback with visualizations"""
-        st.markdown("### 🤖 AI Pronunciation Analysis")
         
-        # Score display with better visual feedback
-        overall_score = results.get('overall_score', 0)
-        recognized_text = results.get('recognized_text', '')
-        
-        # Create a prominent score display
-        if overall_score >= 80:
-            score_color = "#4CAF50"  # Green
-            score_emoji = "🌟"
-            score_message = "Excellent!"
-        elif overall_score >= 60:
-            score_color = "#FFC107"  # Yellow
-            score_emoji = "👍"
-            score_message = "Good job!"
-        else:
-            score_color = "#F44336"  # Red
-            score_emoji = "📚"
-            score_message = "Keep practicing!"
-        
-        # Display main score
-        st.markdown(f"""
-        <div style="text-align: center; padding: 20px; border-radius: 10px; background-color: {score_color}20; border: 2px solid {score_color};">
-            <h2 style="color: {score_color}; margin: 0;">{score_emoji} {overall_score:.0f}%</h2>
-            <p style="color: {score_color}; margin: 5px 0 0 0; font-size: 18px;">{score_message}</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Detailed breakdown
-        col1, col2, col3, col4 = st.columns(4)
-        
-        scores = [
-            ("Word Match", results.get('text_similarity', 0)),
-            ("Audio Quality", results.get('rhythm_score', 70)),
-            ("Pronunciation", results.get('intonation_score', 70)),
-            ("Fluency", results.get('fluency_score', 70))
-        ]
-        
-        for i, (label, score) in enumerate(scores):
-            with [col1, col2, col3, col4][i]:
-                color = self._get_score_color(score)
-                st.markdown(f"**{label}**")
-                st.markdown(f"<div style='text-align: center; color: {color}; font-size: 16px; font-weight: bold;'>{score:.0f}%</div>", unsafe_allow_html=True)
-                st.progress(score / 100.0)
-        
-        # What you said vs target
-        if recognized_text:
-            st.markdown("### 🔍 Recognition Results")
+        # Add auto-progression for session modes
+        if hasattr(st.session_state, 'practice_session_words') and hasattr(st.session_state, 'current_session_index'):
+            # This is a session mode - add progression controls
+            st.markdown("---")
+            col1, col2, col3 = st.columns(3)
             
-            col1, col2 = st.columns(2)
             with col1:
-                st.markdown("**🎤 What AI heard:**")
-                st.markdown(f"<div style='padding: 15px; background-color: #f0f2f6; border-radius: 8px; font-size: 18px;'><strong>{recognized_text}</strong></div>", unsafe_allow_html=True)
+                if st.button("📚 Save & Continue", key=f"save_continue_{target_word}", type="primary"):
+                    # Save word and progress
+                    self._save_and_progress(target_word, results)
             
             with col2:
-                st.markdown("**🎯 Target word:**")
-                st.markdown(f"<div style='padding: 15px; background-color: #e3f2fd; border-radius: 8px; font-size: 18px;'><strong>{target_word}</strong></div>", unsafe_allow_html=True)
+                if st.button("⏭️ Skip Word", key=f"skip_{target_word}"):
+                    self._progress_to_next_word()
             
-            # Exact match check
-            if recognized_text.strip().lower() == target_word.strip().lower():
-                st.success("🎉 Perfect match! You pronounced the word correctly!")
-            elif target_word.lower() in recognized_text.lower():
-                st.info("✅ Close! The AI detected your target word in what you said.")
-            else:
-                st.warning("🎯 Try again - focus on pronouncing each sound clearly.")
-        else:
-            st.error("❌ No speech detected. Please speak louder and more clearly.")
-            st.info("💡 Tips: Make sure your microphone is working and speak directly into it.")
+            with col3:
+                if st.button("🔄 Try Again", key=f"retry_{target_word}"):
+                    self._clear_audio_and_retry()
+
+    def _save_and_progress(self, target_word, results):
+        """Save word to vocabulary and progress to next word"""
+        # Save to vocabulary
+        st.session_state.save_pronunciation_word = {
+            'original': target_word,
+            'translated': target_word,
+            'language': results.get('language_code', 'en'),
+            'score': results.get('overall_score', 0),
+            'recognized': results.get('recognized_text', '')
+        }
         
-        # Specific feedback and tips
-        feedback_messages = results.get('feedback', [])
-        if feedback_messages:
-            st.markdown("### 💬 AI Feedback")
-            for message in feedback_messages:
-                st.info(message)
+        # Update session stats immediately
+        st.session_state.words_studied += 1
+        if results.get('overall_score', 0) >= 70:  # Consider it "learned" if score is good
+            st.session_state.words_learned += 1
         
-        # Error analysis with actionable advice
-        errors = results.get('errors', [])
-        specific_errors = [e for e in errors if e['type'] not in ['perfect', 'general']]
+        # Progress to next word
+        self._progress_to_next_word()
+
+    def _progress_to_next_word(self):
+        """Progress to the next word in the session"""
+        if hasattr(st.session_state, 'current_session_index'):
+            st.session_state.current_session_index += 1
         
-        if specific_errors:
-            st.markdown("### 🎯 Specific Areas to Improve")
-            for error in specific_errors:
-                if error['type'] == 'phonetic':
-                    st.markdown(f"🔸 **{error['pattern']}**: {error['message']}")
-                elif error['type'] == 'missing':
-                    st.markdown(f"🔸 **Missing sound**: {error['message']}")
-                else:
-                    st.markdown(f"🔸 {error['message']}")
+        # Clear audio data for next recording
+        self._clear_audio_and_retry()
+
+    def _clear_audio_and_retry(self):
+        """Clear audio data to allow new recording"""
+        if 'audio_data' in st.session_state:
+            st.session_state.audio_data = None
+        if 'audio_data_received' in st.session_state:
+            st.session_state.audio_data_received = False
+        if 'last_pronunciation_results' in st.session_state:
+            del st.session_state.last_pronunciation_results
+        st.rerun()
         
-        # AI improvement suggestions
-        suggestions = results.get('improvement_suggestions', [])
-        if suggestions:
-            st.markdown("### 💡 AI-Powered Tips")
-            for i, suggestion in enumerate(suggestions, 1):
-                st.markdown(f"{i}. {suggestion}")
-        
-        # Add a save to vocabulary option
-        st.markdown("### 📚 Save to Vocabulary")
-        if st.button("💾 Save this word to my vocabulary", key=f"save_pronunciation_{target_word}"):
-            # This will be handled in main.py
-            st.session_state.save_pronunciation_word = {
-                'original': target_word,
-                'translated': target_word,
-                'language': results.get('language_code', 'en'),
-                'score': overall_score,
-                'recognized': recognized_text
-            }
-            st.success("✅ Word saved to vocabulary!")
-            st.rerun()
-        
-        # Practice again button
-        if st.button("🔄 Try Again", key=f"retry_pronunciation_{target_word}"):
-            # Clear audio data to allow new recording
-            if 'audio_data' in st.session_state:
-                st.session_state.audio_data = None
-            if 'audio_data_received' in st.session_state:
-                st.session_state.audio_data_received = False
-            st.rerun()
-    
     def _recognize_speech(self, audio_data, language_code):
         """Recognize speech from audio data"""
         if not HAS_SR:

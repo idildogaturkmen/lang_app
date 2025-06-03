@@ -1093,18 +1093,6 @@ def prepare_vocabulary_for_diverse_questions(vocabulary, languages):
     
     return vocabulary
 
-if st.sidebar.checkbox("Show Pronunciation Dependencies"):
-    deps = check_pronunciation_dependencies()
-    st.sidebar.markdown("### Pronunciation Practice Dependencies")
-    for dep, available in deps.items():
-        status = "✅" if available else "❌"
-        st.sidebar.markdown(f"{status} {dep}")
-    
-    missing = [dep for dep, avail in deps.items() if not avail]
-    if missing:
-        st.sidebar.markdown("**To install missing dependencies:**")
-        st.sidebar.code(f"pip install {' '.join(missing)}")
-
 if 'db_checked' not in st.session_state:
     st.session_state.db_checked = check_database_setup()
 
@@ -2541,8 +2529,27 @@ elif app_mode == "My Vocabulary":
                                 )
                                 
                                 if vocab_id:
+                                    # Update session stats IMMEDIATELY
                                     st.session_state.words_studied += 1
-                                    st.session_state.words_learned += 1
+                                    if word_data.get('score', 0) >= 70:  # Consider "learned" if good score
+                                        st.session_state.words_learned += 1
+                                    
+                                    # Show success message
+                                    success_message(f"✅ '{word_data['original']}' saved to vocabulary! Score: {word_data.get('score', 0):.0f}%")
+                                    
+                                    # Update database session stats immediately
+                                    if st.session_state.session_id:
+                                        try:
+                                            conn = sqlite3.connect("language_learning.db")
+                                            cursor = conn.cursor()
+                                            cursor.execute(
+                                                "UPDATE sessions SET words_studied = ?, words_learned = ? WHERE id = ?",
+                                                (st.session_state.words_studied, st.session_state.words_learned, st.session_state.session_id)
+                                            )
+                                            conn.commit()
+                                            conn.close()
+                                        except Exception as e:
+                                            print(f"Error updating session: {e}")
                                     
                                     # Check achievements
                                     try:
@@ -2556,6 +2563,21 @@ elif app_mode == "My Vocabulary":
                                 
                                 # Clear the save request
                                 del st.session_state.save_pronunciation_word
+                                
+                                # Force UI update
+                                st.rerun()
+
+                            # Debug information (you can remove this later)
+                            if st.checkbox("🔧 Show Debug Info", key="debug_pronunciation"):
+                                st.write("**Session State Debug:**")
+                                st.write(f"Session ID: {st.session_state.session_id}")
+                                st.write(f"Words Studied: {st.session_state.words_studied}")
+                                st.write(f"Words Learned: {st.session_state.words_learned}")
+                                st.write(f"Has audio_data: {'audio_data' in st.session_state and st.session_state.audio_data is not None}")
+                                st.write(f"Audio received: {st.session_state.get('audio_data_received', False)}")
+                                if 'last_pronunciation_results' in st.session_state:
+                                    st.write("**Last Results:**")
+                                    st.write(st.session_state.last_pronunciation_results)
                             
                     except Exception as e:
                         print(f"❌ Error initializing pronunciation practice: {str(e)}")
@@ -3269,7 +3291,7 @@ elif app_mode == "Pronunciation Practice":
         st.markdown("### 🛠️ For Advanced AI Feedback")
         st.markdown("Install these packages for real-time AI pronunciation analysis:")
         st.code("pip install streamlit-webrtc speech-recognition librosa python-Levenshtein av")
-        
+
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Session Info")
 if st.session_state.session_id:
