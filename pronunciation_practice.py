@@ -712,6 +712,18 @@ class ComprehensivePronunciationPractice:
     
     def _render_recording_interface(self, target_word, language_code):
         """Render the recording interface with real-time feedback"""
+        st.markdown("🎙️ **Record yourself saying:** " + f"**{target_word}**")
+        
+        # Add recording tips
+        with st.expander("💡 Recording Tips", expanded=False):
+            st.markdown("""
+            - **Speak clearly** and at normal volume
+            - **Use a quiet environment** to reduce background noise
+            - **Speak directly** into your microphone
+            - **Take your time** - don't rush the pronunciation
+            - **Listen to the correct pronunciation** first if needed
+            """)
+        
         if self.has_custom_recorder:
             return self._render_custom_recorder()
         elif HAS_WEBRTC:
@@ -842,14 +854,39 @@ class ComprehensivePronunciationPractice:
         """Display comprehensive AI feedback with visualizations"""
         st.markdown("### 🤖 AI Pronunciation Analysis")
         
-        # Score display
+        # Score display with better visual feedback
         overall_score = results.get('overall_score', 0)
+        recognized_text = results.get('recognized_text', '')
+        
+        # Create a prominent score display
+        if overall_score >= 80:
+            score_color = "#4CAF50"  # Green
+            score_emoji = "🌟"
+            score_message = "Excellent!"
+        elif overall_score >= 60:
+            score_color = "#FFC107"  # Yellow
+            score_emoji = "👍"
+            score_message = "Good job!"
+        else:
+            score_color = "#F44336"  # Red
+            score_emoji = "📚"
+            score_message = "Keep practicing!"
+        
+        # Display main score
+        st.markdown(f"""
+        <div style="text-align: center; padding: 20px; border-radius: 10px; background-color: {score_color}20; border: 2px solid {score_color};">
+            <h2 style="color: {score_color}; margin: 0;">{score_emoji} {overall_score:.0f}%</h2>
+            <p style="color: {score_color}; margin: 5px 0 0 0; font-size: 18px;">{score_message}</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Detailed breakdown
         col1, col2, col3, col4 = st.columns(4)
         
         scores = [
-            ("Overall", overall_score),
             ("Word Match", results.get('text_similarity', 0)),
-            ("Rhythm", results.get('rhythm_score', 70)),
+            ("Audio Quality", results.get('rhythm_score', 70)),
+            ("Pronunciation", results.get('intonation_score', 70)),
             ("Fluency", results.get('fluency_score', 70))
         ]
         
@@ -857,51 +894,83 @@ class ComprehensivePronunciationPractice:
             with [col1, col2, col3, col4][i]:
                 color = self._get_score_color(score)
                 st.markdown(f"**{label}**")
-                st.markdown(f"""
-                <div style="text-align: center; font-size: 20px; font-weight: bold; color: {color};">
-                    {score:.0f}%
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown(f"<div style='text-align: center; color: {color}; font-size: 16px; font-weight: bold;'>{score:.0f}%</div>", unsafe_allow_html=True)
+                st.progress(score / 100.0)
         
-        # Progress bar
-        st.progress(overall_score / 100.0)
-        
-        # AI feedback messages
-        feedback_messages = results.get('feedback', [])
-        for message in feedback_messages:
-            st.info(message)
-        
-        # Comparison display
-        recognized_text = results.get('recognized_text', '')
+        # What you said vs target
         if recognized_text:
-            st.markdown("### 🔍 What AI Heard vs Target")
+            st.markdown("### 🔍 Recognition Results")
             
             col1, col2 = st.columns(2)
             with col1:
-                st.markdown("**You said:**")
-                st.markdown(f"<div style='padding: 10px; background-color: #f0f2f6; border-radius: 5px;'>{recognized_text}</div>", unsafe_allow_html=True)
+                st.markdown("**🎤 What AI heard:**")
+                st.markdown(f"<div style='padding: 15px; background-color: #f0f2f6; border-radius: 8px; font-size: 18px;'><strong>{recognized_text}</strong></div>", unsafe_allow_html=True)
             
             with col2:
-                st.markdown("**Target:**")
-                st.markdown(f"<div style='padding: 10px; background-color: #e1f5fe; border-radius: 5px;'>{target_word}</div>", unsafe_allow_html=True)
+                st.markdown("**🎯 Target word:**")
+                st.markdown(f"<div style='padding: 15px; background-color: #e3f2fd; border-radius: 8px; font-size: 18px;'><strong>{target_word}</strong></div>", unsafe_allow_html=True)
+            
+            # Exact match check
+            if recognized_text.strip().lower() == target_word.strip().lower():
+                st.success("🎉 Perfect match! You pronounced the word correctly!")
+            elif target_word.lower() in recognized_text.lower():
+                st.info("✅ Close! The AI detected your target word in what you said.")
+            else:
+                st.warning("🎯 Try again - focus on pronouncing each sound clearly.")
+        else:
+            st.error("❌ No speech detected. Please speak louder and more clearly.")
+            st.info("💡 Tips: Make sure your microphone is working and speak directly into it.")
         
-        # Error analysis
+        # Specific feedback and tips
+        feedback_messages = results.get('feedback', [])
+        if feedback_messages:
+            st.markdown("### 💬 AI Feedback")
+            for message in feedback_messages:
+                st.info(message)
+        
+        # Error analysis with actionable advice
         errors = results.get('errors', [])
-        if any(e['type'] not in ['perfect', 'general'] for e in errors):
-            st.markdown("### 🎯 Specific Areas for Improvement")
-            for error in errors:
-                if error['type'] not in ['perfect', 'general']:
-                    st.markdown(f"- {error['message']}")
+        specific_errors = [e for e in errors if e['type'] not in ['perfect', 'general']]
+        
+        if specific_errors:
+            st.markdown("### 🎯 Specific Areas to Improve")
+            for error in specific_errors:
+                if error['type'] == 'phonetic':
+                    st.markdown(f"🔸 **{error['pattern']}**: {error['message']}")
+                elif error['type'] == 'missing':
+                    st.markdown(f"🔸 **Missing sound**: {error['message']}")
+                else:
+                    st.markdown(f"🔸 {error['message']}")
         
         # AI improvement suggestions
         suggestions = results.get('improvement_suggestions', [])
         if suggestions:
-            st.markdown("### 💡 AI-Powered Improvement Tips")
+            st.markdown("### 💡 AI-Powered Tips")
             for i, suggestion in enumerate(suggestions, 1):
                 st.markdown(f"{i}. {suggestion}")
         
-        # Pronunciation history
-        self._show_pronunciation_history(target_word)
+        # Add a save to vocabulary option
+        st.markdown("### 📚 Save to Vocabulary")
+        if st.button("💾 Save this word to my vocabulary", key=f"save_pronunciation_{target_word}"):
+            # This will be handled in main.py
+            st.session_state.save_pronunciation_word = {
+                'original': target_word,
+                'translated': target_word,
+                'language': results.get('language_code', 'en'),
+                'score': overall_score,
+                'recognized': recognized_text
+            }
+            st.success("✅ Word saved to vocabulary!")
+            st.rerun()
+        
+        # Practice again button
+        if st.button("🔄 Try Again", key=f"retry_pronunciation_{target_word}"):
+            # Clear audio data to allow new recording
+            if 'audio_data' in st.session_state:
+                st.session_state.audio_data = None
+            if 'audio_data_received' in st.session_state:
+                st.session_state.audio_data_received = False
+            st.rerun()
     
     def _recognize_speech(self, audio_data, language_code):
         """Recognize speech from audio data"""
@@ -914,13 +983,33 @@ class ComprehensivePronunciationPractice:
                 audio_file.close()
                 
                 with sr.AudioFile(audio_file.name) as source:
+                    # Adjust for ambient noise
+                    self.recognizer.adjust_for_ambient_noise(source, duration=0.5)
                     audio = self.recognizer.record(source)
                     
                     rec_lang = RECOGNITION_LANGUAGES.get(language_code, "en-US")
-                    recognized_text = self.recognizer.recognize_google(audio, language=rec_lang)
-                    return recognized_text.lower()
-        except (sr.UnknownValueError, sr.RequestError):
-            return ""
+                    
+                    # Try multiple recognition services for better results
+                    recognized_text = ""
+                    
+                    # First try: Google Speech Recognition (free)
+                    try:
+                        recognized_text = self.recognizer.recognize_google(audio, language=rec_lang)
+                        print(f"✅ Google recognized: '{recognized_text}'")
+                        return recognized_text.lower()
+                    except (sr.UnknownValueError, sr.RequestError) as e:
+                        print(f"Google recognition failed: {e}")
+                    
+                    # Fallback: Try with different language settings
+                    try:
+                        recognized_text = self.recognizer.recognize_google(audio, language="en-US")
+                        print(f"✅ Fallback recognized: '{recognized_text}'")
+                        return recognized_text.lower()
+                    except:
+                        pass
+                        
+                    return ""
+                    
         except Exception as e:
             print(f"Speech recognition error: {e}")
             return ""

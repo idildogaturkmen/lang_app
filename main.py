@@ -2522,6 +2522,40 @@ elif app_mode == "My Vocabulary":
                         except ImportError:
                             st.session_state.pronunciation_practice.has_custom_recorder = False
                             print("ℹ️ Using fallback recording methods")
+                            # Handle saving pronunciation words to vocabulary
+                            if 'save_pronunciation_word' in st.session_state:
+                                word_data = st.session_state.save_pronunciation_word
+                                
+                                # Auto-start session if needed
+                                if st.session_state.session_id is None:
+                                    if manage_session("start"):
+                                        success_message("Created a new learning session!")
+                                
+                                # Add to vocabulary
+                                vocab_id = add_vocabulary_direct(
+                                    word_original=word_data['original'],
+                                    word_translated=word_data['translated'],
+                                    language_translated=word_data['language'],
+                                    category="pronunciation_practice",
+                                    image_path=None
+                                )
+                                
+                                if vocab_id:
+                                    st.session_state.words_studied += 1
+                                    st.session_state.words_learned += 1
+                                    
+                                    # Check achievements
+                                    try:
+                                        gamification.check_achievements(
+                                            "pronunciation_practice",
+                                            word=word_data['original'],
+                                            score=word_data['score']
+                                        )
+                                    except Exception as e:
+                                        print(f"Gamification error: {e}")
+                                
+                                # Clear the save request
+                                del st.session_state.save_pronunciation_word
                             
                     except Exception as e:
                         print(f"❌ Error initializing pronunciation practice: {str(e)}")
@@ -3145,56 +3179,97 @@ elif app_mode == "Pronunciation Practice":
             error_message(f"Error in pronunciation practice: {str(e)}")
             st.info("Try refreshing the page or check the pronunciation practice module.")
     else:
-        # Installation guide for missing dependencies
-        st.warning("🎤 Enhanced pronunciation practice requires additional packages.")
+        # Show what's available vs what's missing
+        st.warning("🎤 Some pronunciation features require additional packages.")
         
-        st.markdown("### 📋 Installation Guide")
+        # Basic pronunciation practice without advanced features
+        st.markdown("### 🎯 Basic Pronunciation Practice")
+        st.markdown("You can still practice pronunciation with the available features:")
         
-        # Check which packages are missing
-        missing_packages = []
-        package_status = {}
+        # Get vocabulary
+        vocabulary = get_all_vocabulary_direct()
+        practice_language = st.selectbox(
+            "Select practice language:",
+            list(languages.keys()),
+            index=list(languages.values()).index(st.session_state.target_language) 
+                if st.session_state.target_language in languages.values() else 0,
+            key="basic_pron_lang_select"
+        )
+        practice_language_code = languages[practice_language]
         
-        packages_to_check = {
-            'streamlit-webrtc': 'Real-time audio recording',
-            'speech-recognition': 'Speech-to-text conversion', 
-            'librosa': 'Advanced audio analysis',
-            'python-Levenshtein': 'Text similarity comparison',
-            'av': 'Audio/video processing'
-        }
+        # Filter vocabulary
+        filtered_vocab = [word for word in vocabulary if word['language_translated'] == practice_language_code]
         
-        for package, description in packages_to_check.items():
-            try:
-                if package == 'streamlit-webrtc':
-                    import streamlit_webrtc
-                elif package == 'speech-recognition':
-                    import speech_recognition
-                elif package == 'librosa':
-                    import librosa
-                elif package == 'python-Levenshtein':
-                    import Levenshtein
-                elif package == 'av':
-                    import av
-                package_status[package] = (True, description)
-            except ImportError:
-                package_status[package] = (False, description)
-                missing_packages.append(package)
-        
-        # Display package status
-        for package, (available, description) in package_status.items():
-            status_icon = "✅" if available else "❌"
-            st.markdown(f"{status_icon} **{package}**: {description}")
-        
-        if missing_packages:
-            st.markdown("### 🛠️ Installation Commands")
-            st.code(f"pip install {' '.join(missing_packages)}")
+        if filtered_vocab:
+            word_index = st.selectbox(
+                "Select a word to practice:",
+                range(len(filtered_vocab)),
+                format_func=lambda i: f"{filtered_vocab[i].get('word_translated', '')} ({filtered_vocab[i].get('word_original', '')})",
+                key="basic_word_select"
+            )
             
-            st.markdown("### 🔄 After Installation")
-            st.markdown("1. Restart your Streamlit application")
-            st.markdown("2. Refresh this page")
-            st.markdown("3. Enjoy AI-powered pronunciation practice!")
+            selected_word = filtered_vocab[word_index]
+            word_translated = selected_word.get('word_translated', '')
+            
+            st.markdown(f"### Practice: {word_translated}")
+            
+            # Play pronunciation
+            st.markdown("**🔊 Listen and repeat:**")
+            audio_bytes = text_to_speech(word_translated, practice_language_code)
+            if audio_bytes:
+                st.markdown(get_audio_html(audio_bytes), unsafe_allow_html=True)
+            
+            # Show pronunciation tips
+            pronunciation_tips = get_pronunciation_guide(word_translated, practice_language_code)
+            if pronunciation_tips:
+                st.markdown("**💡 Pronunciation Tips:**")
+                for tip in pronunciation_tips:
+                    st.markdown(f"- {tip}")
+            
+            # File upload for basic feedback
+            st.markdown("**📁 Upload your recording for basic analysis:**")
+            uploaded_audio = st.file_uploader(
+                "Record yourself saying the word and upload the audio file", 
+                type=["wav", "mp3", "ogg", "m4a"],
+                key="basic_audio_upload"
+            )
+            
+            if uploaded_audio:
+                # Basic analysis without advanced features
+                st.audio(uploaded_audio)
+                
+                # Simple feedback
+                st.markdown("### 📝 Basic Feedback")
+                st.success("✅ Audio received! Keep practicing by:")
+                st.markdown("- 🔄 Comparing your pronunciation with the correct audio")
+                st.markdown("- 📚 Focusing on the pronunciation tips above")
+                st.markdown("- 🎯 Recording multiple attempts to improve")
+                
+                # Save to vocabulary option
+                if st.button("💾 Save to Vocabulary", key="basic_save_vocab"):
+                    if st.session_state.session_id is None:
+                        manage_session("start")
+                    
+                    vocab_id = add_vocabulary_direct(
+                        word_original=selected_word.get('word_original', ''),
+                        word_translated=word_translated,
+                        language_translated=practice_language_code,
+                        category="pronunciation_practice",
+                        image_path=None
+                    )
+                    
+                    if vocab_id:
+                        st.success("✅ Word saved to vocabulary!")
+                        st.session_state.words_studied += 1
+                        st.session_state.words_learned += 1
         else:
-            st.success("✅ All packages are installed! Restart the app to enable pronunciation practice.")
-
+            warning_message(f"No vocabulary words found for {practice_language}. Go to Camera Mode to add words first.")
+        
+        # Installation guide
+        st.markdown("### 🛠️ For Advanced AI Feedback")
+        st.markdown("Install these packages for real-time AI pronunciation analysis:")
+        st.code("pip install streamlit-webrtc speech-recognition librosa python-Levenshtein av")
+        
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Session Info")
 if st.session_state.session_id:
