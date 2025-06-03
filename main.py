@@ -236,6 +236,195 @@ except ImportError as e:
     print(f"Custom audio recorder not available: {e}")
 
 
+def draw_detections(image_np, detections):
+    """Draw bounding boxes and labels on the image."""
+    result_image = image_np.copy()
+    
+    for detection in detections:
+        bbox = detection['bbox']
+        left, top, right, bottom = [int(x) for x in bbox]
+        label = detection['label']
+        confidence = detection['confidence']
+        
+        # Use different colors for different object types
+        color = get_detection_color(label)
+        
+        # Draw bounding box
+        cv2.rectangle(result_image, (left, top), (right, bottom), color, 3)
+        
+        # Prepare label text
+        label_text = f"{label} {confidence:.2f}"
+        label_size, _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+        
+        # Draw background for text
+        cv2.rectangle(result_image, 
+                     (left, top - label_size[1] - 10), 
+                     (left + label_size[0], top), 
+                     color, -1)
+        
+        # Draw text (white or black depending on background)
+        text_color = (255, 255, 255) if sum(color) < 400 else (0, 0, 0)
+        cv2.putText(result_image, label_text,
+                   (left, top - 5),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, text_color, 2)
+    
+    return result_image
+
+
+def apply_nms(boxes, classes, scores, image_shape, iou_threshold=0.45):
+    """Apply Non-Maximum Suppression to remove duplicate detections."""
+    
+    final_detections = []
+    unique_classes = np.unique(classes)
+    height, width = image_shape[:2]
+    
+    for class_id in unique_classes:
+        # Get all detections for this class
+        class_mask = classes == class_id
+        class_boxes = boxes[class_mask]
+        class_scores = scores[class_mask]
+        
+        if len(class_boxes) == 0:
+            continue
+        
+        # Convert normalized coordinates to pixel coordinates
+        pixel_boxes = []
+        for box in class_boxes:
+            ymin, xmin, ymax, xmax = box
+            pixel_boxes.append([
+                int(xmin * width),   # left
+                int(ymin * height),  # top
+                int(xmax * width),   # right
+                int(ymax * height)   # bottom
+            ])
+        pixel_boxes = np.array(pixel_boxes)
+        
+        # Apply simple NMS (since OpenCV might cause issues)
+        keep_indices = simple_nms(pixel_boxes, class_scores, iou_threshold)
+        
+        # Add kept detections to final list
+        for idx in keep_indices:
+            class_name = COCO_CLASS_NAMES.get(class_id, f"unknown_{class_id}")
+            bbox = pixel_boxes[idx]
+            
+            final_detections.append({
+                'label': class_name.lower(),
+                'confidence': float(class_scores[idx]),
+                'bbox': [float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])],
+                'class_id': int(class_id)
+            })
+    
+    # Sort detections by confidence (highest first)
+    final_detections.sort(key=lambda x: x['confidence'], reverse=True)
+    return final_detections
+
+# Alternative simplified NMS function if OpenCV NMS doesn't work
+def simple_nms(boxes, scores, iou_threshold=0.5):
+    """Simple Non-Maximum Suppression implementation."""
+    if len(boxes) == 0:
+        return []
+    
+    # Sort by confidence score (highest first)
+    sorted_indices = np.argsort(scores)[::-1]
+    
+    keep = []
+    while len(sorted_indices) > 0:
+        # Take the detection with highest confidence
+        current = sorted_indices[0]
+        keep.append(current)
+        
+        if len(sorted_indices) == 1:
+            break
+        
+        # Calculate IoU with all other boxes
+        current_box = boxes[current]
+        remaining_indices = sorted_indices[1:]
+        
+        # Calculate IoU with remaining boxes
+        ious = []
+        for idx in remaining_indices:
+            iou = calculate_iou(current_box, boxes[idx])
+            ious.append(iou)
+        
+        # Keep only boxes with IoU below threshold
+        ious = np.array(ious)
+        keep_mask = ious < iou_threshold
+        sorted_indices = remaining_indices[keep_mask]
+    
+    return keep
+
+def calculate_iou(box1, box2):
+    """Calculate Intersection over Union (IoU) of two bounding boxes."""
+    # box format: [left, top, right, bottom]
+    x1 = max(box1[0], box2[0])
+    y1 = max(box1[1], box2[1])
+    x2 = min(box1[2], box2[2])
+    y2 = min(box1[3], box2[3])
+    
+    if x2 <= x1 or y2 <= y1:
+        return 0.0
+    
+    intersection = (x2 - x1) * (y2 - y1)
+    area1 = (box1[2] - box1[0]) * (box1[3] - box1[1])
+    area2 = (box2[2] - box2[0]) * (box2[3] - box2[1])
+    union = area1 + area2 - intersection
+    
+    return intersection / union if union > 0 else 0.0
+
+def get_detection_color(label):
+    """Get a consistent color for each object type."""
+    # Color mapping for different object categories
+    color_map = {
+        # Electronics - Blue shades
+        'cell phone': (255, 100, 100),
+        'laptop': (255, 150, 100),
+        'tv': (255, 200, 100),
+        'mouse': (200, 255, 100),
+        'keyboard': (150, 255, 100),
+        'remote': (100, 255, 100),
+        
+        # People - Green shades
+        'person': (100, 255, 150),
+        
+        # Furniture - Purple shades
+        'chair': (150, 100, 255),
+        'couch': (200, 100, 255),
+        'bed': (255, 100, 255),
+        
+        # Food - Orange/Red shades
+        'bottle': (100, 150, 255),
+        'cup': (100, 200, 255),
+        'bowl': (100, 255, 255),
+        
+        # Default color
+        'default': (0, 255, 0)
+    }
+    
+    return color_map.get(label, color_map['default'])
+
+
+def show_detection_settings():
+    """Show detection settings in the sidebar."""
+    with st.sidebar.expander("🎛️ Detection Settings"):
+        st.markdown("**Non-Maximum Suppression (NMS)**")
+        st.markdown("✅ Enabled - Removes duplicate detections")
+        
+        # Allow user to adjust IOU threshold
+        iou_threshold = st.slider(
+            "Overlap Threshold", 
+            min_value=0.1, 
+            max_value=0.9, 
+            value=0.45,
+            step=0.05,
+            help="Lower values = fewer duplicates, Higher values = more detections"
+        )
+        
+        st.markdown(f"**Current Settings:**")
+        st.markdown(f"- Confidence: {confidence_threshold:.2f}")
+        st.markdown(f"- Overlap: {iou_threshold:.2f}")
+        
+        return iou_threshold
+    
 # Helper function to convert AttrDict to a regular dict recursively
 def convert_to_dict(obj):
     if isinstance(obj, dict):
@@ -382,7 +571,8 @@ def rate_limited_detection(image, confidence_threshold=0.5, iou_threshold=0.45):
 
 # Function to detect objects in image
 def detect_objects(image, confidence_threshold=0.5, iou_threshold=0.45):
-    """Detect objects using Faster R-CNN model."""
+    """Detect objects using Faster R-CNN with Non-Maximum Suppression to remove duplicates."""
+    
     try:
         # Load the Faster R-CNN model
         detector = load_faster_rcnn_model()
@@ -408,61 +598,30 @@ def detect_objects(image, confidence_threshold=0.5, iou_threshold=0.45):
         classes = results['detection_classes'][0].numpy().astype(int)
         scores = results['detection_scores'][0].numpy()
         
-        # Process results
-        detections = []
-        result_image = image_np.copy()
-        height, width = result_image.shape[:2]
+        # Filter by confidence threshold first
+        valid_indices = scores >= confidence_threshold
+        filtered_boxes = boxes[valid_indices]
+        filtered_classes = classes[valid_indices]
+        filtered_scores = scores[valid_indices]
         
-        # Filter detections by confidence threshold
-        for i in range(len(scores)):
-            if scores[i] >= confidence_threshold:
-                # Get class name
-                class_id = classes[i]
-                class_name = COCO_CLASS_NAMES.get(class_id, f"unknown_{class_id}")
-                
-                # Get bounding box (normalized coordinates from Faster R-CNN)
-                ymin, xmin, ymax, xmax = boxes[i]
-                
-                # Convert to pixel coordinates
-                left = int(xmin * width)
-                top = int(ymin * height)
-                right = int(xmax * width)
-                bottom = int(ymax * height)
-                
-                # Add detection
-                detections.append({
-                    'label': class_name.lower(),
-                    'confidence': float(scores[i]),
-                    'bbox': [float(left), float(top), float(right), float(bottom)]
-                })
-                
-                # Draw bounding box on result image
-                cv2.rectangle(result_image, (left, top), (right, bottom), (0, 255, 0), 2)
-                
-                # Add label text
-                label_text = f"{class_name} {scores[i]:.2f}"
-                label_size, _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
-                
-                # Draw background for text
-                cv2.rectangle(result_image, 
-                             (left, top - label_size[1] - 10), 
-                             (left + label_size[0], top), 
-                             (0, 255, 0), -1)
-                
-                # Draw text
-                cv2.putText(result_image, label_text,
-                           (left, top - 5),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
+        if len(filtered_boxes) == 0:
+            return [], image_np
         
-        print(f"✅ Faster R-CNN detected {len(detections)} objects")
-        return detections, result_image
+        # Apply Non-Maximum Suppression to remove duplicate detections
+        final_detections = apply_nms(filtered_boxes, filtered_classes, filtered_scores, image_np.shape, iou_threshold)
+        
+        # Draw bounding boxes on result image
+        result_image = draw_detections(image_np, final_detections)
+        
+        print(f"✅ Faster R-CNN detected {len(final_detections)} unique objects (after NMS)")
+        return final_detections, result_image
         
     except Exception as e:
         error_message(f"Faster R-CNN detection error: {str(e)}")
         # Return empty result on error
         dummy_image = np.array(image) if hasattr(image, 'convert') else image
         return [], dummy_image
-    
+
 # Function to enhance image quality
 def enhance_image(image, enhance_type="auto"):
     """Enhance the image to improve object detection."""
@@ -1212,7 +1371,6 @@ def load_faster_rcnn_model():
         return detector
     except Exception as e:
         print(f"❌ Error loading Faster R-CNN model: {e}")
-        # Return None to indicate failure
         return None
 
 # Background worker function for object detection
@@ -1642,7 +1800,7 @@ with st.sidebar.expander("ℹ️ Need Help?"):
 # Display appropriate content based on selected mode
 if app_mode == "Camera Mode":
     style_title("📸 Camera Mode")
-
+    iou_threshold = show_detection_settings()
     # Use the enhanced info message
     info_message("Take a photo or upload an image to identify objects and learn new vocabulary.")
     
@@ -1709,6 +1867,24 @@ if app_mode == "Camera Mode":
     
     # Detection settings for objects
     if detection_type == "Objects":
+        col1, col2 = st.columns(2)
+        with col1:
+            confidence_threshold = st.slider(
+                "Detection Confidence", 
+                min_value=0.3, 
+                max_value=0.9, 
+                value=0.5,
+                step=0.05
+            )
+        with col2:
+            iou_threshold = st.slider(
+                "Duplicate Removal", 
+                min_value=0.1, 
+                max_value=0.9, 
+                value=0.45,
+                step=0.05,
+                help="Lower = fewer duplicates"
+            )
         confidence_threshold = st.slider(
         "Detection Confidence Threshold", 
         min_value=0.3, 
