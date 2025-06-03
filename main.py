@@ -2909,6 +2909,33 @@ elif app_mode == "Pronunciation Practice":
     
     if has_pronunciation_practice:
         try:
+            # Initialize pronunciation practice if not already initialized
+            if 'pronunciation_practice' not in st.session_state:
+                # Initialize the enhanced pronunciation practice module
+                st.session_state.pronunciation_practice = create_pronunciation_practice(
+                    text_to_speech_func=text_to_speech, 
+                    get_audio_html_func=get_audio_html,
+                    translate_text_func=translate_text,
+                    get_example_sentence_func=get_example_sentence
+                )
+                print("✅ Enhanced pronunciation practice initialized with AI feedback")
+
+                # Add pronunciation practice capabilities to session state
+                st.session_state.pronunciation_capabilities = {
+                    'realtime_feedback': True,
+                    'ai_analysis': True,
+                    'visual_feedback': True,
+                    'progress_tracking': True
+                }
+            
+            # Check for custom recorder availability
+            try:
+                from custom_audio_recorder import audio_recorder
+                st.session_state.pronunciation_practice.has_custom_recorder = True
+                print("✅ Custom audio recorder available")
+            except ImportError:
+                st.session_state.pronunciation_practice.has_custom_recorder = False
+                print("ℹ️ Using fallback recording methods")
             # Enhanced pronunciation practice interface
             st.markdown("""
             ### 🎯 Features Available:
