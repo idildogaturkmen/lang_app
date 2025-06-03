@@ -420,8 +420,8 @@ def show_detection_settings():
         )
         
         st.markdown(f"**Current Settings:**")
-        st.markdown(f"- Confidence: {confidence_threshold:.2f}")
         st.markdown(f"- Overlap: {iou_threshold:.2f}")
+        st.markdown("- Confidence: Set below ⬇️")
         
         return iou_threshold
     
@@ -1800,7 +1800,6 @@ with st.sidebar.expander("ℹ️ Need Help?"):
 # Display appropriate content based on selected mode
 if app_mode == "Camera Mode":
     style_title("📸 Camera Mode")
-    iou_threshold = show_detection_settings()
     # Use the enhanced info message
     info_message("Take a photo or upload an image to identify objects and learn new vocabulary.")
     
@@ -1885,13 +1884,6 @@ if app_mode == "Camera Mode":
                 step=0.05,
                 help="Lower = fewer duplicates"
             )
-        confidence_threshold = st.slider(
-        "Detection Confidence Threshold", 
-        min_value=0.3, 
-        max_value=0.9, 
-        value=0.5,  # Vision API works well with higher thresholds
-        step=0.05
-    )
         
         # Set iou_threshold for optimal detection (balance between precision and maximum detection)
         iou_threshold = 0.45  # Using a lower threshold to detect more objects while maintaining precision
