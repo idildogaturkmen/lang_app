@@ -600,41 +600,40 @@ class ComprehensivePronunciationPractice:
     
     def render_practice_ui(self, word):
         """Render the complete pronunciation practice UI for a word"""
-        with st.expander("🎤 AI-Powered Pronunciation Practice", expanded=True):
-            # Word information
-            original_word = word.get('word_original', '')
-            translated_word = word.get('word_translated', '')
-            language_code = word.get('language_translated', 'en')
-            
-            # Initialize real-time analyzer
-            self.realtime_analyzer = RealTimeAudioAnalyzer(translated_word, language_code)
-            
-            st.subheader(f"Practice: {translated_word}")
-            
-            # Show example sentence
-            self._show_example_sentence(original_word, language_code)
-            
-            # Play correct pronunciation
-            st.markdown("**🔊 Listen to correct pronunciation:**")
-            audio_bytes = self.text_to_speech(translated_word, language_code)
-            if audio_bytes:
-                st.markdown(self.get_audio_html(audio_bytes), unsafe_allow_html=True)
-            
-            # Show pronunciation tips
-            self._show_pronunciation_tips(word)
-            
-            # Real-time feedback section
-            st.markdown("### 🎙️ Record Your Pronunciation")
-            
-            # Real-time metrics container
-            self._show_realtime_metrics()
-            
-            # Recording interface with real-time feedback
-            audio_recorded = self._render_recording_interface(translated_word, language_code)
-            
-            # AI analysis and feedback
-            if audio_recorded and 'audio_data' in st.session_state and st.session_state.audio_data:
-                self._render_ai_feedback(translated_word, language_code)
+        # Word information
+        original_word = word.get('word_original', '')
+        translated_word = word.get('word_translated', '')
+        language_code = word.get('language_translated', 'en')
+        
+        # Initialize real-time analyzer
+        self.realtime_analyzer = RealTimeAudioAnalyzer(translated_word, language_code)
+        
+        st.subheader(f"Practice: {translated_word}")
+        
+        # Show example sentence
+        self._show_example_sentence(original_word, language_code)
+        
+        # Play correct pronunciation
+        st.markdown("**🔊 Listen to correct pronunciation:**")
+        audio_bytes = self.text_to_speech(translated_word, language_code)
+        if audio_bytes:
+            st.markdown(self.get_audio_html(audio_bytes), unsafe_allow_html=True)
+        
+        # Show pronunciation tips
+        self._show_pronunciation_tips(word)
+        
+        # Real-time feedback section
+        st.markdown("### 🎙️ Record Your Pronunciation")
+        
+        # Real-time metrics container
+        self._show_realtime_metrics()
+        
+        # Recording interface with real-time feedback
+        audio_recorded = self._render_recording_interface(translated_word, language_code)
+        
+        # AI analysis and feedback
+        if audio_recorded and 'audio_data' in st.session_state and st.session_state.audio_data:
+            self._render_ai_feedback(translated_word, language_code)
     
     def _show_example_sentence(self, word, language_code):
         """Show example sentence with translation"""
