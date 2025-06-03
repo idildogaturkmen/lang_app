@@ -22,12 +22,13 @@ from collections import defaultdict
 import io
 from vocam_ui import apply_custom_css
 from streamlit.components.v1 import components
-from google.cloud import vision
 import hashlib
 from functools import lru_cache
 import inspect
 from example_sentences import ExampleSentenceGenerator
 from pronunciation_assessment_integration import initialize_pronunciation_assessment
+import tensorflow as tf
+import tensorflow_hub as hub
 
 # First, display Python version for
 st.set_page_config(
@@ -272,25 +273,51 @@ except Exception as e:
 
 # Define object categories for better organization
 OBJECT_CATEGORIES = {
-    "food": ["apple", "banana", "orange", "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", 
-             "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake"],
+    "food": ["banana", "apple", "sandwich", "orange", "broccoli", "carrot", 
+             "hot dog", "pizza", "donut", "cake", "bottle", "wine glass", 
+             "cup", "fork", "knife", "spoon", "bowl"],
     
-    "animals": ["bird", "cat", "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe"],
+    "animals": ["bird", "cat", "dog", "horse", "sheep", "cow", "elephant", 
+                "bear", "zebra", "giraffe"],
     
-    "vehicles": ["bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat"],
+    "vehicles": ["bicycle", "car", "motorcycle", "airplane", "bus", "train", 
+                 "truck", "boat"],
     
-    "electronics": ["tv", "laptop", "mouse", "remote", "keyboard", "cell phone", "microwave", "oven", 
-                   "toaster", "sink", "refrigerator"],
+    "electronics": ["tv", "laptop", "mouse", "remote", "keyboard", "cell phone", 
+                   "microwave", "oven", "toaster", "refrigerator"],
     
-    "furniture": ["chair", "couch", "potted plant", "bed", "dining table", "toilet"],
+    "furniture": ["chair", "couch", "potted plant", "bed", "dining table", 
+                  "toilet", "bench"],
     
     "personal": ["backpack", "umbrella", "handbag", "tie", "suitcase"],
     
-    "sports": ["frisbee", "skis", "snowboard", "sports ball", "kite", "baseball bat", 
-              "baseball glove", "skateboard", "surfboard", "tennis racket"],
+    "sports": ["frisbee", "skis", "snowboard", "sports ball", "kite", 
+              "baseball bat", "baseball glove", "skateboard", "surfboard", 
+              "tennis racket"],
     
-    "household": ["bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "book", "clock", 
-                 "vase", "scissors", "teddy bear", "hair drier", "toothbrush"]
+    "household": ["bottle", "wine glass", "cup", "fork", "knife", "spoon", 
+                 "bowl", "book", "clock", "vase", "scissors", "teddy bear", 
+                 "hair drier", "toothbrush", "sink"]
+}
+
+COCO_CLASS_NAMES = {
+    1: 'person', 2: 'bicycle', 3: 'car', 4: 'motorcycle', 5: 'airplane',
+    6: 'bus', 7: 'train', 8: 'truck', 9: 'boat', 10: 'traffic light',
+    11: 'fire hydrant', 13: 'stop sign', 14: 'parking meter', 15: 'bench',
+    16: 'bird', 17: 'cat', 18: 'dog', 19: 'horse', 20: 'sheep',
+    21: 'cow', 22: 'elephant', 23: 'bear', 24: 'zebra', 25: 'giraffe',
+    27: 'backpack', 28: 'umbrella', 31: 'handbag', 32: 'tie', 33: 'suitcase',
+    34: 'frisbee', 35: 'skis', 36: 'snowboard', 37: 'sports ball',
+    38: 'kite', 39: 'baseball bat', 40: 'baseball glove', 41: 'skateboard',
+    42: 'surfboard', 43: 'tennis racket', 44: 'bottle', 46: 'wine glass',
+    47: 'cup', 48: 'fork', 49: 'knife', 50: 'spoon', 51: 'bowl',
+    52: 'banana', 53: 'apple', 54: 'sandwich', 55: 'orange', 56: 'broccoli',
+    57: 'carrot', 58: 'hot dog', 59: 'pizza', 60: 'donut', 61: 'cake',
+    62: 'chair', 63: 'couch', 64: 'potted plant', 65: 'bed', 67: 'dining table',
+    70: 'toilet', 72: 'tv', 73: 'laptop', 74: 'mouse', 75: 'remote',
+    76: 'keyboard', 77: 'cell phone', 78: 'microwave', 79: 'oven',
+    80: 'toaster', 81: 'sink', 82: 'refrigerator', 84: 'book', 85: 'clock',
+    86: 'vase', 87: 'scissors', 88: 'teddy bear', 89: 'hair drier', 90: 'toothbrush'
 }
 
 # Define question types
@@ -355,98 +382,87 @@ def rate_limited_detection(image, confidence_threshold=0.5, iou_threshold=0.45):
 
 # Function to detect objects in image
 def detect_objects(image, confidence_threshold=0.5, iou_threshold=0.45):
-    """Detect objects using Google Cloud Vision API with direct authentication."""
+    """Detect objects using Faster R-CNN model."""
     try:
-        # IMPORTANT: Get credentials directly from secrets without writing to file
-        from google.oauth2 import service_account
-        import io
-        from google.cloud import vision
+        # Load the Faster R-CNN model
+        detector = load_faster_rcnn_model()
+        if detector is None:
+            error_message("Failed to load Faster R-CNN model")
+            return [], np.array(image)
         
-        # Create credentials object directly from dictionary
-        credentials_info = dict(st.secrets["gcp_service_account"])
-        credentials = service_account.Credentials.from_service_account_info(credentials_info)
+        # Convert PIL image to numpy array if needed
+        if hasattr(image, 'convert'):
+            image_np = np.array(image.convert('RGB'))
+        else:
+            image_np = np.array(image)
         
-        # Create vision client with explicit credentials
-        client = vision.ImageAnnotatorClient(credentials=credentials)
+        # Convert to tensor
+        image_tensor = tf.convert_to_tensor(image_np)
+        image_tensor = image_tensor[tf.newaxis, ...]
         
-        # Convert PIL image to bytes
-        img_byte_arr = io.BytesIO()
-        image.save(img_byte_arr, format='JPEG')
-        content = img_byte_arr.getvalue()
+        # Run object detection
+        results = detector(image_tensor)
         
-        # Create vision image
-        vision_image = vision.Image(content=content)
+        # Extract results
+        boxes = results['detection_boxes'][0].numpy()
+        classes = results['detection_classes'][0].numpy().astype(int)
+        scores = results['detection_scores'][0].numpy()
         
-        # Perform detection
-        object_response = client.object_localization(image=vision_image)
-        label_response = client.label_detection(image=vision_image, max_results=15)
-        
-        # Process results (your existing processing code)
+        # Process results
         detections = []
-        result_image = np.array(image.copy())
+        result_image = image_np.copy()
         height, width = result_image.shape[:2]
         
-        # Process localized objects
-        if object_response.localized_object_annotations:
-            for object_annotation in object_response.localized_object_annotations:
-                if object_annotation.score >= confidence_threshold:
-                    # Get bounding box
-                    box = object_annotation.bounding_poly.normalized_vertices
-                    
-                    # Convert to image coordinates
-                    xmin = box[0].x * width
-                    ymin = box[0].y * height
-                    xmax = box[2].x * width
-                    ymax = box[2].y * height
-                    
-                    # Add detection
-                    detections.append({
-                        'label': object_annotation.name.lower(),
-                        'confidence': float(object_annotation.score),
-                        'bbox': [float(xmin), float(ymin), float(xmax), float(ymax)]
-                    })
-                    
-                    # Draw on image
-                    cv2.rectangle(result_image, 
-                                 (int(xmin), int(ymin)), 
-                                 (int(xmax), int(ymax)), 
-                                 (0, 255, 0), 2)
-                    cv2.putText(result_image,
-                               f"{object_annotation.name} {object_annotation.score:.2f}",
-                               (int(xmin), int(ymin - 10)),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        # Filter detections by confidence threshold
+        for i in range(len(scores)):
+            if scores[i] >= confidence_threshold:
+                # Get class name
+                class_id = classes[i]
+                class_name = COCO_CLASS_NAMES.get(class_id, f"unknown_{class_id}")
+                
+                # Get bounding box (normalized coordinates from Faster R-CNN)
+                ymin, xmin, ymax, xmax = boxes[i]
+                
+                # Convert to pixel coordinates
+                left = int(xmin * width)
+                top = int(ymin * height)
+                right = int(xmax * width)
+                bottom = int(ymax * height)
+                
+                # Add detection
+                detections.append({
+                    'label': class_name.lower(),
+                    'confidence': float(scores[i]),
+                    'bbox': [float(left), float(top), float(right), float(bottom)]
+                })
+                
+                # Draw bounding box on result image
+                cv2.rectangle(result_image, (left, top), (right, bottom), (0, 255, 0), 2)
+                
+                # Add label text
+                label_text = f"{class_name} {scores[i]:.2f}"
+                label_size, _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
+                
+                # Draw background for text
+                cv2.rectangle(result_image, 
+                             (left, top - label_size[1] - 10), 
+                             (left + label_size[0], top), 
+                             (0, 255, 0), -1)
+                
+                # Draw text
+                cv2.putText(result_image, label_text,
+                           (left, top - 5),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
         
-        # Process general labels if no objects detected
-        if len(detections) == 0 and label_response.label_annotations:
-            for label in label_response.label_annotations:
-                if label.score >= confidence_threshold:
-                    detections.append({
-                        'label': label.description.lower(),
-                        'confidence': float(label.score),
-                        'bbox': [0, 0, width, height],
-                        'is_general_label': True
-                    })
-        
+        print(f"✅ Faster R-CNN detected {len(detections)} objects")
         return detections, result_image
         
     except Exception as e:
-        # Improved error handling with detailed information
-        st.sidebar.error(f"Vision API error: {str(e)}")
-        
-        # Add detailed error information in an expander
-        with st.sidebar.expander("Error Details"):
-            st.code(str(e))
-            
-            # Check if error is auth-related
-            if "auth" in str(e).lower() or "credential" in str(e).lower():
-                st.info("This appears to be an authentication issue. Check your credentials.")
-            elif "permission" in str(e).lower():
-                st.info("This appears to be a permissions issue. Make sure the API is enabled.")
-            
-        # Return empty result
-        dummy_image = np.array(image)
+        error_message(f"Faster R-CNN detection error: {str(e)}")
+        # Return empty result on error
+        dummy_image = np.array(image) if hasattr(image, 'convert') else image
         return [], dummy_image
-
+    
 # Function to enhance image quality
 def enhance_image(image, enhance_type="auto"):
     """Enhance the image to improve object detection."""
@@ -1067,6 +1083,8 @@ if 'saved_count' not in st.session_state:
     st.session_state.saved_count = 0
 if 'saved_items' not in st.session_state:
     st.session_state.saved_items = []
+if 'faster_rcnn_model_loaded' not in st.session_state:
+    st.session_state.faster_rcnn_model_loaded = False
 
 
 def get_gamification():
@@ -1079,6 +1097,23 @@ gamification = get_gamification()
 gamification.initialize_state()
 
 
+def display_model_status():
+    """Display the current object detection model status in sidebar."""
+    with st.sidebar.expander("🤖 Object Detection Model"):
+        st.markdown("**Current Model:** Faster R-CNN")
+        st.markdown("**Status:** Active")
+        st.markdown("**Source:** TensorFlow Hub")
+        st.markdown("**Classes:** 80+ COCO objects")
+        
+        if st.button("Test Model"):
+            try:
+                model = load_faster_rcnn_model()
+                if model is not None:
+                    st.success("✅ Model loaded successfully!")
+                else:
+                    st.error("❌ Model failed to load")
+            except Exception as e:
+                st.error(f"❌ Error: {e}")
 
 # Function to translate text
 def translate_text(text, target_language):
@@ -1167,112 +1202,18 @@ def get_audio_html(audio_bytes):
 
 # Function to load Google Vision model
 @st.cache_resource
-def load_vision_client():
-    """Load and initialize the Google Cloud Vision client with fallback options."""
+def load_faster_rcnn_model():
+    """Load and cache the Faster R-CNN model from TensorFlow Hub."""
     try:
-        # Test if credentials are working
-        credentials_path = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS', None)
-        if not credentials_path or not os.path.exists(credentials_path):
-            st.warning("⚠️ Google Cloud credentials not found. Some features may be limited.")
-            raise ValueError("Credentials not found")
-            
-        # Create a client with the proper credentials
-        client = vision.ImageAnnotatorClient()
-        
-        # Test with a minimal request
-        dummy_image = vision.Image(content=b'\x00\x00\x00')
-        try:
-            # Just testing connection, will fail with empty image but that's expected
-            client.label_detection(image=dummy_image)
-        except Exception as e:
-            # If error message indicates invalid image, credentials are working
-            if "Invalid image" in str(e):
-                pass  # This is expected, credentials are working
-            else:
-                # Re-raise if it's a different error
-                raise
-                
-        return client
+        print("Loading Faster R-CNN model...")
+        model_url = "https://tfhub.dev/tensorflow/faster_rcnn/resnet50_v1_640x640/1"
+        detector = hub.load(model_url)
+        print("✅ Faster R-CNN model loaded successfully!")
+        return detector
     except Exception as e:
-        if "streamlit" in __name__:  # Only show warning in Streamlit context
-            st.warning(f"⚠️ Vision API unavailable: {str(e)}. Using fallback detection.")
-        
-        # Return a dummy client that uses the YOLO fallback
-        class FallbackVisionClient:
-            def __init__(self):
-                try:
-                    # Try to load YOLO as fallback
-                    self.yolo_model = torch.hub.load('ultralytics/yolov5', 'yolov5m', source='github')
-                    self.yolo_model.eval()
-                    self.has_yolo = True
-                except Exception:
-                    self.has_yolo = False
-                    
-            def label_detection(self, image):
-                if self.has_yolo:
-                    # Use YOLO for fallback detection
-                    pil_image = Image.open(io.BytesIO(image.content))
-                    results = self.yolo_model(pil_image)
-                    
-                    # Convert YOLO results to Vision API-like format
-                    labels = []
-                    for i, (xmin, ymin, xmax, ymax, conf, cls) in enumerate(results.xyxy[0]):
-                        label_name = results.names[int(cls)]
-                        labels.append(type('obj', (object,), {
-                            'description': label_name,
-                            'score': float(conf)
-                        }))
-                    
-                    return type('obj', (object,), {
-                        'label_annotations': labels
-                    })
-                else:
-                    # Return empty results if no fallback available
-                    return type('obj', (object,), {
-                        'label_annotations': []
-                    })
-                    
-            def object_localization(self, image):
-                if self.has_yolo:
-                    # Use YOLO for fallback detection with bounding boxes
-                    pil_image = Image.open(io.BytesIO(image.content))
-                    results = self.yolo_model(pil_image)
-                    
-                    # Convert YOLO results to Vision API-like format
-                    objects = []
-                    for i, (xmin, ymin, xmax, ymax, conf, cls) in enumerate(results.xyxy[0]):
-                        label_name = results.names[int(cls)]
-                        
-                        # Create vertices for bounding box
-                        vertices = []
-                        img_width, img_height = pil_image.size
-                        vertices.append(type('obj', (object,), {'x': float(xmin)/img_width, 'y': float(ymin)/img_height}))
-                        vertices.append(type('obj', (object,), {'x': float(xmax)/img_width, 'y': float(ymin)/img_height}))
-                        vertices.append(type('obj', (object,), {'x': float(xmax)/img_width, 'y': float(ymax)/img_height}))
-                        vertices.append(type('obj', (object,), {'x': float(xmin)/img_width, 'y': float(ymax)/img_height}))
-                        
-                        # Create bounding poly
-                        bounding_poly = type('obj', (object,), {
-                            'normalized_vertices': vertices
-                        })
-                        
-                        # Create object annotation
-                        objects.append(type('obj', (object,), {
-                            'name': label_name,
-                            'score': float(conf),
-                            'bounding_poly': bounding_poly
-                        }))
-                    
-                    return type('obj', (object,), {
-                        'localized_object_annotations': objects
-                    })
-                else:
-                    # Return empty results if no fallback available
-                    return type('obj', (object,), {
-                        'localized_object_annotations': []
-                    })
-        
-        return FallbackVisionClient()
+        print(f"❌ Error loading Faster R-CNN model: {e}")
+        # Return None to indicate failure
+        return None
 
 # Background worker function for object detection
 def detect_objects_worker(image, confidence_threshold, iou_threshold, task_id):
@@ -1315,24 +1256,6 @@ def safe_vision_call(image, detect_func):
         else:
             error_message(f"Vision API error: {error_type}: {e}")
             return None, np.array(image)
-
-def is_vision_api_available():
-    """Check if the Vision API is currently available."""
-    try:
-        client = load_vision_client()
-        # Make a minimal API call to test connectivity
-        dummy_response = client.label_detection(
-            image=vision.Image(content=b"\x00\x00\x00\x00\x00\x00\x00\x00")
-        )
-        return True
-    except Exception:
-        return False
-
-# At the top of your app, add this check and a flag for offline mode
-if 'offline_mode' not in st.session_state:
-    st.session_state.offline_mode = not is_vision_api_available()
-    if st.session_state.offline_mode:
-        warning_message("Google Vision API is not available. Running in offline mode with limited detection.")
 
 
 # Function to start or end a learning session
@@ -1714,6 +1637,7 @@ with st.sidebar.expander("ℹ️ Need Help?"):
     - After taking a picture, scroll down to see results
     - Tap buttons to navigate between sections
     """)
+
 
 # Display appropriate content based on selected mode
 if app_mode == "Camera Mode":
@@ -2843,8 +2767,10 @@ if st.session_state.session_id:
     st.sidebar.success(f"Session active")
     st.sidebar.info(f"Words studied: {st.session_state.words_studied}")
     st.sidebar.info(f"Words learned: {st.session_state.words_learned}")
+    display_model_status()
 else:
     st.sidebar.warning("No active session")
     st.sidebar.markdown("*Start a session in Camera Mode to track progress*")
+    display_model_status()
 
 add_footer()
