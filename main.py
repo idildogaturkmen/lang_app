@@ -1236,24 +1236,6 @@ gamification = get_gamification()
 gamification.initialize_state()
 
 
-def display_model_status():
-    """Display the current object detection model status in sidebar."""
-    with st.sidebar.expander("🤖 Object Detection Model"):
-        st.markdown("**Current Model:** Faster R-CNN")
-        st.markdown("**Status:** Active")
-        st.markdown("**Source:** TensorFlow Hub")
-        st.markdown("**Classes:** 80+ COCO objects")
-        
-        if st.button("Test Model"):
-            try:
-                model = load_faster_rcnn_model()
-                if model is not None:
-                    st.success("✅ Model loaded successfully!")
-                else:
-                    st.error("❌ Model failed to load")
-            except Exception as e:
-                st.error(f"❌ Error: {e}")
-
 # Function to translate text
 class FreeTranslationService:
     def __init__(self):
@@ -3298,10 +3280,8 @@ if st.session_state.session_id:
     st.sidebar.success(f"Session active")
     st.sidebar.info(f"Words studied: {st.session_state.words_studied}")
     st.sidebar.info(f"Words learned: {st.session_state.words_learned}")
-    display_model_status()
 else:
     st.sidebar.warning("No active session")
     st.sidebar.markdown("*Start a session in Camera Mode to track progress*")
-    display_model_status()
 
 add_footer()
