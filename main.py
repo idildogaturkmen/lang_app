@@ -36,17 +36,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-try:
-    from cloud_detector import detect_streamlit_cloud
-    is_cloud = detect_streamlit_cloud()
-except ImportError:
-    is_cloud = False
-
-if is_cloud:
-    os.environ['IS_STREAMLIT_CLOUD'] = 'true'
-    print("Running in Streamlit Cloud - some features may be limited")
-
-
 # Import the UI enhancement module
 from vocam_ui import (
     apply_custom_css, 
@@ -65,16 +54,6 @@ from vocam_ui import (
 )
 
 apply_custom_css()
-
-try:
-    from cloud_detector import detect_streamlit_cloud
-    is_cloud = detect_streamlit_cloud()
-except ImportError:
-    is_cloud = False
-
-if is_cloud:
-    os.environ['IS_STREAMLIT_CLOUD'] = 'true'
-    print("Running in Streamlit Cloud - some features may be limited")
 
 try:
     from pronunciation_practice import create_pronunciation_practice
