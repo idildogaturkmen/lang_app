@@ -27,8 +27,6 @@ import tensorflow_hub as hub
 import requests
 from deep_translator import GoogleTranslator
 from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM
-import json
-from urllib.parse import parse_qs, urlparse
 
 # First, display Python version for
 st.set_page_config(
@@ -37,267 +35,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-# Authentication integration functions
-def get_url_params():
-    """Get URL parameters from Streamlit"""
-    try:
-        # Get query parameters
-        query_params = st.experimental_get_query_params()
-        return query_params
-    except:
-        # Fallback for newer Streamlit versions
-        return st.query_params
-
-def decode_user_token(token):
-    """Decode user token from frontend"""
-    try:
-        decoded = base64.b64decode(token).decode('utf-8')
-        user_data = json.loads(decoded)
-        return user_data
-    except Exception as e:
-        print(f"Error decoding user token: {e}")
-        return None
-
-def authenticate_from_frontend():
-    """Authenticate user from frontend parameters"""
-    query_params = get_url_params()
-    
-    # Check for user authentication from frontend
-    if 'user' in query_params and 'auth' in query_params:
-        user_token = query_params['user'][0] if isinstance(query_params['user'], list) else query_params['user']
-        auth_token = query_params['auth'][0] if isinstance(query_params['auth'], list) else query_params['auth']
-        
-        if auth_token == 'vocam':  # Verify it's from our frontend
-            user_data = decode_user_token(user_token)
-            
-            if user_data and 'id' in user_data:
-                # Check token age (valid for 1 hour)
-                token_age = (time.time() * 1000) - user_data.get('timestamp', 0)
-                if token_age < 3600000:  # 1 hour in milliseconds
-                    return user_data
-    
-    return None
-
-def init_user_database(user_id):
-    """Initialize user-specific database tables"""
-    try:
-        conn = sqlite3.connect("language_learning.db")
-        cursor = conn.cursor()
-        
-        # Add user_id column to existing tables if it doesn't exist
-        try:
-            cursor.execute("ALTER TABLE vocabulary ADD COLUMN user_id INTEGER")
-        except sqlite3.OperationalError:
-            pass  # Column already exists
-        
-        try:
-            cursor.execute("ALTER TABLE sessions ADD COLUMN user_id INTEGER")
-        except sqlite3.OperationalError:
-            pass
-        
-        try:
-            cursor.execute("ALTER TABLE user_progress ADD COLUMN user_id INTEGER")
-        except sqlite3.OperationalError:
-            pass
-        
-        # Create indexes for better performance
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_vocab_user_id ON vocabulary(user_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_progress_user_id ON user_progress(user_id)")
-        
-        conn.commit()
-        conn.close()
-        
-    except Exception as e:
-        print(f"Error initializing user database: {e}")
-
-# Enhanced vocabulary functions with user isolation
-def add_vocabulary_direct_with_user(user_id, word_original, word_translated, language_translated, category=None, image_path=None):
-    """Add vocabulary for specific user"""
-    try:
-        conn = sqlite3.connect("language_learning.db")
-        cursor = conn.cursor()
-        
-        # Check if word already exists for this user
-        cursor.execute(
-            "SELECT id FROM vocabulary WHERE user_id = ? AND word_original = ? AND language_translated = ?",
-            (user_id, word_original, language_translated)
-        )
-        existing_word = cursor.fetchone()
-        
-        if existing_word:
-            vocab_id = existing_word[0]
-            cursor.execute(
-                "UPDATE vocabulary SET word_translated = ?, category = ?, image_path = ? WHERE id = ?",
-                (word_translated, category, image_path, vocab_id)
-            )
-        else:
-            current_time = datetime.datetime.now()
-            try:
-                cursor.execute('''
-                INSERT INTO vocabulary 
-                (user_id, word_original, word_translated, language_translated, category, image_path, date_added, source)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'manual')
-                ''', (user_id, word_original, word_translated, language_translated, category, image_path, current_time))
-            except sqlite3.OperationalError:
-                # Fallback for existing tables without user_id
-                cursor.execute('''
-                INSERT INTO vocabulary 
-                (word_original, word_translated, language_translated, category, image_path, date_added, source)
-                VALUES (?, ?, ?, ?, ?, ?, 'manual')
-                ''', (word_original, word_translated, language_translated, category, image_path, current_time))
-            
-            vocab_id = cursor.lastrowid
-            
-            # Initialize user progress
-            try:
-                cursor.execute('''
-                INSERT INTO user_progress (user_id, vocabulary_id, last_reviewed, proficiency_level)
-                VALUES (?, ?, ?, 0)
-                ''', (user_id, vocab_id, current_time))
-            except sqlite3.OperationalError:
-                cursor.execute('''
-                INSERT INTO user_progress (vocabulary_id, last_reviewed, proficiency_level)
-                VALUES (?, ?, 0)
-                ''', (vocab_id, current_time))
-        
-        conn.commit()
-        conn.close()
-        return vocab_id
-        
-    except Exception as e:
-        st.error(f"Error saving vocabulary: {str(e)}")
-        return None
-
-def get_all_vocabulary_direct_with_user(user_id):
-    """Get vocabulary for specific user"""
-    try:
-        conn = sqlite3.connect("language_learning.db")
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        try:
-            cursor.execute('''
-            SELECT v.id, v.word_original, v.word_translated, v.language_translated,
-                   v.category, v.image_path, v.date_added,
-                   up.proficiency_level, up.review_count, up.correct_count, up.last_reviewed
-            FROM vocabulary v
-            LEFT JOIN user_progress up ON v.id = up.vocabulary_id
-            WHERE v.user_id = ?
-            ORDER BY v.date_added DESC
-            ''', (user_id,))
-        except sqlite3.OperationalError:
-            # Fallback for tables without user_id
-            cursor.execute('''
-            SELECT v.id, v.word_original, v.word_translated, v.language_translated,
-                   v.category, v.image_path, v.date_added,
-                   up.proficiency_level, up.review_count, up.correct_count, up.last_reviewed
-            FROM vocabulary v
-            LEFT JOIN user_progress up ON v.id = up.vocabulary_id
-            ORDER BY v.date_added DESC
-            ''')
-        
-        results = cursor.fetchall()
-        vocabulary = [dict(row) for row in results]
-        
-        conn.close()
-        return vocabulary
-        
-    except Exception as e:
-        st.error(f"Error retrieving vocabulary: {str(e)}")
-        return []
-
-def create_session_direct_with_user(user_id):
-    """Create session for specific user"""
-    try:
-        conn = sqlite3.connect("language_learning.db")
-        cursor = conn.cursor()
-        
-        current_time = datetime.datetime.now()
-        try:
-            cursor.execute(
-                "INSERT INTO sessions (user_id, start_time, words_studied, words_learned) VALUES (?, ?, 0, 0)",
-                (user_id, current_time)
-            )
-        except sqlite3.OperationalError:
-            # Fallback for existing table
-            cursor.execute(
-                "INSERT INTO sessions (start_time, words_studied, words_learned) VALUES (?, 0, 0)",
-                (current_time,)
-            )
-        
-        session_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
-        
-        return session_id
-        
-    except Exception as e:
-        st.error(f"Error creating session: {str(e)}")
-        return None
-
-# Authentication state initialization
-if 'authenticated' not in st.session_state:
-    st.session_state.authenticated = False
-if 'user_data' not in st.session_state:
-    st.session_state.user_data = None
-if 'user_id' not in st.session_state:
-    st.session_state.user_id = None
-
-# Check for frontend authentication
-if not st.session_state.authenticated:
-    user_data = authenticate_from_frontend()
-    if user_data:
-        st.session_state.authenticated = True
-        st.session_state.user_data = user_data
-        st.session_state.user_id = user_data['id']
-        
-        # Initialize user database
-        init_user_database(user_data['id'])
-        
-        # Show welcome message
-        st.success(f"Welcome back, {user_data.get('displayName', user_data.get('username', 'User'))}!")
-
-# If still not authenticated, show access message
-if not st.session_state.authenticated:
-    st.markdown("""
-    <div style="text-align: center; padding: 4rem 2rem; background: linear-gradient(135deg, #1679AB, #074173); color: white; border-radius: 20px; margin: 2rem 0;">
-        <h1 style="margin-bottom: 1rem;">🌍 Vocam Learning App</h1>
-        <h3 style="margin-bottom: 2rem; opacity: 0.9;">Welcome to your personalized vocabulary learning experience!</h3>
-        <p style="margin-bottom: 2rem; font-size: 1.1rem;">This is your learning environment. Please access through the main Vocam website:</p>
-        <a href="https://vocam.app/web" style="background: #5DEBD7; color: #074173; padding: 1rem 2rem; border-radius: 25px; text-decoration: none; font-weight: bold; font-size: 1.1rem;">
-            🚀 Go to Vocam Website
-        </a>
-        <div style="margin-top: 2rem; padding-top: 2rem; border-top: 1px solid rgba(255,255,255,0.3);">
-            <h4>🎯 Features Available:</h4>
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-top: 1rem;">
-                <div style="background: rgba(255,255,255,0.1); padding: 1rem; border-radius: 10px;">
-                    <div style="font-size: 2rem; margin-bottom: 0.5rem;">📸</div>
-                    <div>Faster R-CNN Object Detection</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.1); padding: 1rem; border-radius: 10px;">
-                    <div style="font-size: 2rem; margin-bottom: 0.5rem;">🌍</div>
-                    <div>Multi-language Translation</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.1); padding: 1rem; border-radius: 10px;">
-                    <div style="font-size: 2rem; margin-bottom: 0.5rem;">🎮</div>
-                    <div>Gamified Learning</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.1); padding: 1rem; border-radius: 10px;">
-                    <div style="font-size: 2rem; margin-bottom: 0.5rem;">🎤</div>
-                    <div>Pronunciation Practice</div>
-                </div>
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    st.stop()
-
-# User is authenticated - continue with main app
-user_data = st.session_state.user_data
-user_id = st.session_state.user_id
 
 # Import the UI enhancement module
 from vocam_ui import (
@@ -986,19 +723,167 @@ def get_pronunciation_guide(word, language_code):
 
 # Function to create a database session
 def create_session_direct():
-    """User-specific session creation"""
-    return create_session_direct_with_user(user_id)
+    """Create a session directly using SQLite."""
+    try:
+        # Connect to the database
+        conn = sqlite3.connect("language_learning.db")
+        cursor = conn.cursor()
+        
+        # Insert a new session with the current time
+        current_time = datetime.datetime.now()
+        cursor.execute(
+            "INSERT INTO sessions (start_time, words_studied, words_learned) VALUES (?, 0, 0)",
+            (current_time,)
+        )
+        conn.commit()
+        
+        # Get the last inserted ID
+        session_id = cursor.lastrowid
+        conn.close()
+        
+        return session_id
+    except Exception as e:
+        error_message(f"Direct session creation error: {str(e)}")
+        return None
 
 # Function to add vocabulary to the database
 def add_vocabulary_direct(word_original, word_translated, language_translated, category=None, image_path=None):
-    """User-specific vocabulary addition"""
-    return add_vocabulary_direct_with_user(user_id, word_original, word_translated, language_translated, category, image_path)
-
+    """Add vocabulary directly using SQLite with improved error handling for duplicates and locks."""
+    try:
+        # Original function code here...
+        # Connect to the database with timeout to handle locks
+        conn = sqlite3.connect("language_learning.db", timeout=10.0)
+        cursor = conn.cursor()
+        
+        # Check if this word already exists in this language
+        cursor.execute(
+            "SELECT id FROM vocabulary WHERE word_original = ? AND language_translated = ?",
+            (word_original, language_translated)
+        )
+        existing_word = cursor.fetchone()
+        
+        # If word exists, update it rather than inserting a new one
+        if existing_word:
+            vocab_id = existing_word[0]
+            
+            # Update the existing word with new translation and image if provided
+            cursor.execute(
+                "UPDATE vocabulary SET word_translated = ?, category = ?, image_path = ? WHERE id = ?",
+                (word_translated, category, image_path, vocab_id)
+            )
+            
+            # Let the user know we're updating
+            info_message(f"Word '{word_original}' already exists in {language_translated}. Updating with new information.")
+        else:
+            # Current time for timestamps
+            current_time = datetime.datetime.now()
+            
+            # Insert a new word
+            try:
+                # Try with source column
+                cursor.execute('''
+                INSERT INTO vocabulary 
+                (word_original, word_translated, language_translated, category, image_path, date_added, source)
+                VALUES (?, ?, ?, ?, ?, ?, 'manual')
+                ''', (word_original, word_translated, language_translated, category, image_path, current_time))
+            except sqlite3.OperationalError as e:
+                if 'no column named source' in str(e):
+                    # Try without source column
+                    cursor.execute('''
+                    INSERT INTO vocabulary 
+                    (word_original, word_translated, language_translated, category, image_path, date_added)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ''', (word_original, word_translated, language_translated, category, image_path, current_time))
+                else:
+                    raise e
+            
+            # Get the last inserted ID
+            vocab_id = cursor.lastrowid
+            
+            # Check if we need to add user progress
+            cursor.execute("SELECT id FROM user_progress WHERE vocabulary_id = ?", (vocab_id,))
+            if not cursor.fetchone():
+                # Initialize user progress for this vocabulary
+                cursor.execute('''
+                INSERT INTO user_progress (vocabulary_id, last_reviewed, proficiency_level)
+                VALUES (?, ?, 0)
+                ''', (vocab_id, current_time))
+        
+        # Commit changes and close
+        conn.commit()
+        conn.close()
+        
+        # NEW CODE: Integration with gamification system - with error handling
+        if vocab_id:
+            try:
+                # Check for gamification achievements
+                gamification.check_achievements(
+                    "word_learned",
+                    word=word_original,
+                    category=category,
+                    language=language_translated
+                )
+                
+                # Check for daily challenges
+                gamification.check_challenge_progress(
+                    word_original=word_original,
+                    word_translated=word_translated,
+                    language=language_translated
+                )
+            except Exception as e:
+                print(f"Gamification error in add_vocabulary_direct: {e}")
+        
+        return vocab_id
+    except sqlite3.OperationalError as e:
+        # Handle database locks with specific advice
+        if 'database is locked' in str(e):
+            error_message("Database is currently locked. Please wait a moment and try again.")
+            # Add a small delay to allow the database to unlock
+            time.sleep(1.5)
+        else:
+            error_message(f"Database error: {str(e)}")
+        return None
+    except Exception as e:
+        error_message(f"Direct vocabulary save error: {str(e)}")
+        return None
+    
 
 # Function to get all vocabulary items from the database
 def get_all_vocabulary_direct():
-    """User-specific vocabulary retrieval"""
-    return get_all_vocabulary_direct_with_user(user_id)
+    """Get all vocabulary items directly from SQLite."""
+    try:
+        # Connect to the database
+        conn = sqlite3.connect("language_learning.db")
+        
+        # Use dictionary cursor for easier access
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        # Get all vocabulary with user progress info
+        cursor.execute('''
+        SELECT v.id, v.word_original, v.word_translated, v.language_translated,
+               v.category, v.image_path, v.date_added,
+               up.proficiency_level, up.review_count, up.correct_count, up.last_reviewed
+        FROM vocabulary v
+        LEFT JOIN user_progress up ON v.id = up.vocabulary_id
+        ORDER BY v.date_added DESC
+        ''')
+        
+        # Fetch all results
+        results = cursor.fetchall()
+        
+        # Convert to list of dictionaries
+        vocabulary = []
+        for row in results:
+            # Convert row to dictionary
+            word = dict(row)
+            vocabulary.append(word)
+        
+        conn.close()
+        return vocabulary
+    except Exception as e:
+        error_message(f"Error retrieving vocabulary: {str(e)}")
+        return []
 
 # Function to get session statistics
 def get_session_stats_direct(days=30):
@@ -1801,28 +1686,6 @@ def safe_button(label, **kwargs):
     return truly_safe_button(label, **kwargs)
 
 
-st.sidebar.markdown(f"""
-<div style="background: linear-gradient(135deg, #1679AB, #074173); padding: 1rem; border-radius: 10px; color: white; margin-bottom: 1rem;">
-    <h3 style="margin: 0 0 0.5rem 0;">👋 Welcome back!</h3>
-    <p style="margin: 0; font-size: 1.1rem; font-weight: bold;">{user_data.get('displayName', user_data.get('username', 'User'))}</p>
-    <p style="margin: 0.5rem 0 0 0; opacity: 0.9;">User ID: #{user_id}</p>
-</div>
-""", unsafe_allow_html=True)
-
-# Add return to website button
-if st.sidebar.button("🌐 Return to Vocam Website", type="secondary"):
-    query_params = get_url_params()
-    return_url = query_params.get('return', ['https://vocam.app/web'])[0] if 'return' in query_params else 'https://vocam.app/web'
-    
-    # Decode the return URL
-    try:
-        return_url = return_url.replace('%3A', ':').replace('%2F', '/').replace('%3F', '?').replace('%3D', '=').replace('%26', '&')
-    except:
-        return_url = 'https://vocam.app/web'
-    
-    st.sidebar.markdown(f'<meta http-equiv="refresh" content="0; url={return_url}">', unsafe_allow_html=True)
-
-    
 # Main sidebar for navigation
 st.sidebar.title("🌍 Vocam")
 app_mode_options = ["Camera Mode", "My Vocabulary", "Quiz Mode", "Statistics", "My Progress", "Pronunciation Practice"]
@@ -1837,7 +1700,6 @@ app_mode = st.sidebar.selectbox(
     app_mode_options,
     index=default_index
 )
-
 
 # Update session state with the current selection (might be from selectbox or previous setting)
 st.session_state.app_mode = app_mode
