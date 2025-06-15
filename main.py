@@ -30,8 +30,6 @@ from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM
 
 # First, display Python version for
 st.set_page_config(
-    page_title="Vocam",
-    page_icon="🌍",
     layout="wide",
     initial_sidebar_state="expanded"
 )
