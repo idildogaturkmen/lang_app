@@ -36,6 +36,61 @@ os.environ['TORCH_HOME'] = '/tmp/torch'
 os.environ['PYTORCH_TRANSFORMERS_CACHE'] = '/tmp/transformers'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Reduce TensorFlow logging
 
+def cleanup_memory():
+    """Force garbage collection and memory cleanup"""
+    gc.collect()
+    if hasattr(tf, 'keras'):
+        tf.keras.backend.clear_session()
+
+def cleanup_session_state():
+    """Clean up large objects from session state"""
+    keys_to_clean = [
+        'detection_checkboxes', 
+        'processing_results', 
+        'last_image_hash'
+    ]
+    
+    for key in keys_to_clean:
+        if key in st.session_state:
+            del st.session_state[key]
+    
+    gc.collect()
+
+@contextmanager
+def memory_monitor():
+    """Context manager to monitor and cleanup memory"""
+    process = psutil.Process()
+    initial_memory = process.memory_info().rss / 1024 / 1024  # MB
+    
+    try:
+        yield
+    finally:
+        gc.collect()
+        final_memory = process.memory_info().rss / 1024 / 1024  # MB
+        print(f"Memory usage: {initial_memory:.1f}MB -> {final_memory:.1f}MB")
+
+# Optimized image preprocessing function - add this
+def optimize_image_size(image, max_size=600):
+    """Resize image to reduce memory usage while maintaining quality"""
+    if hasattr(image, 'size'):
+        # PIL Image
+        width, height = image.size
+        if max(width, height) > max_size:
+            if width > height:
+                new_width = max_size
+                new_height = int(height * max_size / width)
+            else:
+                new_height = max_size
+                new_width = int(width * max_size / height)
+            
+            image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        
+        # Convert to RGB if needed
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+            
+    return image
+
 def get_memory_usage():
     """Get current memory usage information"""
     process = psutil.Process()
@@ -279,46 +334,6 @@ def load_image_efficiently(image_source):
         st.error(f"Error loading image: {e}")
         return None
     
-def cleanup_memory():
-    """Force garbage collection and memory cleanup"""
-    gc.collect()
-    if hasattr(tf, 'keras'):
-        tf.keras.backend.clear_session()
-
-@contextmanager
-def memory_monitor():
-    """Context manager to monitor and cleanup memory"""
-    process = psutil.Process()
-    initial_memory = process.memory_info().rss / 1024 / 1024  # MB
-    
-    try:
-        yield
-    finally:
-        gc.collect()
-        final_memory = process.memory_info().rss / 1024 / 1024  # MB
-        print(f"Memory usage: {initial_memory:.1f}MB -> {final_memory:.1f}MB")
-
-# Optimized image preprocessing function - add this
-def optimize_image_size(image, max_size=600):
-    """Resize image to reduce memory usage while maintaining quality"""
-    if hasattr(image, 'size'):
-        # PIL Image
-        width, height = image.size
-        if max(width, height) > max_size:
-            if width > height:
-                new_width = max_size
-                new_height = int(height * max_size / width)
-            else:
-                new_height = max_size
-                new_width = int(width * max_size / height)
-            
-            image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-        
-        # Convert to RGB if needed
-        if image.mode != 'RGB':
-            image = image.convert('RGB')
-            
-    return image
 
 def draw_detections(image_np, detections):
     """Draw bounding boxes and labels on the image."""
@@ -868,19 +883,6 @@ def create_session_direct():
         error_message(f"Direct session creation error: {str(e)}")
         return None
 
-def cleanup_session_state():
-    """Clean up large objects from session state"""
-    keys_to_clean = [
-        'detection_checkboxes', 
-        'processing_results', 
-        'last_image_hash'
-    ]
-    
-    for key in keys_to_clean:
-        if key in st.session_state:
-            del st.session_state[key]
-    
-    gc.collect()
 
 # Function to add vocabulary to the database
 def add_vocabulary_direct(word_original, word_translated, language_translated, category=None, image_path=None):
