@@ -1685,7 +1685,6 @@ def safe_button(label, **kwargs):
 
 
 # Main sidebar for navigation
-st.sidebar.title("Vocam")
 app_mode_options = ["Camera Mode", "My Vocabulary", "Quiz Mode", "Statistics", "My Progress", "Pronunciation Practice"]
 if 'app_mode' in st.session_state:
     # Use the session state value as the default index for the selectbox
