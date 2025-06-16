@@ -26,7 +26,6 @@ import tensorflow as tf
 import tensorflow_hub as hub
 import requests
 from deep_translator import GoogleTranslator
-from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM
 
 # First, display Python version for
 st.set_page_config(
@@ -52,6 +51,33 @@ from vocam_ui import (
 )
 
 apply_custom_css()
+
+try:
+    from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM
+    has_transformers = True
+    print("✅ Transformers loaded successfully")
+except ImportError as e:
+    has_transformers = False
+    print(f"❌ Transformers not available: {e}")
+    
+    # Create dummy classes for fallback
+    class DummyPipeline:
+        def __init__(self, *args, **kwargs):
+            pass
+        def __call__(self, text):
+            return [{"translation_text": f"[Translation unavailable - transformers not installed]"}]
+    
+    class DummyTokenizer:
+        def __init__(self, *args, **kwargs):
+            pass
+    
+    class DummyModel:
+        def __init__(self, *args, **kwargs):
+            pass
+    
+    pipeline = DummyPipeline
+    AutoTokenizer = DummyTokenizer
+    AutoModelForSeq2SeqLM = DummyModel
 
 try:
     from pronunciation_practice import create_pronunciation_practice
@@ -1316,6 +1342,11 @@ class FreeTranslationService:
     def _translate_with_huggingface(self, text, source_lang, target_lang):
         """Hugging Face translation models - Completely free"""
         try:
+            # Check if transformers is available
+            if not has_transformers:
+                print("Transformers not available, skipping Hugging Face translation")
+                return None
+                
             # Map language codes to model names (add more as needed)
             model_map = {
                 ('en', 'es'): 'Helsinki-NLP/opus-mt-en-es',

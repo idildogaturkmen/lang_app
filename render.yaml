@@ -3,11 +3,14 @@ services:
     name: lang_app
     env: python
     plan: free
-    buildCommand: pip install --no-cache-dir -r requirements.txt
+    buildCommand: |
+      pip install --no-cache-dir --upgrade pip &&
+      pip install --no-cache-dir -r requirements.txt &&
+      echo "Build completed successfully"
     startCommand: streamlit run main.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --server.fileWatcherType none --browser.gatherUsageStats false --server.maxUploadSize 10
     envVars:
       - key: PYTHON_VERSION
-        value: 3.9.16
+        value: 3.9.18
       - key: PYTHONUNBUFFERED
         value: "1"
       - key: PYTHONDONTWRITEBYTECODE  
@@ -24,3 +27,14 @@ services:
         value: "false"
       - key: STREAMLIT_SERVER_FILE_WATCHER_TYPE
         value: "none"
+      # Add memory optimization
+      - key: MALLOC_ARENA_MAX
+        value: "2"
+      - key: MALLOC_MMAP_THRESHOLD_
+        value: "131072"
+      - key: MALLOC_TRIM_THRESHOLD_
+        value: "131072"
+      - key: MALLOC_TOP_PAD_
+        value: "131072"
+      - key: MALLOC_MMAP_MAX_
+        value: "65536"
