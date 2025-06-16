@@ -1,10 +1,26 @@
 services:
   - type: web
-    name: vocam-streamlit-app
+    name: lang_app
     env: python
     plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: streamlit run app.py --server.port=$PORT --server.address=0.0.0.0 --server.headless=true --server.fileWatcherType=none
+    buildCommand: pip install --no-cache-dir -r requirements.txt
+    startCommand: streamlit run main.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --server.fileWatcherType none --browser.gatherUsageStats false --server.maxUploadSize 10
     envVars:
       - key: PYTHON_VERSION
         value: 3.9.16
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: PYTHONDONTWRITEBYTECODE  
+        value: "1"
+      - key: TF_CPP_MIN_LOG_LEVEL
+        value: "2"
+      - key: TORCH_HOME
+        value: "/tmp/torch"
+      - key: PYTORCH_TRANSFORMERS_CACHE
+        value: "/tmp/transformers"
+      - key: STREAMLIT_SERVER_MAX_UPLOAD_SIZE
+        value: "10"
+      - key: STREAMLIT_BROWSER_GATHER_USAGE_STATS
+        value: "false"
+      - key: STREAMLIT_SERVER_FILE_WATCHER_TYPE
+        value: "none"

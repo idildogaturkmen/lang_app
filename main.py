@@ -27,6 +27,46 @@ import tensorflow_hub as hub
 import requests
 from deep_translator import GoogleTranslator
 from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM
+import gc
+import psutil
+from contextlib import contextmanager
+
+# Add these environment variables at the top after imports
+os.environ['TORCH_HOME'] = '/tmp/torch'
+os.environ['PYTORCH_TRANSFORMERS_CACHE'] = '/tmp/transformers'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Reduce TensorFlow logging
+
+def get_memory_usage():
+    """Get current memory usage information"""
+    process = psutil.Process()
+    memory_info = process.memory_info()
+    memory_mb = memory_info.rss / 1024 / 1024
+    return {
+        'memory_mb': memory_mb,
+        'memory_percent': process.memory_percent(),
+        'cpu_percent': process.cpu_percent()
+    }
+
+def display_memory_debug():
+    """Display memory usage in sidebar for debugging"""
+    if st.sidebar.checkbox("🔧 Show Memory Debug"):
+        memory_info = get_memory_usage()
+        st.sidebar.markdown("### Memory Usage")
+        st.sidebar.metric("RAM Usage", f"{memory_info['memory_mb']:.1f} MB")
+        st.sidebar.metric("Memory %", f"{memory_info['memory_percent']:.1f}%")
+        st.sidebar.metric("CPU %", f"{memory_info['cpu_percent']:.1f}%")
+        
+        # Warning if memory is high
+        if memory_info['memory_mb'] > 400:  # Warning at 400MB (Render limit is ~512MB)
+            st.sidebar.warning(f"⚠️ High memory usage: {memory_info['memory_mb']:.1f}MB")
+        
+        # Force cleanup button
+        if st.sidebar.button("🧹 Force Cleanup"):
+            cleanup_memory()
+            cleanup_session_state()
+            st.sidebar.success("Memory cleanup performed")
+
+display_memory_debug()
 
 # First, display Python version for
 st.set_page_config(
@@ -177,6 +217,7 @@ except ImportError as e:
     has_custom_recorder = False
     print(f"Custom audio recorder not available: {e}")
 
+
 def check_pronunciation_dependencies():
     """Check and report pronunciation practice dependencies"""
     dependencies = {
@@ -218,6 +259,66 @@ def check_pronunciation_dependencies():
         pass
     
     return dependencies
+
+# Memory-efficient image loading function
+def load_image_efficiently(image_source):
+    """Load and optimize image efficiently"""
+    try:
+        if hasattr(image_source, 'read'):
+            # File upload object
+            image = Image.open(image_source)
+        else:
+            # Camera input or other
+            image = Image.open(image_source)
+        
+        # Optimize immediately upon loading
+        image = optimize_image_size(image, max_size=600)
+        
+        return image
+    except Exception as e:
+        st.error(f"Error loading image: {e}")
+        return None
+    
+def cleanup_memory():
+    """Force garbage collection and memory cleanup"""
+    gc.collect()
+    if hasattr(tf, 'keras'):
+        tf.keras.backend.clear_session()
+
+@contextmanager
+def memory_monitor():
+    """Context manager to monitor and cleanup memory"""
+    process = psutil.Process()
+    initial_memory = process.memory_info().rss / 1024 / 1024  # MB
+    
+    try:
+        yield
+    finally:
+        gc.collect()
+        final_memory = process.memory_info().rss / 1024 / 1024  # MB
+        print(f"Memory usage: {initial_memory:.1f}MB -> {final_memory:.1f}MB")
+
+# Optimized image preprocessing function - add this
+def optimize_image_size(image, max_size=600):
+    """Resize image to reduce memory usage while maintaining quality"""
+    if hasattr(image, 'size'):
+        # PIL Image
+        width, height = image.size
+        if max(width, height) > max_size:
+            if width > height:
+                new_width = max_size
+                new_height = int(height * max_size / width)
+            else:
+                new_height = max_size
+                new_width = int(width * max_size / height)
+            
+            image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        
+        # Convert to RGB if needed
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+            
+    return image
 
 def draw_detections(image_np, detections):
     """Draw bounding boxes and labels on the image."""
@@ -529,56 +630,79 @@ def rate_limited_detection(image, confidence_threshold=0.5, iou_threshold=0.45):
 
 # Function to detect objects in image
 def detect_objects(image, confidence_threshold=0.5, iou_threshold=0.45):
-    """Detect objects using Faster R-CNN with Non-Maximum Suppression to remove duplicates."""
+    """Memory-optimized object detection using Faster R-CNN."""
     
-    try:
-        # Load the Faster R-CNN model
-        detector = load_faster_rcnn_model()
-        if detector is None:
-            error_message("Failed to load Faster R-CNN model")
-            return [], np.array(image)
-        
-        # Convert PIL image to numpy array if needed
-        if hasattr(image, 'convert'):
-            image_np = np.array(image.convert('RGB'))
-        else:
-            image_np = np.array(image)
-        
-        # Convert to tensor
-        image_tensor = tf.convert_to_tensor(image_np)
-        image_tensor = image_tensor[tf.newaxis, ...]
-        
-        # Run object detection
-        results = detector(image_tensor)
-        
-        # Extract results
-        boxes = results['detection_boxes'][0].numpy()
-        classes = results['detection_classes'][0].numpy().astype(int)
-        scores = results['detection_scores'][0].numpy()
-        
-        # Filter by confidence threshold first
-        valid_indices = scores >= confidence_threshold
-        filtered_boxes = boxes[valid_indices]
-        filtered_classes = classes[valid_indices]
-        filtered_scores = scores[valid_indices]
-        
-        if len(filtered_boxes) == 0:
-            return [], image_np
-        
-        # Apply Non-Maximum Suppression to remove duplicate detections
-        final_detections = apply_nms(filtered_boxes, filtered_classes, filtered_scores, image_np.shape, iou_threshold)
-        
-        # Draw bounding boxes on result image
-        result_image = draw_detections(image_np, final_detections)
-        
-        print(f"✅ Faster R-CNN detected {len(final_detections)} unique objects (after NMS)")
-        return final_detections, result_image
-        
-    except Exception as e:
-        error_message(f"Faster R-CNN detection error: {str(e)}")
-        # Return empty result on error
-        dummy_image = np.array(image) if hasattr(image, 'convert') else image
-        return [], dummy_image
+    with memory_monitor():
+        try:
+            # Load the model (cached)
+            detector = load_faster_rcnn_model()
+            if detector is None:
+                error_message("Failed to load Faster R-CNN model")
+                return [], np.array(image)
+            
+            # Optimize image size FIRST to reduce memory usage
+            optimized_image = optimize_image_size(image, max_size=600)
+            
+            # Convert PIL image to numpy array
+            if hasattr(optimized_image, 'convert'):
+                image_np = np.array(optimized_image.convert('RGB'))
+            else:
+                image_np = np.array(optimized_image)
+            
+            # Clear intermediate variables
+            del optimized_image
+            gc.collect()
+            
+            # Convert to tensor with memory optimization
+            image_tensor = tf.convert_to_tensor(image_np, dtype=tf.uint8)
+            image_tensor = image_tensor[tf.newaxis, ...]
+            
+            # Run object detection with memory management
+            with tf.device('/CPU:0'):  # Force CPU usage to save memory
+                results = detector(image_tensor)
+            
+            # Extract results immediately and clear tensor
+            boxes = results['detection_boxes'][0].numpy()
+            classes = results['detection_classes'][0].numpy().astype(int)
+            scores = results['detection_scores'][0].numpy()
+            
+            # Clear detection results from memory
+            del results, image_tensor
+            gc.collect()
+            
+            # Filter by confidence threshold first
+            valid_indices = scores >= confidence_threshold
+            filtered_boxes = boxes[valid_indices]
+            filtered_classes = classes[valid_indices]
+            filtered_scores = scores[valid_indices]
+            
+            # Clear original arrays
+            del boxes, classes, scores
+            gc.collect()
+            
+            if len(filtered_boxes) == 0:
+                return [], image_np
+            
+            # Apply Non-Maximum Suppression to remove duplicate detections
+            final_detections = apply_nms(filtered_boxes, filtered_classes, filtered_scores, image_np.shape, iou_threshold)
+            
+            # Draw bounding boxes on result image
+            result_image = draw_detections(image_np, final_detections)
+            
+            # Clear intermediate variables
+            del filtered_boxes, filtered_classes, filtered_scores
+            gc.collect()
+            
+            print(f"✅ Faster R-CNN detected {len(final_detections)} unique objects (after NMS)")
+            return final_detections, result_image
+            
+        except Exception as e:
+            error_message(f"Faster R-CNN detection error: {str(e)}")
+            # Force cleanup on error
+            gc.collect()
+            # Return empty result on error
+            dummy_image = np.array(image) if hasattr(image, 'convert') else image
+            return [], dummy_image
 
 # Function to enhance image quality
 def enhance_image(image, enhance_type="auto"):
@@ -743,6 +867,20 @@ def create_session_direct():
     except Exception as e:
         error_message(f"Direct session creation error: {str(e)}")
         return None
+
+def cleanup_session_state():
+    """Clean up large objects from session state"""
+    keys_to_clean = [
+        'detection_checkboxes', 
+        'processing_results', 
+        'last_image_hash'
+    ]
+    
+    for key in keys_to_clean:
+        if key in st.session_state:
+            del st.session_state[key]
+    
+    gc.collect()
 
 # Function to add vocabulary to the database
 def add_vocabulary_direct(word_original, word_translated, language_translated, category=None, image_path=None):
@@ -1392,12 +1530,20 @@ def get_audio_html(audio_bytes):
 # Function to load RCNN Model
 @st.cache_resource
 def load_faster_rcnn_model():
-    """Load and cache the Faster R-CNN model from TensorFlow Hub."""
+    """Load and cache the Faster R-CNN model with memory optimization."""
     try:
-        print("Loading Faster R-CNN model...")
+        print("Loading optimized Faster R-CNN model...")
+        
+        # Clear any existing memory
+        gc.collect()
+        
+        # Use a smaller, more memory-efficient model
         model_url = "https://tfhub.dev/tensorflow/faster_rcnn/resnet50_v1_640x640/1"
+        
+        # Load with memory constraints
         detector = hub.load(model_url)
-        print("✅ Faster R-CNN model loaded successfully!")
+        
+        print("✅ Optimized Faster R-CNN model loaded successfully!")
         return detector
     except Exception as e:
         print(f"❌ Error loading Faster R-CNN model: {e}")
@@ -1860,13 +2006,13 @@ if app_mode == "Camera Mode":
     with image_tab1:
         picture = st.camera_input("Take a picture", key="camera_input")
         if picture is not None:
-            image = Image.open(picture)
+            image = load_image_efficiently(picture)
 
     # Second tab: Upload
     with image_tab2:
         uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"], key="file_uploader")
         if uploaded_file is not None:
-            image = Image.open(uploaded_file)
+            image = load_image_efficiently(uploaded_file)
     
     # Detection options
     detection_type = st.radio(
@@ -1924,9 +2070,23 @@ if app_mode == "Camera Mode":
             separator_placeholder = st.empty()
             separator_placeholder.markdown('<div class="result-separator"></div>', unsafe_allow_html=True)
             
-            # Perform the detection while showing a native spinner
-            with st.spinner("Processing..."):
-                detections, result_image = detect_objects(image_for_detection, confidence_threshold, iou_threshold)
+            # MEMORY OPTIMIZED DETECTION
+            try:
+                # Clean up memory before detection
+                cleanup_memory()
+                
+                # Perform the detection with memory monitoring
+                with st.spinner("Processing..."):
+                    with memory_monitor():
+                        detections, result_image = detect_objects(image_for_detection, confidence_threshold, iou_threshold)
+                
+                # Clean up after detection
+                cleanup_memory()
+                
+            except Exception as e:
+                error_message(f"Detection failed: {str(e)}")
+                st.info("Try using a smaller image or refreshing the page")
+                detections, result_image = [], np.array(image)
             
             # Clear the spinner and separator completely
             spinner_placeholder.empty()
@@ -2105,6 +2265,11 @@ if app_mode == "Camera Mode":
                                 st.session_state.words_just_saved = True
                                 st.session_state.saved_count = saved_count
                                 st.session_state.saved_items = saved_items
+                                
+                                # ADD THESE TWO LINES:
+                                cleanup_memory()
+                                cleanup_session_state()
+                                
                                 st.rerun()  # Rerun once to update the UI
                             else:
                                 error_message("Failed to save any words. Please check database connection.")
@@ -3262,3 +3427,10 @@ else:
     st.sidebar.markdown("*Start a session in Camera Mode to track progress*")
 
 add_footer()
+if 'last_app_mode' not in st.session_state:
+    st.session_state.last_app_mode = app_mode
+
+if st.session_state.last_app_mode != app_mode:
+    cleanup_memory()
+    cleanup_session_state()
+    st.session_state.last_app_mode = app_mode
