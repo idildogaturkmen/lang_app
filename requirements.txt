@@ -17,7 +17,3 @@ librosa>=0.10.0
 tensorflow==2.15.0
 tensorflow-hub==0.16.1
 transformers==4.35.2
-torch==2.0.1
-torchvision==0.15.2
-pygame==2.5.2
-requests==2.31.0
