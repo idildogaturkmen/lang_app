@@ -20,15 +20,7 @@ import hashlib
 from example_sentences import ExampleSentenceGenerator
 import requests
 from deep_translator import GoogleTranslator
-import gc
-import psutil
-import warnings
 from ultralytics import YOLO
-import torch
-
-# Suppress TensorFlow warnings to reduce memory overhead
-warnings.filterwarnings('ignore', category=FutureWarning)
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 
 @st.cache_resource
@@ -89,72 +81,6 @@ def detect_objects_yolov8(image, confidence_threshold=0.5):
         print(f"YOLOv8 detection error: {e}")
         return [], np.array(image)
     
-def check_uploaded_image_size(uploaded_file):
-    """Check uploaded file size before processing"""
-    if uploaded_file is not None:
-        file_size_mb = len(uploaded_file.getvalue()) / (1024 * 1024)
-        
-        if file_size_mb > 2:  # 2MB limit for free plan
-            st.error(f"🚨 Image too large: {file_size_mb:.1f} MB. Please use an image smaller than 2 MB.")
-            return False
-        elif file_size_mb > 1:
-            st.warning(f"⚠️ Large image: {file_size_mb:.1f} MB. This may cause memory issues.")
-        
-        return True
-    return False
-
-def show_memory_guidance():
-    """Show guidance when memory is high"""
-    current_memory = get_memory_usage()
-    
-    if current_memory > 1800:
-        st.error("""
-        🚨 **Memory Usage Critical**
-        
-        To reduce memory usage:
-        1. Use smaller images (< 800x600 pixels)
-        2. Refresh the page to clear memory
-        3. Process one image at a time
-        4. Avoid uploading multiple large images
-        """)
-        
-        if st.button("🔄 Refresh Page to Clear Memory"):
-            st.rerun()
-    
-    elif current_memory > 1400:
-        st.warning("""
-        ⚠️ **High Memory Usage**
-        
-        Consider using smaller images for better performance.
-        """)
-
-def setup_automatic_cleanup():
-    """Setup automatic memory cleanup triggers"""
-    # Cleanup after every 5 operations
-    if 'operation_count' not in st.session_state:
-        st.session_state.operation_count = 0
-    
-    st.session_state.operation_count += 1
-    
-    if st.session_state.operation_count % 5 == 0:
-        print(f"Automatic cleanup triggered after {st.session_state.operation_count} operations")
-        cleanup_memory()
-
-def optimize_for_render():
-    """Render.com specific optimizations"""
-    # Set environment variables if not set
-    if not os.getenv('OMP_NUM_THREADS'):
-        os.environ['OMP_NUM_THREADS'] = '1'
-    if not os.getenv('OPENBLAS_NUM_THREADS'):
-        os.environ['OPENBLAS_NUM_THREADS'] = '1'
-    
-    # Force garbage collection more frequently
-    gc.set_threshold(400, 5, 5)  # More aggressive than default
-    
-    print("✅ Render optimizations applied")
-
-# Call this at startup (add after your other startup code)
-optimize_for_render()
 
 # First, display Python version for
 st.set_page_config(
@@ -374,110 +300,6 @@ def check_pronunciation_dependencies():
     
     return dependencies
 
-def get_memory_usage():
-    """Get current memory usage in MB"""
-    try:
-        process = psutil.Process(os.getpid())
-        memory_info = process.memory_info()
-        return memory_info.rss / 1024 / 1024  # Convert to MB
-    except Exception as e:
-        print(f"Error getting memory usage: {e}")
-        return 0
-
-def get_memory_percentage():
-    """Get memory usage as percentage of available system memory"""
-    try:
-        memory = psutil.virtual_memory()
-        return memory.percent
-    except Exception as e:
-        print(f"Error getting memory percentage: {e}")
-        return 0
-
-def log_memory_usage(stage=""):
-    """Log memory usage at different stages"""
-    memory_mb = get_memory_usage()
-    memory_percent = get_memory_percentage()
-    stage_text = f" at {stage}" if stage else ""
-    print(f"Memory usage{stage_text}: {memory_mb:.1f} MB ({memory_percent:.1f}% of system memory)")
-    return memory_mb
-
-def cleanup_memory():
-    """Comprehensive memory cleanup - YOLOv8 version"""
-    try:
-        # Force garbage collection
-        collected = gc.collect()
-        
-        # Clear torch cache if available
-        try:
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            print("✅ PyTorch cache cleared")
-        except Exception as e:
-            print(f"PyTorch cleanup warning: {e}")
-        
-        print(f"✅ Garbage collection freed {collected} objects")
-        
-        # Log memory after cleanup
-        memory_after = get_memory_usage()
-        print(f"Memory after cleanup: {memory_after:.1f} MB")
-        
-        return memory_after
-        
-    except Exception as e:
-        print(f"Memory cleanup error: {e}")
-        return get_memory_usage()
-
-def check_memory_limit(threshold_mb=1400, critical_threshold_mb=1800):
-    """
-    Check if memory usage is approaching limits for Render free plan
-    Render free plan has ~512MB memory limit, so we need to be conservative
-    """
-    current_memory = get_memory_usage()
-    
-    if current_memory > critical_threshold_mb:
-        error_message(f"🚨 CRITICAL: Memory usage too high: {current_memory:.1f} MB")
-        cleanup_memory()
-        return "critical"
-    elif current_memory > threshold_mb:
-        warning_message(f"⚠️ High memory usage: {current_memory:.1f} MB")
-        cleanup_memory()
-        return "warning"
-    else:
-        return "ok"
-
-def memory_safe_operation(operation_name="operation"):
-    """Decorator to monitor memory during operations"""
-    def decorator(func):
-        def wrapper(*args, **kwargs):
-            # Check memory before operation
-            memory_before = log_memory_usage(f"before {operation_name}")
-            
-            # Check if we have enough memory
-            if memory_before > 1600:  # Very conservative for free plan
-                error_message(f"Insufficient memory for {operation_name}: {memory_before:.1f} MB")
-                cleanup_memory()
-                return None, None
-            
-            try:
-                # Execute the operation
-                result = func(*args, **kwargs)
-                
-                # Check memory after operation
-                memory_after = log_memory_usage(f"after {operation_name}")
-                
-                # Cleanup if memory increased significantly
-                if memory_after > memory_before + 100:
-                    print(f"Memory increased by {memory_after - memory_before:.1f} MB during {operation_name}")
-                    cleanup_memory()
-                
-                return result
-            except Exception as e:
-                print(f"Error during {operation_name}: {e}")
-                cleanup_memory()
-                return None, None
-        return wrapper
-    return decorator
-
 
 def draw_detections(image_np, detections):
     """Draw bounding boxes and labels on the image."""
@@ -563,17 +385,6 @@ def get_detection_color(label):
     
     return color_map.get(label, color_map['default'])
 
-
-def check_startup_memory():
-    """Check memory at app startup"""
-    initial_memory = get_memory_usage()
-    print(f"App startup memory: {initial_memory:.1f} MB")
-    
-    if initial_memory > 1000:  # Warning threshold for free plan
-        st.sidebar.warning(f"⚠️ High startup memory: {initial_memory:.1f} MB")
-        cleanup_memory()
-    
-    return initial_memory
 
 
 def show_detection_settings():
@@ -1183,53 +994,6 @@ def prepare_vocabulary_for_diverse_questions(vocabulary, languages):
 if 'db_checked' not in st.session_state:
     st.session_state.db_checked = check_database_setup()
 
-def debug_button(label, **kwargs):
-    """Debug wrapper that shows what parameters are being passed to a button and ensures uniqueness"""
-    import inspect
-    import time
-    
-    # Get the caller info
-    caller = inspect.getframeinfo(inspect.currentframe().f_back)
-    
-    # Create a unique key based on the calling file, line number, and timestamp
-    if 'key' not in kwargs:
-        caller_id = f"{caller.filename.split('/')[-1]}_{caller.lineno}"
-        timestamp = int(time.time() * 1000) % 10000  # Use last 4 digits of timestamp for readability
-        unique_key = f"{label.replace(' ', '_')}_{caller_id}_{timestamp}"
-        kwargs['key'] = unique_key
-    
-    # For debugging, uncomment this line to see what keys are being generated
-    # print(f"Button: {label}, Key: {kwargs['key']}")
-    
-    # Remove any problematic parameters if present
-    if 'use_column_width' in kwargs:
-        del kwargs['use_column_width']
-    if 'type' in kwargs and kwargs['type'] == 'primary':
-        del kwargs['type']
-    
-    # Use the cleaned kwargs
-    return st.button(label, **kwargs)
-
-def safe_button(label, **kwargs):
-    """Safe wrapper for st.button that ensures uniqueness and removes problematic parameters"""
-    import time
-    
-    # Generate a unique key if none provided
-    if 'key' not in kwargs:
-        # Create unique key based on label and timestamp
-        timestamp = int(time.time() * 1000) % 10000  # Use last 4 digits of timestamp for readability
-        unique_key = f"{label.replace(' ', '_')}_{timestamp}"
-        kwargs['key'] = unique_key
-    
-    # Remove problematic parameters if present
-    if 'use_column_width' in kwargs:
-        del kwargs['use_column_width']
-    if 'type' in kwargs and kwargs['type'] == 'primary':
-        del kwargs['type']
-    
-    # Use the cleaned kwargs
-    return st.button(label, **kwargs)
-
 # Initialize database
 @st.cache_resource
 def get_database():
@@ -1237,10 +1001,7 @@ def get_database():
 
 db = get_database()
 
-if 'startup_memory_checked' not in st.session_state:
-    st.session_state.startup_memory_checked = True
-    startup_memory = check_startup_memory()
-    st.session_state.startup_memory = startup_memory
+
 # Initialize session state for manual mode
 if 'manual_mode' not in st.session_state:
     st.session_state.manual_mode = False
@@ -1504,19 +1265,7 @@ def get_audio_html(audio_bytes):
 def manage_session(action):
     """Session management with memory monitoring for Render free plan"""
     try:
-        # Log memory at start of session management
-        log_memory_usage(f"session {action} start")
-        
         if action == "start":
-            # Check memory before starting session
-            memory_status = check_memory_limit(1400, 1800)
-            if memory_status == "critical":
-                error_message("Insufficient memory to start session. Please refresh the page and try again.")
-                return False
-            
-            # Clear any leftover memory before starting
-            cleanup_memory()
-            
             try:
                 # Create session using your existing direct method
                 session_id = create_session_direct()
@@ -1526,7 +1275,6 @@ def manage_session(action):
                     st.session_state.words_studied = 0
                     st.session_state.words_learned = 0
                     success_message("Started new learning session!")
-                    log_memory_usage("session started")
                     return True
                 else:
                     error_message("Failed to create session. Please check database connection.")
@@ -1534,7 +1282,6 @@ def manage_session(action):
                     
             except Exception as e:
                 error_message(f"Error starting session: {str(e)}")
-                cleanup_memory()
                 return False
                 
         elif action == "end" and st.session_state.session_id:
@@ -1558,60 +1305,17 @@ def manage_session(action):
                 st.session_state.words_studied = 0
                 st.session_state.words_learned = 0
                 
-                # Cleanup memory after ending session
-                cleanup_memory()
-                log_memory_usage("session ended")
-                
                 return True
                     
             except Exception as e:
                 error_message(f"Error ending session: {str(e)}")
-                cleanup_memory()
                 return False
         
         return False
         
     except Exception as e:
         error_message(f"Session management error: {str(e)}")
-        cleanup_memory()
         return False
-
-def add_memory_monitor_to_sidebar():
-    """Fixed version without duplicate widget IDs"""
-    import time
-    unique_key = f"memory_monitor_{int(time.time() * 1000) % 10000}"
-    
-    if st.sidebar.checkbox("🔧 Show Memory Monitor", key=unique_key):
-        current_memory = get_memory_usage()
-        memory_percent = get_memory_percentage()
-        
-        if current_memory > 1500:
-            st.sidebar.error(f"🚨 Memory: {current_memory:.1f} MB")
-        elif current_memory > 1000:
-            st.sidebar.warning(f"⚠️ Memory: {current_memory:.1f} MB")
-        else:
-            st.sidebar.success(f"✅ Memory: {current_memory:.1f} MB")
-        
-        st.sidebar.caption(f"System: {memory_percent:.1f}% used")
-
-
-# Add these image preprocessing functions
-
-def calculate_optimal_size(width, height, max_size=480, min_size=320):
-    """Calculate optimal image size for memory efficiency"""
-    # For Render free plan, we need to be very conservative with image sizes
-    current_pixels = width * height
-    max_pixels = max_size * max_size
-    
-    if current_pixels <= max_pixels:
-        return width, height
-    
-    # Calculate scaling factor
-    scale = (max_pixels / current_pixels) ** 0.5
-    new_width = max(min_size, int(width * scale))
-    new_height = max(min_size, int(height * scale))
-    
-    return new_width, new_height
 
     
 # Function to save image
@@ -1792,33 +1496,6 @@ def check_answer(selected_index):
 # Global counter for truly unique widget IDs
 if 'widget_counter' not in st.session_state:
     st.session_state.widget_counter = 0
-
-def truly_safe_button(label, **kwargs):
-    """Button helper that guarantees unique keys even with rapid clicks"""
-    # Increment the global counter
-    st.session_state.widget_counter += 1
-    
-    # Generate a unique key if none provided
-    if 'key' not in kwargs:
-        # Create unique key based on counter + millisecond timestamp
-        import time
-        timestamp = int(time.time() * 1000000) % 1000000  # Microsecond part only
-        counter = st.session_state.widget_counter
-        unique_key = f"{label.replace(' ', '_').lower()}_{counter}_{timestamp}"
-        kwargs['key'] = unique_key
-    
-    # Remove problematic parameters if present
-    if 'use_column_width' in kwargs:
-        del kwargs['use_column_width']
-    if 'type' in kwargs and kwargs['type'] == 'primary':
-        kwargs['type'] = None  # Set to None instead of deleting
-    
-    # Use the cleaned kwargs
-    return st.button(label, **kwargs)
-
-def safe_button(label, **kwargs):
-    """Alias for truly_safe_button for backward compatibility"""
-    return truly_safe_button(label, **kwargs)
 
 
 # Main sidebar for navigation
@@ -2002,19 +1679,10 @@ if app_mode == "Camera Mode":
     with image_tab2:
         uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"], key="file_uploader")
         if uploaded_file is not None:
-            # Check file size before processing
-            if check_uploaded_image_size(uploaded_file):
-                try:
-                    image = Image.open(uploaded_file)
-                    # Validate image dimensions
-                    width, height = image.size
-                    if width * height > 1000000:  # 1MP limit
-                        st.error(f"Image resolution too high: {width}x{height}. Please use an image smaller than 1000x1000 pixels.")
-                        image = None
-                except Exception as e:
-                    st.error(f"Error loading image: {e}")
-                    image = None
-            else:
+            try:
+                image = Image.open(uploaded_file)
+            except Exception as e:
+                st.error(f"Error loading image: {e}")
                 image = None
     
     # Detection options
@@ -2053,24 +1721,6 @@ if app_mode == "Camera Mode":
     
     # Process image if available
     if image is not None:
-        # Add memory monitoring and guidance
-        add_memory_monitor_to_sidebar()
-        show_memory_guidance()
-        
-        # Check memory before processing
-        memory_status = check_memory_limit(1400, 1800)
-        if memory_status == "critical":
-            st.error("🚨 Critical memory usage. Please refresh the page and try with a smaller image.")
-            st.stop()
-        
-        # Validate image size first
-        if hasattr(image, 'size'):
-            width, height = image.size
-            pixels = width * height
-            if pixels > 4000000:  # 4MP limit
-                st.error(f"Image too large: {width}x{height} ({pixels/1000000:.1f}MP). Please use an image smaller than 1000x1000 pixels.")
-                st.stop()
-        
         # Process based on detection type
         if detection_type == "Objects":
             # Use a placeholder for the spinner that we can clear later
@@ -2081,9 +1731,6 @@ if app_mode == "Camera Mode":
             # Add visual separator for mobile
             separator_placeholder = st.empty()
             separator_placeholder.markdown('<div class="result-separator"></div>', unsafe_allow_html=True)
-            
-            # Setup automatic cleanup
-            setup_automatic_cleanup()
             
             # Perform the detection while showing a native spinner
             with st.spinner("Processing..."):
@@ -2101,7 +1748,6 @@ if app_mode == "Camera Mode":
                 except Exception as e:
                     if "memory" in str(e).lower() or "resource" in str(e).lower():
                         error_message("Memory limit reached. Please try a smaller image or refresh the page.")
-                        cleanup_memory()
                     else:
                         error_message(f"Detection error: {str(e)}")
                     # Fallback behavior
@@ -3431,7 +3077,6 @@ elif app_mode == "Pronunciation Practice":
         st.code("pip install streamlit-webrtc speech-recognition librosa python-Levenshtein av")
 
 st.sidebar.markdown("---")
-add_memory_monitor_to_sidebar()
 st.sidebar.markdown("### Session Info")
 if st.session_state.session_id:
     st.sidebar.success(f"Session active")
@@ -3441,13 +3086,4 @@ else:
     st.sidebar.warning("No active session")
     st.sidebar.markdown("*Start a session in Camera Mode to track progress*")
 
-if st.sidebar.button("🧪 Test Memory Functions"):
-    st.sidebar.write(f"Current memory: {get_memory_usage():.1f} MB")
-    st.sidebar.write(f"Memory %: {get_memory_percentage():.1f}%")
-    
-    # Test cleanup
-    before_cleanup = get_memory_usage()
-    cleanup_memory()
-    after_cleanup = get_memory_usage()
-    st.sidebar.write(f"Cleanup freed: {before_cleanup - after_cleanup:.1f} MB")
 add_footer()
