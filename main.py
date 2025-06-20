@@ -403,7 +403,7 @@ def cleanup_memory():
         print(f"Memory cleanup error: {e}")
         return get_memory_usage()
 
-def check_memory_limit(threshold_mb=400, critical_threshold_mb=480):
+def check_memory_limit(threshold_mb=1400, critical_threshold_mb=1800):
     """
     Check if memory usage is approaching limits for Render free plan
     Render free plan has ~512MB memory limit, so we need to be conservative
@@ -429,7 +429,7 @@ def memory_safe_operation(operation_name="operation"):
             memory_before = log_memory_usage(f"before {operation_name}")
             
             # Check if we have enough memory
-            if memory_before > 450:  # Very conservative for free plan
+            if memory_before > 1600:  # Very conservative for free plan
                 error_message(f"Insufficient memory for {operation_name}: {memory_before:.1f} MB")
                 cleanup_memory()
                 return None, None
@@ -442,7 +442,7 @@ def memory_safe_operation(operation_name="operation"):
                 memory_after = log_memory_usage(f"after {operation_name}")
                 
                 # Cleanup if memory increased significantly
-                if memory_after > memory_before + 50:
+                if memory_after > memory_before + 100:
                     print(f"Memory increased by {memory_after - memory_before:.1f} MB during {operation_name}")
                     cleanup_memory()
                 
@@ -545,7 +545,7 @@ def check_startup_memory():
     initial_memory = get_memory_usage()
     print(f"App startup memory: {initial_memory:.1f} MB")
     
-    if initial_memory > 300:  # Warning threshold for free plan
+    if initial_memory > 1000:  # Warning threshold for free plan
         st.sidebar.warning(f"⚠️ High startup memory: {initial_memory:.1f} MB")
         cleanup_memory()
     
@@ -674,7 +674,7 @@ def detect_objects_memory_optimized(image, confidence_threshold=0.5, iou_thresho
             return [], np.array(image) if hasattr(image, 'shape') else np.zeros((100, 100, 3))
         
         # Check memory before starting
-        memory_status = check_memory_limit(350, 420)  # Very conservative for free plan
+        memory_status = check_memory_limit(1400, 1800)  # Very conservative for free plan
         if memory_status == "critical":
             error_message("Insufficient memory for object detection. Please try a smaller image.")
             return [], np.array(image)
@@ -686,7 +686,7 @@ def detect_objects_memory_optimized(image, confidence_threshold=0.5, iou_thresho
             return [], np.array(image)
         
         # Preprocess image with memory optimization
-        image_np = preprocess_image_memory_efficient(image, max_size=480)
+        image_np = preprocess_image_memory_efficient(image, max_size=800)
         if image_np is None:
             error_message("Image preprocessing failed")
             return [], np.array(image)
@@ -1715,7 +1715,7 @@ def load_faster_rcnn_model():
         
         # Check available memory before loading
         available_memory = get_memory_usage()
-        if available_memory > 400:  # If we're already using too much memory
+        if available_memory > 1200:  # If we're already using too much memory
             error_message(f"Insufficient memory to load model: {available_memory:.1f} MB already used")
             return None
         
@@ -1767,7 +1767,7 @@ def manage_session(action):
         
         if action == "start":
             # Check memory before starting session
-            memory_status = check_memory_limit(300, 400)
+            memory_status = check_memory_limit(1400, 1800)
             if memory_status == "critical":
                 error_message("Insufficient memory to start session. Please refresh the page and try again.")
                 return False
@@ -1841,9 +1841,9 @@ def add_memory_monitor_to_sidebar():
         memory_percent = get_memory_percentage()
         
         # Color code based on memory usage
-        if current_memory > 450:
+        if current_memory > 1800:
             st.sidebar.error(f"🚨 Memory: {current_memory:.1f} MB")
-        elif current_memory > 350:
+        elif current_memory > 1400:
             st.sidebar.warning(f"⚠️ Memory: {current_memory:.1f} MB")
         else:
             st.sidebar.success(f"✅ Memory: {current_memory:.1f} MB")
@@ -1957,7 +1957,7 @@ def process_image_with_memory_check(image, detection_type, enhancement_type, con
     """Process image with memory monitoring"""
     try:
         # Check memory before processing
-        memory_status = check_memory_limit(350, 420)
+        memory_status = check_memory_limit(1400, 1800)
         if memory_status == "critical":
             error_message("Insufficient memory to process image. Please try a smaller image or refresh the page.")
             return None, None
@@ -2458,7 +2458,7 @@ if app_mode == "Camera Mode":
         if hasattr(image, 'size'):
             width, height = image.size
             pixels = width * height
-            if pixels > 1000000:  # 1MP limit
+            if pixels > 4000000:  # 4MP limit
                 st.error(f"Image too large: {width}x{height} ({pixels/1000000:.1f}MP). Please use an image smaller than 1000x1000 pixels.")
                 st.stop()
         
