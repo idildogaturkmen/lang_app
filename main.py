@@ -77,7 +77,7 @@ def show_memory_guidance():
     """Show guidance when memory is high"""
     current_memory = get_memory_usage()
     
-    if current_memory > 400:
+    if current_memory > 1800:
         st.error("""
         🚨 **Memory Usage Critical**
         
@@ -91,7 +91,7 @@ def show_memory_guidance():
         if st.button("🔄 Refresh Page to Clear Memory"):
             st.rerun()
     
-    elif current_memory > 300:
+    elif current_memory > 1400:
         st.warning("""
         ⚠️ **High Memory Usage**
         
@@ -1977,7 +1977,7 @@ def process_image_with_memory_check(image, detection_type, enhancement_type, con
                     return None, None
                 
                 # Check memory after enhancement
-                check_memory_limit(400, 450)
+                check_memory_limit(1400, 1800)
                 
                 # Run detection
                 detections, result_image = detect_objects_memory_optimized(
