@@ -2,12 +2,12 @@ services:
   - type: web
     name: lang_app
     env: python
-    plan: standard  # Since you mentioned you're using Standard plan
+    plan: standard
     buildCommand: |
       pip install --no-cache-dir --upgrade pip &&
       pip install --no-cache-dir -r requirements.txt &&
       echo "Build completed successfully"
-    startCommand: streamlit run main.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --server.fileWatcherType none --browser.gatherUsageStats false --server.maxUploadSize 10
+    startCommand: python server.py
     envVars:
       - key: PYTHON_VERSION
         value: 3.9.18
@@ -16,7 +16,17 @@ services:
       - key: PYTHONDONTWRITEBYTECODE  
         value: "1"
       
-      # Basic OpenMP/BLAS threading limits
+      # Secret key for Flask sessions
+      - key: SECRET_KEY
+        generateValue: true
+      
+      # Port configuration (Render will set PORT automatically)
+      - key: STREAMLIT_PORT
+        value: "8501"
+      - key: AUTH_PORT
+        value: "5001"
+      
+      # Basic threading limits
       - key: OMP_NUM_THREADS
         value: "2"
       - key: OPENBLAS_NUM_THREADS
@@ -33,3 +43,7 @@ services:
       # Cache optimizations
       - key: TORCH_HOME
         value: "/tmp/torch"
+        
+      # Database configuration
+      - key: DATABASE_PATH
+        value: "language_learning.db"

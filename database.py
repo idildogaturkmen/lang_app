@@ -2,6 +2,64 @@ import sqlite3
 import os
 import datetime
 
+try:
+    import bcrypt
+except ImportError:
+    print("Warning: bcrypt not available. Installing...")
+    import subprocess
+    import sys
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "bcrypt"])
+    import bcrypt
+
+def initialize_demo_users(db):
+    """Initialize demo users for testing."""
+    try:
+        # Check if demo user already exists
+        existing = db.authenticate_user('demo', 'demo123')
+        if not existing:
+            try:
+                demo_user_id = db.create_user('demo', 'demo@vocam.app', 'demo123', 'Demo User')
+                if demo_user_id:
+                    # Add some sample vocabulary for demo user
+                    db.add_vocabulary(demo_user_id, 'book', 'libro', 'es', 'objects')
+                    db.add_vocabulary(demo_user_id, 'apple', 'manzana', 'es', 'food')
+                    db.add_vocabulary(demo_user_id, 'house', 'casa', 'es', 'places')
+                    db.add_vocabulary(demo_user_id, 'cat', 'gato', 'es', 'animals')
+                    db.add_vocabulary(demo_user_id, 'water', 'agua', 'es', 'food')
+                    print("✅ Demo user created successfully with sample vocabulary")
+                else:
+                    print("❌ Failed to create demo user")
+            except ValueError as e:
+                if "already exists" in str(e):
+                    print("ℹ️ Demo user already exists")
+                else:
+                    print(f"❌ Error creating demo user: {e}")
+        else:
+            print("ℹ️ Demo user already exists and is accessible")
+            
+        # Check if test user exists
+        existing_test = db.authenticate_user('test', 'test123')
+        if not existing_test:
+            try:
+                test_user_id = db.create_user('test', 'test@vocam.app', 'test123', 'Test User')
+                if test_user_id:
+                    # Add different sample vocabulary for test user
+                    db.add_vocabulary(test_user_id, 'car', 'coche', 'es', 'vehicles')
+                    db.add_vocabulary(test_user_id, 'dog', 'perro', 'es', 'animals')
+                    print("✅ Test user created successfully")
+                else:
+                    print("❌ Failed to create test user")
+            except ValueError as e:
+                if "already exists" in str(e):
+                    print("ℹ️ Test user already exists")
+                else:
+                    print(f"❌ Error creating test user: {e}")
+        else:
+            print("ℹ️ Test user already exists and is accessible")
+            
+    except Exception as e:
+        print(f"❌ Error during demo user initialization: {e}")
+
 class LanguageLearningDB:
     def __init__(self, db_path):
         """Initialize the database connection."""
@@ -381,7 +439,20 @@ class LanguageLearningDB:
         except sqlite3.Error as e:
             print(f"Error adding camera translation to vocabulary: {e}")
             return None
-    
+    def cleanup_expired_sessions(self):
+        """Clean up expired sessions."""
+        try:
+            self.cursor.execute('''
+            DELETE FROM user_sessions 
+            WHERE expires_at < ? OR is_active = 0
+            ''', (datetime.datetime.now(),))
+            self.conn.commit()
+            deleted = self.cursor.rowcount
+            if deleted > 0:
+                print(f"Cleaned up {deleted} expired sessions")
+        except Exception as e:
+            print(f"Error cleaning up sessions: {e}")
+            
     def close(self):
         """Close the database connection."""
         if self.conn:

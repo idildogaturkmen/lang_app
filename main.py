@@ -21,7 +21,91 @@ from example_sentences import ExampleSentenceGenerator
 import requests
 from deep_translator import GoogleTranslator
 from ultralytics import YOLO
+import json
+from urllib.parse import parse_qs
+from database import LanguageLearningDB
 
+
+# Authentication Functions
+def get_url_params():
+    """Get URL parameters from Streamlit."""
+    try:
+        query_params = st.experimental_get_query_params()
+        return query_params
+    except:
+        return {}
+
+def decode_user_token(token):
+    """Decode user token from URL."""
+    try:
+        user_data = json.loads(base64.b64decode(token).decode('utf-8'))
+        
+        # Validate token timestamp (token should be recent)
+        current_time = time.time() * 1000
+        token_time = user_data.get('timestamp', 0)
+        
+        # Token should be no older than 1 hour
+        if current_time - token_time > 3600000:
+            return None
+            
+        return user_data
+    except Exception as e:
+        print(f"Error decoding user token: {e}")
+        return None
+
+def get_authenticated_user():
+    """Get the current authenticated user."""
+    if 'authenticated_user' not in st.session_state:
+        # Get URL parameters
+        params = get_url_params()
+        user_token = params.get('user', [None])[0]
+        auth_param = params.get('auth', [None])[0]
+        
+        if user_token and auth_param == 'vocam':
+            user_data = decode_user_token(user_token)
+            if user_data:
+                st.session_state.authenticated_user = user_data
+            else:
+                st.session_state.authenticated_user = None
+        else:
+            st.session_state.authenticated_user = None
+    
+    return st.session_state.authenticated_user
+
+def require_authentication():
+    """Require user authentication to access the app."""
+    user = get_authenticated_user()
+    
+    if not user:
+        st.error("🔒 Authentication Required")
+        st.info("Please log in through the main website to access Vocam.")
+        st.markdown("**[← Login Here](https://vocam.app/web)**")
+        
+        # Show a simple demo mode option
+        st.markdown("---")
+        st.markdown("### Demo Mode")
+        if st.button("Continue as Demo User"):
+            # Set demo user data
+            demo_user = {
+                'id': 999,
+                'username': 'demo',
+                'displayName': 'Demo User',
+                'timestamp': time.time() * 1000
+            }
+            st.session_state.authenticated_user = demo_user
+            st.rerun()
+        
+        st.stop()
+    
+    return user
+
+user = require_authentication()
+
+def get_user_database():
+    """Get database instance."""
+    if 'user_db' not in st.session_state:
+        st.session_state.user_db = LanguageLearningDB("language_learning.db")
+    return st.session_state.user_db
 
 @st.cache_resource
 def load_yolov8_nano():
@@ -641,245 +725,204 @@ def get_pronunciation_guide(word, language_code):
         return [f"Pronunciation guide unavailable: {str(e)}"]
 
 # Function to create a database session
-def create_session_direct():
-    """Create a session directly using SQLite."""
+
+# Add this to the TOP of your main.py file (after imports)
+
+import base64
+import json
+from urllib.parse import parse_qs
+from database import LanguageLearningDB
+
+# Authentication Functions
+def get_url_params():
+    """Get URL parameters from Streamlit."""
     try:
-        # Connect to the database
-        conn = sqlite3.connect("language_learning.db")
-        cursor = conn.cursor()
+        query_params = st.experimental_get_query_params()
+        return query_params
+    except:
+        return {}
+
+def decode_user_token(token):
+    """Decode user token from URL."""
+    try:
+        user_data = json.loads(base64.b64decode(token).decode('utf-8'))
         
-        # Insert a new session with the current time
-        current_time = datetime.datetime.now()
-        cursor.execute(
-            "INSERT INTO sessions (start_time, words_studied, words_learned) VALUES (?, 0, 0)",
-            (current_time,)
-        )
-        conn.commit()
+        # Validate token timestamp (token should be recent)
+        current_time = time.time() * 1000
+        token_time = user_data.get('timestamp', 0)
         
-        # Get the last inserted ID
-        session_id = cursor.lastrowid
-        conn.close()
-        
-        return session_id
+        # Token should be no older than 1 hour
+        if current_time - token_time > 3600000:
+            return None
+            
+        return user_data
     except Exception as e:
-        error_message(f"Direct session creation error: {str(e)}")
+        print(f"Error decoding user token: {e}")
         return None
 
-# Function to add vocabulary to the database
+def get_authenticated_user():
+    """Get the current authenticated user."""
+    if 'authenticated_user' not in st.session_state:
+        # Get URL parameters
+        params = get_url_params()
+        user_token = params.get('user', [None])[0]
+        auth_param = params.get('auth', [None])[0]
+        
+        if user_token and auth_param == 'vocam':
+            user_data = decode_user_token(user_token)
+            if user_data:
+                st.session_state.authenticated_user = user_data
+            else:
+                st.session_state.authenticated_user = None
+        else:
+            st.session_state.authenticated_user = None
+    
+    return st.session_state.authenticated_user
+
+def require_authentication():
+    """Require user authentication to access the app."""
+    user = get_authenticated_user()
+    
+    if not user:
+        st.error("🔒 Authentication Required")
+        st.info("Please log in through the main website to access Vocam.")
+        st.markdown("**[← Login Here](https://vocam.app/web)**")
+        
+        # Show a simple demo mode option
+        st.markdown("---")
+        st.markdown("### Demo Mode")
+        if st.button("Continue as Demo User"):
+            # Set demo user data
+            demo_user = {
+                'id': 999,
+                'username': 'demo',
+                'displayName': 'Demo User',
+                'timestamp': time.time() * 1000
+            }
+            st.session_state.authenticated_user = demo_user
+            st.rerun()
+        
+        st.stop()
+    
+    return user
+
+def get_user_database():
+    """Get database instance."""
+    if 'user_db' not in st.session_state:
+        st.session_state.user_db = LanguageLearningDB("language_learning.db")
+    return st.session_state.user_db
+
+# Modified Database Functions for User Context
 def add_vocabulary_direct(word_original, word_translated, language_translated, category=None, image_path=None):
-    """Add vocabulary directly using SQLite with improved error handling for duplicates and locks."""
-    try:
-        # Original function code here...
-        # Connect to the database with timeout to handle locks
-        conn = sqlite3.connect("language_learning.db", timeout=10.0)
-        cursor = conn.cursor()
-        
-        # Check if this word already exists in this language
-        cursor.execute(
-            "SELECT id FROM vocabulary WHERE word_original = ? AND language_translated = ?",
-            (word_original, language_translated)
-        )
-        existing_word = cursor.fetchone()
-        
-        # If word exists, update it rather than inserting a new one
-        if existing_word:
-            vocab_id = existing_word[0]
-            
-            # Update the existing word with new translation and image if provided
-            cursor.execute(
-                "UPDATE vocabulary SET word_translated = ?, category = ?, image_path = ? WHERE id = ?",
-                (word_translated, category, image_path, vocab_id)
-            )
-            
-            # Let the user know we're updating
-            info_message(f"Word '{word_original}' already exists in {language_translated}. Updating with new information.")
-        else:
-            # Current time for timestamps
-            current_time = datetime.datetime.now()
-            
-            # Insert a new word
-            try:
-                # Try with source column
-                cursor.execute('''
-                INSERT INTO vocabulary 
-                (word_original, word_translated, language_translated, category, image_path, date_added, source)
-                VALUES (?, ?, ?, ?, ?, ?, 'manual')
-                ''', (word_original, word_translated, language_translated, category, image_path, current_time))
-            except sqlite3.OperationalError as e:
-                if 'no column named source' in str(e):
-                    # Try without source column
-                    cursor.execute('''
-                    INSERT INTO vocabulary 
-                    (word_original, word_translated, language_translated, category, image_path, date_added)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    ''', (word_original, word_translated, language_translated, category, image_path, current_time))
-                else:
-                    raise e
-            
-            # Get the last inserted ID
-            vocab_id = cursor.lastrowid
-            
-            # Check if we need to add user progress
-            cursor.execute("SELECT id FROM user_progress WHERE vocabulary_id = ?", (vocab_id,))
-            if not cursor.fetchone():
-                # Initialize user progress for this vocabulary
-                cursor.execute('''
-                INSERT INTO user_progress (vocabulary_id, last_reviewed, proficiency_level)
-                VALUES (?, ?, 0)
-                ''', (vocab_id, current_time))
-        
-        # Commit changes and close
-        conn.commit()
-        conn.close()
-        
-        # NEW CODE: Integration with gamification system - with error handling
-        if vocab_id:
-            try:
-                # Check for gamification achievements
-                gamification.check_achievements(
-                    "word_learned",
-                    word=word_original,
-                    category=category,
-                    language=language_translated
-                )
-                
-                # Check for daily challenges
-                gamification.check_challenge_progress(
-                    word_original=word_original,
-                    word_translated=word_translated,
-                    language=language_translated
-                )
-            except Exception as e:
-                print(f"Gamification error in add_vocabulary_direct: {e}")
-        
-        return vocab_id
-    except sqlite3.OperationalError as e:
-        # Handle database locks with specific advice
-        if 'database is locked' in str(e):
-            error_message("Database is currently locked. Please wait a moment and try again.")
-            # Add a small delay to allow the database to unlock
-            time.sleep(1.5)
-        else:
-            error_message(f"Database error: {str(e)}")
-        return None
-    except Exception as e:
-        error_message(f"Direct vocabulary save error: {str(e)}")
+    """Add vocabulary for the authenticated user."""
+    user = get_authenticated_user()
+    if not user:
         return None
     
+    db = get_user_database()
+    vocab_id = db.add_vocabulary(
+        user_id=user['id'],
+        word_original=word_original,
+        word_translated=word_translated,
+        language_translated=language_translated,
+        category=category,
+        image_path=image_path
+    )
+    
+    if vocab_id:
+        try:
+            gamification.check_achievements(
+                "word_learned",
+                word=word_original,
+                category=category,
+                language=language_translated
+            )
+        except Exception as e:
+            print(f"Gamification error: {e}")
+    
+    return vocab_id
+
+def get_all_vocabulary_direct():
+    """Get all vocabulary for the authenticated user."""
+    user = get_authenticated_user()
+    if not user:
+        return []
+    
+    db = get_user_database()
+    vocabulary = db.get_all_vocabulary(user['id'])
+    
+    result = []
+    for row in vocabulary:
+        result.append(dict(row))
+    
+    return result
+
+def create_session_direct():
+    """Create a session for the authenticated user."""
+    user = get_authenticated_user()
+    if not user:
+        return None
+    
+    db = get_user_database()
+    return db.start_session(user['id'])
+
+# Function to add vocabulary to the database
+# Modified Database Functions for User Context
+def add_vocabulary_direct(word_original, word_translated, language_translated, category=None, image_path=None):
+    """Add vocabulary for the authenticated user."""
+    user = get_authenticated_user()
+    if not user:
+        return None
+    
+    db = get_user_database()
+    vocab_id = db.add_vocabulary(
+        user_id=user['id'],
+        word_original=word_original,
+        word_translated=word_translated,
+        language_translated=language_translated,
+        category=category,
+        image_path=image_path
+    )
+    
+    if vocab_id:
+        try:
+            gamification.check_achievements(
+                "word_learned",
+                word=word_original,
+                category=category,
+                language=language_translated
+            )
+        except Exception as e:
+            print(f"Gamification error: {e}")
+    
+    return vocab_id
 
 # Function to get all vocabulary items from the database
 def get_all_vocabulary_direct():
-    """Get all vocabulary items directly from SQLite."""
-    try:
-        # Connect to the database
-        conn = sqlite3.connect("language_learning.db")
-        
-        # Use dictionary cursor for easier access
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        # Get all vocabulary with user progress info
-        cursor.execute('''
-        SELECT v.id, v.word_original, v.word_translated, v.language_translated,
-               v.category, v.image_path, v.date_added,
-               up.proficiency_level, up.review_count, up.correct_count, up.last_reviewed
-        FROM vocabulary v
-        LEFT JOIN user_progress up ON v.id = up.vocabulary_id
-        ORDER BY v.date_added DESC
-        ''')
-        
-        # Fetch all results
-        results = cursor.fetchall()
-        
-        # Convert to list of dictionaries
-        vocabulary = []
-        for row in results:
-            # Convert row to dictionary
-            word = dict(row)
-            vocabulary.append(word)
-        
-        conn.close()
-        return vocabulary
-    except Exception as e:
-        error_message(f"Error retrieving vocabulary: {str(e)}")
+    """Get all vocabulary for the authenticated user."""
+    user = get_authenticated_user()
+    if not user:
         return []
+    
+    db = get_user_database()
+    vocabulary = db.get_all_vocabulary(user['id'])
+    
+    result = []
+    for row in vocabulary:
+        result.append(dict(row))
+    
+    return result
 
 # Function to get session statistics
 def get_session_stats_direct(days=30):
-    """Get session statistics directly from SQLite."""
-    try:
-        # Connect to the database
-        conn = sqlite3.connect("language_learning.db")
-        cursor = conn.cursor()
-        
-        # Calculate date for filtering
-        current_time = datetime.datetime.now()
-        start_date = current_time - datetime.timedelta(days=days)
-        
-        # Convert to string format
-        start_date_str = start_date.strftime("%Y-%m-%d")
-        
-        # Get total sessions
-        cursor.execute(
-            "SELECT COUNT(*) FROM sessions WHERE start_time >= ?",
-            (start_date_str,)
-        )
-        total_sessions = cursor.fetchone()[0]
-        
-        # Get words studied and learned
-        cursor.execute(
-            "SELECT SUM(words_studied), SUM(words_learned) FROM sessions WHERE start_time >= ?",
-            (start_date_str,)
-        )
-        result = cursor.fetchone()
-        total_words_studied = result[0] if result[0] else 0
-        total_words_learned = result[1] if result[1] else 0
-        
-        # Calculate averages
-        avg_words_per_session = total_words_studied / total_sessions if total_sessions > 0 else 0
-        
-        # Get session durations
-        cursor.execute(
-            """
-            SELECT start_time, end_time 
-            FROM sessions 
-            WHERE start_time >= ? AND end_time IS NOT NULL
-            """,
-            (start_date_str,)
-        )
-        
-        # Calculate average session length
-        total_minutes = 0
-        session_count = 0
-        
-        for start_time_str, end_time_str in cursor.fetchall():
-            try:
-                # Parse the datetime strings
-                start_time = datetime.datetime.fromisoformat(start_time_str.replace(' ', 'T'))
-                end_time = datetime.datetime.fromisoformat(end_time_str.replace(' ', 'T'))
-                
-                # Calculate duration in minutes
-                duration = (end_time - start_time).total_seconds() / 60
-                total_minutes += duration
-                session_count += 1
-            except:
-                pass
-        
-        avg_session_minutes = total_minutes / session_count if session_count > 0 else 0
-        
-        conn.close()
-        
-        # Return stats dictionary
-        return {
-            'total_sessions': total_sessions,
-            'total_words_studied': total_words_studied,
-            'total_words_learned': total_words_learned,
-            'avg_words_per_session': avg_words_per_session,
-            'avg_session_minutes': avg_session_minutes
-        }
-    except Exception as e:
-        error_message(f"Error retrieving session stats: {str(e)}")
+    """Get session statistics for the authenticated user."""
+    user = get_authenticated_user()
+    if not user:
         return {}
+    
+    db = get_user_database()
+    stats = db.get_session_stats(user['id'], days)
+    return dict(stats) if stats else {}
 
 # Function to check if database is properly set up
 def check_database_setup():
@@ -1382,76 +1425,13 @@ def setup_new_question(vocabulary):
 
 # Function to update word progress in the database
 def update_word_progress_direct(vocab_id, is_correct):
-    """Update word progress directly using SQLite."""
-    try:
-        # Connect to the database
-        conn = sqlite3.connect("language_learning.db")
-        cursor = conn.cursor()
-        
-        # Current time for timestamp
-        current_time = datetime.datetime.now()
-        
-        # Get current progress
-        cursor.execute(
-            """
-            SELECT review_count, correct_count, proficiency_level 
-            FROM user_progress 
-            WHERE vocabulary_id = ?
-            """,
-            (vocab_id,)
-        )
-        
-        result = cursor.fetchone()
-        
-        if result:
-            review_count, correct_count, proficiency_level = result
-            
-            # Increment counts
-            review_count = review_count + 1 if review_count else 1
-            correct_count = correct_count + 1 if correct_count and is_correct else (1 if is_correct else 0)
-            
-            # Calculate proficiency (0-5 scale)
-            if review_count > 0:
-                accuracy = correct_count / review_count
-                if accuracy >= 0.9 and review_count >= 5:
-                    proficiency_level = 5
-                elif accuracy >= 0.8 and review_count >= 4:
-                    proficiency_level = 4
-                elif accuracy >= 0.6 and review_count >= 3:
-                    proficiency_level = 3
-                elif accuracy >= 0.4 and review_count >= 2:
-                    proficiency_level = 2
-                elif accuracy >= 0.2:
-                    proficiency_level = 1
-                else:
-                    proficiency_level = 0
-            
-            # Update progress
-            cursor.execute(
-                """
-                UPDATE user_progress 
-                SET review_count = ?, correct_count = ?, proficiency_level = ?, last_reviewed = ? 
-                WHERE vocabulary_id = ?
-                """,
-                (review_count, correct_count, proficiency_level, current_time, vocab_id)
-            )
-        else:
-            # Create new progress entry
-            cursor.execute(
-                """
-                INSERT INTO user_progress 
-                (vocabulary_id, review_count, correct_count, proficiency_level, last_reviewed)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (vocab_id, 1, 1 if is_correct else 0, 1 if is_correct else 0, current_time)
-            )
-        
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        error_message(f"Error updating word progress: {str(e)}")
+    """Update word progress for the authenticated user."""
+    user = get_authenticated_user()
+    if not user:
         return False
+    
+    db = get_user_database()
+    return db.update_word_progress(vocab_id, is_correct)
 
 # Function to check quiz answer
 def check_answer(selected_index):
@@ -1694,7 +1674,7 @@ if app_mode == "Camera Mode":
     
     # Detection settings for objects
     if detection_type == "Objects":
-        col1, col2 = st.columns(2)
+        col1 = st.columns(1)
         with col1:
             confidence_threshold = st.slider(
                 "Detection Confidence", 
@@ -1703,16 +1683,6 @@ if app_mode == "Camera Mode":
                 value=0.5,
                 step=0.05
             )
-        with col2:
-            iou_threshold = st.slider(
-                "Duplicate Removal", 
-                min_value=0.1, 
-                max_value=0.9, 
-                value=0.45,
-                step=0.05,
-                help="Lower = fewer duplicates"
-            )
-        
         # Set iou_threshold for optimal detection (balance between precision and maximum detection)
         iou_threshold = 0.45  # Using a lower threshold to detect more objects while maintaining precision
         
@@ -3082,5 +3052,15 @@ if st.session_state.session_id:
 else:
     st.sidebar.warning("No active session")
     st.sidebar.markdown("*Start a session in Camera Mode to track progress*")
+
+# Add logout functionality
+if st.sidebar.button("🚪 Logout"):
+    # Clear all session state
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+    
+    st.markdown("**Logging out...**")
+    st.markdown("[← Return to Login](https://vocam.app/web)")
+    st.stop()
 
 add_footer()
