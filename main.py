@@ -2449,7 +2449,7 @@ if app_mode == "Camera Mode":
         show_memory_guidance()
         
         # Check memory before processing
-        memory_status = check_memory_limit(350, 420)
+        memory_status = check_memory_limit(1400, 1800)
         if memory_status == "critical":
             st.error("🚨 Critical memory usage. Please refresh the page and try with a smaller image.")
             st.stop()
