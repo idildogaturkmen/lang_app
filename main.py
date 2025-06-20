@@ -1732,29 +1732,26 @@ if app_mode == "Camera Mode":
             separator_placeholder = st.empty()
             separator_placeholder.markdown('<div class="result-separator"></div>', unsafe_allow_html=True)
             
-            # Perform the detection while showing a native spinner
-            with st.spinner("Processing..."):
-                try:
-                    # Always apply enhancement for object detection
-                    enhanced_image = enhance_image(image, "auto")
-                    if enhanced_image is None:
-                        raise Exception("Image enhancement failed")
-                    
-                    # Run memory-optimized detection
-                    detections, result_image = detect_objects(
-                        enhanced_image, confidence_threshold, iou_threshold
-                    )
-                    
-                except Exception as e:
-                    if "memory" in str(e).lower() or "resource" in str(e).lower():
-                        error_message("Memory limit reached. Please try a smaller image or refresh the page.")
-                    else:
-                        error_message(f"Detection error: {str(e)}")
-                    # Fallback behavior
-                    detections, result_image = [], np.array(image)
+            try:
+                # Always apply enhancement for object detection
+                enhanced_image = enhance_image(image, "auto")
+                if enhanced_image is None:
+                    raise Exception("Image enhancement failed")
+                
+                # Run memory-optimized detection
+                detections, result_image = detect_objects(
+                    enhanced_image, confidence_threshold, iou_threshold
+                )
+                
+            except Exception as e:
+                if "memory" in str(e).lower() or "resource" in str(e).lower():
+                    error_message("Memory limit reached. Please try a smaller image or refresh the page.")
+                else:
+                    error_message(f"Detection error: {str(e)}")
+                # Fallback behavior
+                detections, result_image = [], np.array(image)
             
             # Clear the spinner and separator completely
-            spinner_placeholder.empty()
             separator_placeholder.empty()
         
             # Display results
