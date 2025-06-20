@@ -16,5 +16,4 @@ soundfile>=0.13.1,<1.0.0
 librosa>=0.10.0,<1.0.0
 tensorflow==2.15.0
 tensorflow-hub==0.16.1
-# Comment out transformers to avoid installation issues on free tier
-# transformers==4.35.2
+psutil>=5.9.0,<6.0.0

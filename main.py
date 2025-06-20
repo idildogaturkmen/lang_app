@@ -7,10 +7,7 @@ import base64
 import time
 import sqlite3
 import datetime
-import sys
 import re
-import queue
-from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
 from io import BytesIO
 from gamification import GamificationSystem
@@ -20,12 +17,114 @@ import io
 from vocam_ui import apply_custom_css
 from streamlit.components.v1 import components
 import hashlib
-from functools import lru_cache
 from example_sentences import ExampleSentenceGenerator
 import tensorflow as tf
 import tensorflow_hub as hub
 import requests
 from deep_translator import GoogleTranslator
+import gc
+import psutil
+import warnings
+
+# Suppress TensorFlow warnings to reduce memory overhead
+warnings.filterwarnings('ignore', category=FutureWarning)
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
+# Configure TensorFlow for memory optimization
+import tensorflow as tf
+
+# Configure TensorFlow memory settings
+def configure_tensorflow_memory():
+    """Configure TensorFlow for optimal memory usage"""
+    try:
+        # Configure GPU memory growth (if available)
+        gpus = tf.config.experimental.list_physical_devices('GPU')
+        if gpus:
+            try:
+                for gpu in gpus:
+                    tf.config.experimental.set_memory_growth(gpu, True)
+                print("✅ GPU memory growth configured")
+            except RuntimeError as e:
+                print(f"GPU memory configuration failed: {e}")
+        
+        # Configure CPU threading for memory efficiency
+        tf.config.threading.set_inter_op_parallelism_threads(1)
+        tf.config.threading.set_intra_op_parallelism_threads(2)
+        
+        print("✅ TensorFlow configured for memory optimization")
+        
+    except Exception as e:
+        print(f"TensorFlow configuration warning: {e}")
+
+# Call this at startup
+configure_tensorflow_memory()
+
+def check_uploaded_image_size(uploaded_file):
+    """Check uploaded file size before processing"""
+    if uploaded_file is not None:
+        file_size_mb = len(uploaded_file.getvalue()) / (1024 * 1024)
+        
+        if file_size_mb > 2:  # 2MB limit for free plan
+            st.error(f"🚨 Image too large: {file_size_mb:.1f} MB. Please use an image smaller than 2 MB.")
+            return False
+        elif file_size_mb > 1:
+            st.warning(f"⚠️ Large image: {file_size_mb:.1f} MB. This may cause memory issues.")
+        
+        return True
+    return False
+
+def show_memory_guidance():
+    """Show guidance when memory is high"""
+    current_memory = get_memory_usage()
+    
+    if current_memory > 400:
+        st.error("""
+        🚨 **Memory Usage Critical**
+        
+        To reduce memory usage:
+        1. Use smaller images (< 800x600 pixels)
+        2. Refresh the page to clear memory
+        3. Process one image at a time
+        4. Avoid uploading multiple large images
+        """)
+        
+        if st.button("🔄 Refresh Page to Clear Memory"):
+            st.rerun()
+    
+    elif current_memory > 300:
+        st.warning("""
+        ⚠️ **High Memory Usage**
+        
+        Consider using smaller images for better performance.
+        """)
+
+def setup_automatic_cleanup():
+    """Setup automatic memory cleanup triggers"""
+    # Cleanup after every 5 operations
+    if 'operation_count' not in st.session_state:
+        st.session_state.operation_count = 0
+    
+    st.session_state.operation_count += 1
+    
+    if st.session_state.operation_count % 5 == 0:
+        print(f"Automatic cleanup triggered after {st.session_state.operation_count} operations")
+        cleanup_memory()
+
+def optimize_for_render():
+    """Render.com specific optimizations"""
+    # Set environment variables if not set
+    if not os.getenv('OMP_NUM_THREADS'):
+        os.environ['OMP_NUM_THREADS'] = '1'
+    if not os.getenv('OPENBLAS_NUM_THREADS'):
+        os.environ['OPENBLAS_NUM_THREADS'] = '1'
+    
+    # Force garbage collection more frequently
+    gc.set_threshold(400, 5, 5)  # More aggressive than default
+    
+    print("✅ Render optimizations applied")
+
+# Call this at startup (add after your other startup code)
+optimize_for_render()
 
 # First, display Python version for
 st.set_page_config(
@@ -245,6 +344,117 @@ def check_pronunciation_dependencies():
     
     return dependencies
 
+def get_memory_usage():
+    """Get current memory usage in MB"""
+    try:
+        process = psutil.Process(os.getpid())
+        memory_info = process.memory_info()
+        return memory_info.rss / 1024 / 1024  # Convert to MB
+    except Exception as e:
+        print(f"Error getting memory usage: {e}")
+        return 0
+
+def get_memory_percentage():
+    """Get memory usage as percentage of available system memory"""
+    try:
+        memory = psutil.virtual_memory()
+        return memory.percent
+    except Exception as e:
+        print(f"Error getting memory percentage: {e}")
+        return 0
+
+def log_memory_usage(stage=""):
+    """Log memory usage at different stages"""
+    memory_mb = get_memory_usage()
+    memory_percent = get_memory_percentage()
+    stage_text = f" at {stage}" if stage else ""
+    print(f"Memory usage{stage_text}: {memory_mb:.1f} MB ({memory_percent:.1f}% of system memory)")
+    return memory_mb
+
+def cleanup_memory():
+    """Comprehensive memory cleanup"""
+    try:
+        # Force garbage collection
+        collected = gc.collect()
+        
+        # Clear TensorFlow session and cache
+        try:
+            tf.keras.backend.clear_session()
+            print("✅ TensorFlow session cleared")
+        except Exception as e:
+            print(f"TensorFlow cleanup warning: {e}")
+        
+        # Additional cleanup for TensorFlow Hub models
+        try:
+            if hasattr(tf, 'compat'):
+                tf.compat.v1.reset_default_graph()
+        except Exception as e:
+            print(f"TensorFlow graph reset warning: {e}")
+        
+        print(f"✅ Garbage collection freed {collected} objects")
+        
+        # Log memory after cleanup
+        memory_after = get_memory_usage()
+        print(f"Memory after cleanup: {memory_after:.1f} MB")
+        
+        return memory_after
+        
+    except Exception as e:
+        print(f"Memory cleanup error: {e}")
+        return get_memory_usage()
+
+def check_memory_limit(threshold_mb=400, critical_threshold_mb=480):
+    """
+    Check if memory usage is approaching limits for Render free plan
+    Render free plan has ~512MB memory limit, so we need to be conservative
+    """
+    current_memory = get_memory_usage()
+    
+    if current_memory > critical_threshold_mb:
+        error_message(f"🚨 CRITICAL: Memory usage too high: {current_memory:.1f} MB")
+        cleanup_memory()
+        return "critical"
+    elif current_memory > threshold_mb:
+        warning_message(f"⚠️ High memory usage: {current_memory:.1f} MB")
+        cleanup_memory()
+        return "warning"
+    else:
+        return "ok"
+
+def memory_safe_operation(operation_name="operation"):
+    """Decorator to monitor memory during operations"""
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            # Check memory before operation
+            memory_before = log_memory_usage(f"before {operation_name}")
+            
+            # Check if we have enough memory
+            if memory_before > 450:  # Very conservative for free plan
+                error_message(f"Insufficient memory for {operation_name}: {memory_before:.1f} MB")
+                cleanup_memory()
+                return None, None
+            
+            try:
+                # Execute the operation
+                result = func(*args, **kwargs)
+                
+                # Check memory after operation
+                memory_after = log_memory_usage(f"after {operation_name}")
+                
+                # Cleanup if memory increased significantly
+                if memory_after > memory_before + 50:
+                    print(f"Memory increased by {memory_after - memory_before:.1f} MB during {operation_name}")
+                    cleanup_memory()
+                
+                return result
+            except Exception as e:
+                print(f"Error during {operation_name}: {e}")
+                cleanup_memory()
+                return None, None
+        return wrapper
+    return decorator
+
+
 def draw_detections(image_np, detections):
     """Draw bounding boxes and labels on the image."""
     result_image = image_np.copy()
@@ -279,88 +489,6 @@ def draw_detections(image_np, detections):
     
     return result_image
 
-
-def apply_nms(boxes, classes, scores, image_shape, iou_threshold=0.45):
-    """Apply Non-Maximum Suppression to remove duplicate detections."""
-    
-    final_detections = []
-    unique_classes = np.unique(classes)
-    height, width = image_shape[:2]
-    
-    for class_id in unique_classes:
-        # Get all detections for this class
-        class_mask = classes == class_id
-        class_boxes = boxes[class_mask]
-        class_scores = scores[class_mask]
-        
-        if len(class_boxes) == 0:
-            continue
-        
-        # Convert normalized coordinates to pixel coordinates
-        pixel_boxes = []
-        for box in class_boxes:
-            ymin, xmin, ymax, xmax = box
-            pixel_boxes.append([
-                int(xmin * width),   # left
-                int(ymin * height),  # top
-                int(xmax * width),   # right
-                int(ymax * height)   # bottom
-            ])
-        pixel_boxes = np.array(pixel_boxes)
-        
-        # Apply simple NMS (since OpenCV might cause issues)
-        keep_indices = simple_nms(pixel_boxes, class_scores, iou_threshold)
-        
-        # Add kept detections to final list
-        for idx in keep_indices:
-            class_name = COCO_CLASS_NAMES.get(class_id, f"unknown_{class_id}")
-            bbox = pixel_boxes[idx]
-            
-            final_detections.append({
-                'label': class_name.lower(),
-                'confidence': float(class_scores[idx]),
-                'bbox': [float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])],
-                'class_id': int(class_id)
-            })
-    
-    # Sort detections by confidence (highest first)
-    final_detections.sort(key=lambda x: x['confidence'], reverse=True)
-    return final_detections
-
-# Alternative simplified NMS function if OpenCV NMS doesn't work
-def simple_nms(boxes, scores, iou_threshold=0.5):
-    """Simple Non-Maximum Suppression implementation."""
-    if len(boxes) == 0:
-        return []
-    
-    # Sort by confidence score (highest first)
-    sorted_indices = np.argsort(scores)[::-1]
-    
-    keep = []
-    while len(sorted_indices) > 0:
-        # Take the detection with highest confidence
-        current = sorted_indices[0]
-        keep.append(current)
-        
-        if len(sorted_indices) == 1:
-            break
-        
-        # Calculate IoU with all other boxes
-        current_box = boxes[current]
-        remaining_indices = sorted_indices[1:]
-        
-        # Calculate IoU with remaining boxes
-        ious = []
-        for idx in remaining_indices:
-            iou = calculate_iou(current_box, boxes[idx])
-            ious.append(iou)
-        
-        # Keep only boxes with IoU below threshold
-        ious = np.array(ious)
-        keep_mask = ious < iou_threshold
-        sorted_indices = remaining_indices[keep_mask]
-    
-    return keep
 
 def calculate_iou(box1, box2):
     """Calculate Intersection over Union (IoU) of two bounding boxes."""
@@ -410,6 +538,18 @@ def get_detection_color(label):
     }
     
     return color_map.get(label, color_map['default'])
+
+
+def check_startup_memory():
+    """Check memory at app startup"""
+    initial_memory = get_memory_usage()
+    print(f"App startup memory: {initial_memory:.1f} MB")
+    
+    if initial_memory > 300:  # Warning threshold for free plan
+        st.sidebar.warning(f"⚠️ High startup memory: {initial_memory:.1f} MB")
+        cleanup_memory()
+    
+    return initial_memory
 
 
 def show_detection_settings():
@@ -513,13 +653,6 @@ def get_object_category(label):
             return category
     return "other"
 
-# Add this to optimize API usage and reduce costs
-@lru_cache(maxsize=100)
-def cached_vision_detection(image_hash, confidence_threshold):
-    """Cache detection results based on image hash to avoid redundant API calls."""
-    # This is a placeholder - the actual implementation would be tied to your caching mechanism
-    # Return None to indicate cache miss
-    return None
 
 def get_image_hash(image):
     """Create a hash of an image for caching purposes."""
@@ -527,84 +660,241 @@ def get_image_hash(image):
     image.save(img_byte_arr, format='JPEG', quality=70)  # Lower quality for hash stability
     return hashlib.md5(img_byte_arr.getvalue()).hexdigest()
 
-# Add rate limiting to avoid excessive API calls
-last_api_call = 0
-MIN_API_CALL_INTERVAL = 0.5  # seconds
 
-def rate_limited_detection(image, confidence_threshold=0.5, iou_threshold=0.45):
-    """Rate-limited version of detect_objects to avoid excessive API calls."""
-    global last_api_call
-    
-    # Check cache first
-    image_hash = get_image_hash(image)
-    cached_result = cached_vision_detection(image_hash, confidence_threshold)
-    if cached_result:
-        return cached_result
-    
-    # Rate limiting
-    current_time = time.time()
-    time_since_last_call = current_time - last_api_call
-    if time_since_last_call < MIN_API_CALL_INTERVAL:
-        time.sleep(MIN_API_CALL_INTERVAL - time_since_last_call)
-    
-    # Make the API call
-    result = detect_objects(image, confidence_threshold, iou_threshold)
-    last_api_call = time.time()
-    
-    return result
-
-# Function to detect objects in image
-def detect_objects(image, confidence_threshold=0.5, iou_threshold=0.45):
-    """Detect objects using Faster R-CNN with Non-Maximum Suppression to remove duplicates."""
-    
+@memory_safe_operation("object detection")
+def detect_objects_memory_optimized(image, confidence_threshold=0.5, iou_threshold=0.45):
+    """
+    Memory-optimized object detection for Render free plan
+    """
     try:
-        # Load the Faster R-CNN model
-        detector = load_faster_rcnn_model()
-        if detector is None:
-            error_message("Failed to load Faster R-CNN model")
+        # Validate image first
+        is_valid, validation_message = validate_image_for_processing(image)
+        if not is_valid:
+            error_message(validation_message)
+            return [], np.array(image) if hasattr(image, 'shape') else np.zeros((100, 100, 3))
+        
+        # Check memory before starting
+        memory_status = check_memory_limit(350, 420)  # Very conservative for free plan
+        if memory_status == "critical":
+            error_message("Insufficient memory for object detection. Please try a smaller image.")
             return [], np.array(image)
         
-        # Convert PIL image to numpy array if needed
-        if hasattr(image, 'convert'):
-            image_np = np.array(image.convert('RGB'))
-        else:
-            image_np = np.array(image)
+        # Load model
+        detector = load_faster_rcnn_model()
+        if detector is None:
+            error_message("Failed to load detection model")
+            return [], np.array(image)
         
-        # Convert to tensor
-        image_tensor = tf.convert_to_tensor(image_np)
-        image_tensor = image_tensor[tf.newaxis, ...]
+        # Preprocess image with memory optimization
+        image_np = preprocess_image_memory_efficient(image, max_size=480)
+        if image_np is None:
+            error_message("Image preprocessing failed")
+            return [], np.array(image)
         
-        # Run object detection
-        results = detector(image_tensor)
+        log_memory_usage("before TensorFlow inference")
         
-        # Extract results
-        boxes = results['detection_boxes'][0].numpy()
-        classes = results['detection_classes'][0].numpy().astype(int)
-        scores = results['detection_scores'][0].numpy()
+        # Convert to tensor with memory optimization
+        try:
+            # Use smaller batch size and ensure uint8 format
+            image_tensor = tf.convert_to_tensor(image_np, dtype=tf.uint8)
+            image_tensor = tf.expand_dims(image_tensor, 0)  # Add batch dimension
+            
+            # Verify tensor shape
+            expected_shape = (1, image_np.shape[0], image_np.shape[1], 3)
+            if image_tensor.shape != expected_shape:
+                raise Exception(f"Tensor shape mismatch: {image_tensor.shape} vs {expected_shape}")
+            
+        except Exception as e:
+            error_message(f"Tensor conversion failed: {str(e)}")
+            return [], image_np
         
-        # Filter by confidence threshold first
+        # Run detection with memory monitoring
+        try:
+            print("Running Faster R-CNN inference...")
+            
+            # Force CPU execution and disable GPU to save memory
+            with tf.device('/CPU:0'):
+                results = detector(image_tensor)
+            
+            log_memory_usage("after TensorFlow inference")
+            
+        except Exception as e:
+            error_message(f"Detection inference failed: {str(e)}")
+            cleanup_memory()
+            return [], image_np
+        
+        # Extract results quickly to free memory
+        try:
+            boxes = results['detection_boxes'][0].numpy()
+            classes = results['detection_classes'][0].numpy().astype(int)
+            scores = results['detection_scores'][0].numpy()
+            
+            # Clear TensorFlow variables immediately
+            del results, image_tensor
+            cleanup_memory()
+            
+        except Exception as e:
+            error_message(f"Result extraction failed: {str(e)}")
+            cleanup_memory()
+            return [], image_np
+        
+        # Filter by confidence threshold
         valid_indices = scores >= confidence_threshold
+        if not np.any(valid_indices):
+            info_message("No objects detected above confidence threshold")
+            return [], image_np
+        
         filtered_boxes = boxes[valid_indices]
         filtered_classes = classes[valid_indices]
         filtered_scores = scores[valid_indices]
         
-        if len(filtered_boxes) == 0:
-            return [], image_np
+        # Apply NMS with memory optimization
+        try:
+            final_detections = apply_nms_memory_efficient(
+                filtered_boxes, filtered_classes, filtered_scores, 
+                image_np.shape, iou_threshold
+            )
+        except Exception as e:
+            error_message(f"NMS failed: {str(e)}")
+            # Fallback: return raw detections without NMS
+            final_detections = []
+            for i in range(len(filtered_boxes)):
+                if filtered_scores[i] >= confidence_threshold:
+                    box = filtered_boxes[i]
+                    class_id = filtered_classes[i]
+                    score = filtered_scores[i]
+                    
+                    # Convert normalized coordinates to pixel coordinates
+                    height, width = image_np.shape[:2]
+                    y1, x1, y2, x2 = box
+                    x1, y1, x2, y2 = int(x1*width), int(y1*height), int(x2*width), int(y2*height)
+                    
+                    class_name = COCO_CLASS_NAMES.get(class_id, f"unknown_{class_id}")
+                    
+                    final_detections.append({
+                        'label': class_name.lower(),
+                        'confidence': float(score),
+                        'bbox': [float(x1), float(y1), float(x2), float(y2)],
+                        'class_id': int(class_id)
+                    })
         
-        # Apply Non-Maximum Suppression to remove duplicate detections
-        final_detections = apply_nms(filtered_boxes, filtered_classes, filtered_scores, image_np.shape, iou_threshold)
+        # Draw detections on image
+        try:
+            result_image = draw_detections(image_np, final_detections)
+        except Exception as e:
+            print(f"Drawing detections failed: {e}")
+            result_image = image_np
         
-        # Draw bounding boxes on result image
-        result_image = draw_detections(image_np, final_detections)
+        # Final memory cleanup
+        cleanup_memory()
         
-        print(f"✅ Faster R-CNN detected {len(final_detections)} unique objects (after NMS)")
+        print(f"✅ Detection completed: {len(final_detections)} objects found")
+        log_memory_usage("detection completed")
+        
         return final_detections, result_image
         
     except Exception as e:
-        error_message(f"Faster R-CNN detection error: {str(e)}")
-        # Return empty result on error
-        dummy_image = np.array(image) if hasattr(image, 'convert') else image
-        return [], dummy_image
+        error_message(f"Object detection failed: {str(e)}")
+        print(f"Detection error details: {e}")
+        cleanup_memory()
+        return [], np.array(image) if hasattr(image, 'shape') else np.zeros((100, 100, 3))
+
+def apply_nms_memory_efficient(boxes, classes, scores, image_shape, iou_threshold=0.45):
+    """Memory-efficient Non-Maximum Suppression"""
+    try:
+        final_detections = []
+        unique_classes = np.unique(classes)
+        height, width = image_shape[:2]
+        
+        for class_id in unique_classes:
+            # Get detections for this class
+            class_mask = classes == class_id
+            class_boxes = boxes[class_mask]
+            class_scores = scores[class_mask]
+            
+            if len(class_boxes) == 0:
+                continue
+            
+            # Convert to pixel coordinates
+            pixel_boxes = []
+            for box in class_boxes:
+                y1, x1, y2, x2 = box
+                pixel_boxes.append([
+                    int(x1 * width),   # left
+                    int(y1 * height),  # top
+                    int(x2 * width),   # right
+                    int(y2 * height)   # bottom
+                ])
+            pixel_boxes = np.array(pixel_boxes)
+            
+            # Apply simple NMS
+            keep_indices = simple_nms_memory_efficient(pixel_boxes, class_scores, iou_threshold)
+            
+            # Add kept detections
+            for idx in keep_indices:
+                class_name = COCO_CLASS_NAMES.get(class_id, f"unknown_{class_id}")
+                bbox = pixel_boxes[idx]
+                
+                final_detections.append({
+                    'label': class_name.lower(),
+                    'confidence': float(class_scores[idx]),
+                    'bbox': [float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])],
+                    'class_id': int(class_id)
+                })
+        
+        # Sort by confidence
+        final_detections.sort(key=lambda x: x['confidence'], reverse=True)
+        
+        # Limit number of detections to save memory
+        max_detections = 10  # Conservative limit for free plan
+        if len(final_detections) > max_detections:
+            final_detections = final_detections[:max_detections]
+            print(f"Limited detections to {max_detections} for memory efficiency")
+        
+        return final_detections
+        
+    except Exception as e:
+        print(f"NMS error: {e}")
+        return []
+
+def simple_nms_memory_efficient(boxes, scores, iou_threshold=0.5):
+    """Memory-efficient NMS implementation"""
+    if len(boxes) == 0:
+        return []
+    
+    # Sort by confidence
+    sorted_indices = np.argsort(scores)[::-1]
+    
+    keep = []
+    while len(sorted_indices) > 0:
+        current = sorted_indices[0]
+        keep.append(current)
+        
+        if len(sorted_indices) == 1:
+            break
+        
+        # Calculate IoU with remaining boxes (limit to save memory)
+        remaining_indices = sorted_indices[1:min(len(sorted_indices), 20)]  # Limit for memory
+        
+        ious = []
+        current_box = boxes[current]
+        
+        for idx in remaining_indices:
+            iou = calculate_iou(current_box, boxes[idx])
+            ious.append(iou)
+        
+        # Keep boxes with IoU below threshold
+        ious = np.array(ious)
+        keep_mask = ious < iou_threshold
+        sorted_indices = remaining_indices[keep_mask]
+    
+    return keep
+
+# Function to detect objects in image
+def detect_objects(image, confidence_threshold=0.5, iou_threshold=0.45):
+    """Memory-optimized object detection for Render free plan"""
+    return detect_objects_memory_optimized(image, confidence_threshold, iou_threshold)
+
 
 # Function to enhance image quality
 def enhance_image(image, enhance_type="auto"):
@@ -1153,14 +1443,10 @@ def get_database():
 
 db = get_database()
 
-# Initialize processing queue in session state for background tasks
-if 'processing_queue' not in st.session_state:
-    st.session_state.processing_queue = queue.Queue()
-if 'processing_results' not in st.session_state:
-    st.session_state.processing_results = {}
-if 'processing_complete' not in st.session_state:
-    st.session_state.processing_complete = False
-
+if 'startup_memory_checked' not in st.session_state:
+    st.session_state.startup_memory_checked = True
+    startup_memory = check_startup_memory()
+    st.session_state.startup_memory = startup_memory
 # Initialize session state for manual mode
 if 'manual_mode' not in st.session_state:
     st.session_state.manual_mode = False
@@ -1423,91 +1709,302 @@ def get_audio_html(audio_bytes):
 # Function to load RCNN Model
 @st.cache_resource
 def load_faster_rcnn_model():
-    """Load and cache the Faster R-CNN model from TensorFlow Hub."""
+    """Load Faster R-CNN model with memory optimization for Render free plan"""
     try:
-        print("Loading Faster R-CNN model...")
+        log_memory_usage("before model loading")
+        
+        # Check available memory before loading
+        available_memory = get_memory_usage()
+        if available_memory > 400:  # If we're already using too much memory
+            error_message(f"Insufficient memory to load model: {available_memory:.1f} MB already used")
+            return None
+        
+        print("Loading Faster R-CNN model with memory optimization...")
+        
+        # Use a smaller model variant for better memory efficiency
+        # This model is smaller but still accurate
         model_url = "https://tfhub.dev/tensorflow/faster_rcnn/resnet50_v1_640x640/1"
-        detector = hub.load(model_url)
-        print("✅ Faster R-CNN model loaded successfully!")
+        
+        # Load model with memory constraints
+        with tf.device('/CPU:0'):  # Force CPU usage to save GPU memory
+            detector = hub.load(model_url)
+        
+        log_memory_usage("after model loading")
+        
+        # Test the model with a small dummy input to ensure it works
+        try:
+            dummy_input = tf.zeros((1, 480, 640, 3), dtype=tf.uint8)
+            _ = detector(dummy_input)
+            print("✅ Model validation successful")
+            del dummy_input
+        except Exception as e:
+            print(f"Model validation warning: {e}")
+        
+        print("✅ Faster R-CNN model loaded with memory optimization!")
+        
+        # Store loading success in session state
+        st.session_state.faster_rcnn_model_loaded = True
+        
         return detector
+        
     except Exception as e:
         print(f"❌ Error loading Faster R-CNN model: {e}")
+        error_message(f"Failed to load object detection model: {str(e)}")
+        cleanup_memory()
         return None
 
-# Background worker function for object detection
-def detect_objects_worker(image, confidence_threshold, iou_threshold, task_id):
-    """Worker function to run detection in background."""
-    try:
-        # Run detection
-        detections, rendered_image = detect_objects(image, confidence_threshold, iou_threshold)
-        
-        # Store results
-        st.session_state.processing_results[task_id] = {
-            'detections': detections,
-            'result_image': rendered_image
-        }
-        
-        # Mark task as complete
-        st.session_state.processing_complete = True
-    except Exception as e:
-        # Store error
-        st.session_state.processing_results[task_id] = {
-            'error': str(e)
-        }
-        st.session_state.processing_complete = True
-
-
+# Add this function to check if model is loaded
+def is_model_loaded():
+    """Check if the model is successfully loaded"""
+    return st.session_state.get('faster_rcnn_model_loaded', False)
 
 # Function to start or end a learning session
 def manage_session(action):
-    """Start or end learning session with improved error handling."""
-    if action == "start":
-        try:
-            # Try to use the direct method instead of the database object
-            session_id = create_session_direct()
+    """Session management with memory monitoring for Render free plan"""
+    try:
+        # Log memory at start of session management
+        log_memory_usage(f"session {action} start")
+        
+        if action == "start":
+            # Check memory before starting session
+            memory_status = check_memory_limit(300, 400)
+            if memory_status == "critical":
+                error_message("Insufficient memory to start session. Please refresh the page and try again.")
+                return False
             
-            if session_id:
-                st.session_state.session_id = session_id
-                st.session_state.words_studied = 0
-                st.session_state.words_learned = 0
-                success_message(f"Started new learning session!")
-                return True
-            else:
-                error_message("Failed to create a session directly. Check database permissions.")
+            # Clear any leftover memory before starting
+            cleanup_memory()
+            
+            try:
+                # Create session using your existing direct method
+                session_id = create_session_direct()
+                
+                if session_id:
+                    st.session_state.session_id = session_id
+                    st.session_state.words_studied = 0
+                    st.session_state.words_learned = 0
+                    success_message("Started new learning session!")
+                    log_memory_usage("session started")
+                    return True
+                else:
+                    error_message("Failed to create session. Please check database connection.")
+                    return False
+                    
+            except Exception as e:
+                error_message(f"Error starting session: {str(e)}")
+                cleanup_memory()
                 return False
                 
-        except Exception as e:
-            error_message(f"Error starting session: {str(e)}")
-            return False
-            
-    elif action == "end" and st.session_state.session_id:
-        try:
-            # Connect directly to the database
-            conn = sqlite3.connect("language_learning.db")
-            cursor = conn.cursor()
-            
-            # Update the session with end time and stats
-            current_time = datetime.datetime.now()
-            cursor.execute(
-                "UPDATE sessions SET end_time = ?, words_studied = ?, words_learned = ? WHERE id = ?",
-                (current_time, st.session_state.words_studied, st.session_state.words_learned, st.session_state.session_id)
-            )
-            conn.commit()
-            conn.close()
-            
-            success_message(f"Session completed! Words studied: {st.session_state.words_studied}, Words learned: {st.session_state.words_learned}")
-            # Clear session state
-            st.session_state.session_id = None
-            st.session_state.words_studied = 0
-            st.session_state.words_learned = 0
-            return True
+        elif action == "end" and st.session_state.session_id:
+            try:
+                # Update session in database
+                conn = sqlite3.connect("language_learning.db")
+                cursor = conn.cursor()
                 
-        except Exception as e:
-            error_message(f"Error ending session: {str(e)}")
-            return False
-    
-    return False
+                current_time = datetime.datetime.now()
+                cursor.execute(
+                    "UPDATE sessions SET end_time = ?, words_studied = ?, words_learned = ? WHERE id = ?",
+                    (current_time, st.session_state.words_studied, st.session_state.words_learned, st.session_state.session_id)
+                )
+                conn.commit()
+                conn.close()
+                
+                success_message(f"Session completed! Words studied: {st.session_state.words_studied}, Words learned: {st.session_state.words_learned}")
+                
+                # Clear session state
+                st.session_state.session_id = None
+                st.session_state.words_studied = 0
+                st.session_state.words_learned = 0
+                
+                # Cleanup memory after ending session
+                cleanup_memory()
+                log_memory_usage("session ended")
+                
+                return True
+                    
+            except Exception as e:
+                error_message(f"Error ending session: {str(e)}")
+                cleanup_memory()
+                return False
+        
+        return False
+        
+    except Exception as e:
+        error_message(f"Session management error: {str(e)}")
+        cleanup_memory()
+        return False
 
+def add_memory_monitor_to_sidebar():
+    """Add memory monitoring to sidebar for debugging"""
+    if st.sidebar.checkbox("🔧 Show Memory Monitor", key="memory_monitor"):
+        current_memory = get_memory_usage()
+        memory_percent = get_memory_percentage()
+        
+        # Color code based on memory usage
+        if current_memory > 450:
+            st.sidebar.error(f"🚨 Memory: {current_memory:.1f} MB")
+        elif current_memory > 350:
+            st.sidebar.warning(f"⚠️ Memory: {current_memory:.1f} MB")
+        else:
+            st.sidebar.success(f"✅ Memory: {current_memory:.1f} MB")
+        
+        st.sidebar.caption(f"System: {memory_percent:.1f}% used")
+        
+        # Memory cleanup button
+        if st.sidebar.button("🧹 Clean Memory", key="cleanup_memory"):
+            cleanup_memory()
+            st.rerun()
+        
+        # Model status
+        if is_model_loaded():
+            st.sidebar.info("🤖 Model: Loaded")
+        else:
+            st.sidebar.warning("🤖 Model: Not loaded")
+
+
+# Add these image preprocessing functions
+
+def calculate_optimal_size(width, height, max_size=480, min_size=320):
+    """Calculate optimal image size for memory efficiency"""
+    # For Render free plan, we need to be very conservative with image sizes
+    current_pixels = width * height
+    max_pixels = max_size * max_size
+    
+    if current_pixels <= max_pixels:
+        return width, height
+    
+    # Calculate scaling factor
+    scale = (max_pixels / current_pixels) ** 0.5
+    new_width = max(min_size, int(width * scale))
+    new_height = max(min_size, int(height * scale))
+    
+    return new_width, new_height
+
+def preprocess_image_memory_efficient(image, max_size=480):
+    """
+    Preprocess image with aggressive memory optimization for Render free plan
+    """
+    try:
+        log_memory_usage("before image preprocessing")
+        
+        # Convert to numpy array
+        if hasattr(image, 'convert'):
+            # Convert to RGB if needed
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+            img_array = np.array(image)
+        else:
+            img_array = np.array(image)
+        
+        original_height, original_width = img_array.shape[:2]
+        print(f"Original image size: {original_width}x{original_height}")
+        
+        # Calculate optimal size for memory efficiency
+        new_width, new_height = calculate_optimal_size(original_width, original_height, max_size)
+        
+        # Resize if necessary
+        if new_width != original_width or new_height != original_height:
+            print(f"Resizing image for memory efficiency: {original_width}x{original_height} -> {new_width}x{new_height}")
+            
+            # Use INTER_AREA for downsampling (better quality and faster)
+            img_array = cv2.resize(img_array, (new_width, new_height), interpolation=cv2.INTER_AREA)
+            
+            # Verify resize worked
+            if img_array is None:
+                raise Exception("Image resize failed")
+        
+        # Ensure image is in correct format
+        if len(img_array.shape) != 3 or img_array.shape[2] != 3:
+            raise Exception(f"Invalid image shape: {img_array.shape}")
+        
+        # Ensure correct data type
+        if img_array.dtype != np.uint8:
+            img_array = img_array.astype(np.uint8)
+        
+        log_memory_usage("after image preprocessing")
+        
+        return img_array
+        
+    except Exception as e:
+        print(f"Error in memory-efficient preprocessing: {e}")
+        error_message(f"Image preprocessing failed: {str(e)}")
+        return None
+
+def validate_image_for_processing(image):
+    """Validate image before processing"""
+    try:
+        if image is None:
+            return False, "Image is None"
+        
+        if hasattr(image, 'size'):
+            width, height = image.size
+            pixels = width * height
+            
+            # Check if image is too large for memory
+            if pixels > 1000000:  # 1MP limit for free plan
+                return False, f"Image too large: {width}x{height} ({pixels} pixels). Please use a smaller image."
+            
+            if width < 100 or height < 100:
+                return False, f"Image too small: {width}x{height}. Minimum size is 100x100."
+        
+        return True, "Image validation passed"
+        
+    except Exception as e:
+        return False, f"Image validation error: {str(e)}"
+    
+
+def process_image_with_memory_check(image, detection_type, enhancement_type, confidence_threshold, iou_threshold):
+    """Process image with memory monitoring"""
+    try:
+        # Check memory before processing
+        memory_status = check_memory_limit(350, 420)
+        if memory_status == "critical":
+            error_message("Insufficient memory to process image. Please try a smaller image or refresh the page.")
+            return None, None
+        
+        # Validate image first
+        is_valid, validation_message = validate_image_for_processing(image)
+        if not is_valid:
+            error_message(validation_message)
+            return None, None
+        
+        if detection_type == "Objects":
+            # Enhance image with memory check
+            try:
+                enhanced_image = enhance_image(image, enhancement_type)
+                if enhanced_image is None:
+                    error_message("Image enhancement failed")
+                    return None, None
+                
+                # Check memory after enhancement
+                check_memory_limit(400, 450)
+                
+                # Run detection
+                detections, result_image = detect_objects_memory_optimized(
+                    enhanced_image, confidence_threshold, iou_threshold
+                )
+                
+                return detections, result_image
+                
+            except Exception as e:
+                error_message(f"Object detection failed: {str(e)}")
+                cleanup_memory()
+                return None, None
+        
+        else:  # Text OCR
+            try:
+                detected_text = detect_text_in_image(image)
+                return detected_text, None
+            except Exception as e:
+                error_message(f"Text detection failed: {str(e)}")
+                return None, None
+                
+    except Exception as e:
+        error_message(f"Image processing failed: {str(e)}")
+        cleanup_memory()
+        return None, None
+    
+    
 # Function to save image
 def save_image(image, label):
     try:
@@ -1896,7 +2393,20 @@ if app_mode == "Camera Mode":
     with image_tab2:
         uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"], key="file_uploader")
         if uploaded_file is not None:
-            image = Image.open(uploaded_file)
+            # Check file size before processing
+            if check_uploaded_image_size(uploaded_file):
+                try:
+                    image = Image.open(uploaded_file)
+                    # Validate image dimensions
+                    width, height = image.size
+                    if width * height > 1000000:  # 1MP limit
+                        st.error(f"Image resolution too high: {width}x{height}. Please use an image smaller than 1000x1000 pixels.")
+                        image = None
+                except Exception as e:
+                    st.error(f"Error loading image: {e}")
+                    image = None
+            else:
+                image = None
     
     # Detection options
     detection_type = st.radio(
@@ -1934,14 +2444,23 @@ if app_mode == "Camera Mode":
     
     # Process image if available
     if image is not None:
-        # Always apply enhancement for object detection
-        if detection_type == "Objects":
-            with st.spinner("Enhancing image for better detection..."):
-                enhanced_image = enhance_image(image, enhancement_type)
-                # Use the enhanced image for detection
-                image_for_detection = enhanced_image
-        else:
-            image_for_detection = image
+        # Add memory monitoring and guidance
+        add_memory_monitor_to_sidebar()
+        show_memory_guidance()
+        
+        # Check memory before processing
+        memory_status = check_memory_limit(350, 420)
+        if memory_status == "critical":
+            st.error("🚨 Critical memory usage. Please refresh the page and try with a smaller image.")
+            st.stop()
+        
+        # Validate image size first
+        if hasattr(image, 'size'):
+            width, height = image.size
+            pixels = width * height
+            if pixels > 1000000:  # 1MP limit
+                st.error(f"Image too large: {width}x{height} ({pixels/1000000:.1f}MP). Please use an image smaller than 1000x1000 pixels.")
+                st.stop()
         
         # Process based on detection type
         if detection_type == "Objects":
@@ -1954,14 +2473,35 @@ if app_mode == "Camera Mode":
             separator_placeholder = st.empty()
             separator_placeholder.markdown('<div class="result-separator"></div>', unsafe_allow_html=True)
             
+            # Setup automatic cleanup
+            setup_automatic_cleanup()
+            
             # Perform the detection while showing a native spinner
             with st.spinner("Processing..."):
-                detections, result_image = detect_objects(image_for_detection, confidence_threshold, iou_threshold)
+                try:
+                    # Always apply enhancement for object detection
+                    enhanced_image = enhance_image(image, "auto")
+                    if enhanced_image is None:
+                        raise Exception("Image enhancement failed")
+                    
+                    # Run memory-optimized detection
+                    detections, result_image = detect_objects_memory_optimized(
+                        enhanced_image, confidence_threshold, iou_threshold
+                    )
+                    
+                except Exception as e:
+                    if "memory" in str(e).lower() or "resource" in str(e).lower():
+                        error_message("Memory limit reached. Please try a smaller image or refresh the page.")
+                        cleanup_memory()
+                    else:
+                        error_message(f"Detection error: {str(e)}")
+                    # Fallback behavior
+                    detections, result_image = [], np.array(image)
             
             # Clear the spinner and separator completely
             spinner_placeholder.empty()
             separator_placeholder.empty()
-            
+        
             # Display results
             if detections:
                 style_section_title("✨ Detected Objects")
@@ -3282,6 +3822,7 @@ elif app_mode == "Pronunciation Practice":
         st.code("pip install streamlit-webrtc speech-recognition librosa python-Levenshtein av")
 
 st.sidebar.markdown("---")
+add_memory_monitor_to_sidebar()
 st.sidebar.markdown("### Session Info")
 if st.session_state.session_id:
     st.sidebar.success(f"Session active")
@@ -3291,4 +3832,14 @@ else:
     st.sidebar.warning("No active session")
     st.sidebar.markdown("*Start a session in Camera Mode to track progress*")
 
+if st.sidebar.button("🧪 Test Memory Functions"):
+    st.sidebar.write(f"Current memory: {get_memory_usage():.1f} MB")
+    st.sidebar.write(f"Memory %: {get_memory_percentage():.1f}%")
+    st.sidebar.write(f"Model loaded: {is_model_loaded()}")
+    
+    # Test cleanup
+    before_cleanup = get_memory_usage()
+    cleanup_memory()
+    after_cleanup = get_memory_usage()
+    st.sidebar.write(f"Cleanup freed: {before_cleanup - after_cleanup:.1f} MB")
 add_footer()

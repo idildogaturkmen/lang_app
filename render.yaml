@@ -7,7 +7,7 @@ services:
       pip install --no-cache-dir --upgrade pip &&
       pip install --no-cache-dir -r requirements.txt &&
       echo "Build completed successfully"
-    startCommand: streamlit run main.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --server.fileWatcherType none --browser.gatherUsageStats false --server.maxUploadSize 10
+    startCommand: streamlit run main.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --server.fileWatcherType none --browser.gatherUsageStats false --server.maxUploadSize 5
     envVars:
       - key: PYTHON_VERSION
         value: 3.9.18
@@ -15,26 +15,61 @@ services:
         value: "1"
       - key: PYTHONDONTWRITEBYTECODE  
         value: "1"
+      
+      # TensorFlow optimizations
       - key: TF_CPP_MIN_LOG_LEVEL
-        value: "2"
-      - key: TORCH_HOME
-        value: "/tmp/torch"
-      - key: PYTORCH_TRANSFORMERS_CACHE
-        value: "/tmp/transformers"
+        value: "3"
+      - key: TF_ENABLE_ONEDNN_OPTS
+        value: "0"
+      - key: TF_FORCE_GPU_ALLOW_GROWTH
+        value: "true"
+      - key: TF_DISABLE_SEGMENT_REDUCTION_OP_DETERMINISM_EXCEPTIONS
+        value: "true"
+      
+      # Memory optimization for Python
+      - key: MALLOC_ARENA_MAX
+        value: "1"  # Reduced from 2
+      - key: MALLOC_MMAP_THRESHOLD_
+        value: "65536"  # Reduced
+      - key: MALLOC_TRIM_THRESHOLD_
+        value: "65536"  # Reduced
+      - key: MALLOC_TOP_PAD_
+        value: "65536"  # Reduced
+      - key: MALLOC_MMAP_MAX_
+        value: "32768"  # Reduced
+      
+      # OpenMP/BLAS threading limits
+      - key: OMP_NUM_THREADS
+        value: "1"
+      - key: OPENBLAS_NUM_THREADS
+        value: "1"
+      - key: MKL_NUM_THREADS
+        value: "1"
+      - key: NUMEXPR_NUM_THREADS
+        value: "1"
+      
+      # Streamlit optimizations
       - key: STREAMLIT_SERVER_MAX_UPLOAD_SIZE
-        value: "10"
+        value: "5"  # Reduced from 10
       - key: STREAMLIT_BROWSER_GATHER_USAGE_STATS
         value: "false"
       - key: STREAMLIT_SERVER_FILE_WATCHER_TYPE
         value: "none"
-      # Add memory optimization
-      - key: MALLOC_ARENA_MAX
-        value: "2"
-      - key: MALLOC_MMAP_THRESHOLD_
-        value: "131072"
-      - key: MALLOC_TRIM_THRESHOLD_
-        value: "131072"
-      - key: MALLOC_TOP_PAD_
-        value: "131072"
-      - key: MALLOC_MMAP_MAX_
-        value: "65536"
+      - key: STREAMLIT_SERVER_ENABLE_CORS
+        value: "false"
+      - key: STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION
+        value: "false"
+      
+      # Cache optimizations
+      - key: TORCH_HOME
+        value: "/tmp/torch"
+      - key: PYTORCH_TRANSFORMERS_CACHE
+        value: "/tmp/transformers"
+      - key: TENSORFLOW_HUB_CACHE_DIR
+        value: "/tmp/tfhub_cache"
+      
+      # Additional memory constraints
+      - key: PYTHONHASHSEED
+        value: "0"
+      - key: PYTHONOPTIMIZE
+        value: "1"
