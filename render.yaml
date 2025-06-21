@@ -7,7 +7,7 @@ services:
       pip install --no-cache-dir --upgrade pip &&
       pip install --no-cache-dir -r requirements.txt &&
       echo "Build completed successfully"
-    startCommand: python server.py
+    startCommand: streamlit run main.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --server.fileWatcherType none --browser.gatherUsageStats false --server.maxUploadSize 10
     envVars:
       - key: PYTHON_VERSION
         value: 3.9.18
@@ -16,15 +16,9 @@ services:
       - key: PYTHONDONTWRITEBYTECODE  
         value: "1"
       
-      # Secret key for Flask sessions
-      - key: SECRET_KEY
-        generateValue: true
-      
-      # Port configuration (Render will set PORT automatically)
-      - key: STREAMLIT_PORT
-        value: "8501"
-      - key: AUTH_PORT
-        value: "5001"
+      # Clerk secret key (you'll set this manually in Render dashboard)
+      - key: CLERK_SECRET_KEY
+        sync: false
       
       # Basic threading limits
       - key: OMP_NUM_THREADS
@@ -43,7 +37,3 @@ services:
       # Cache optimizations
       - key: TORCH_HOME
         value: "/tmp/torch"
-        
-      # Database configuration
-      - key: DATABASE_PATH
-        value: "language_learning.db"

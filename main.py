@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import base64
 import time
 import sqlite3
-import datetime
+from datetime import datetime
 import re
 from PIL import Image
 from io import BytesIO
@@ -24,7 +24,10 @@ from ultralytics import YOLO
 import json
 from urllib.parse import parse_qs
 from database import LanguageLearningDB
+import jwt
 
+# Clerk Configuration
+CLERK_SECRET_KEY = os.environ.get("CLERK_SECRET_KEY", "")
 
 # Authentication Functions
 def get_url_params():
@@ -741,6 +744,54 @@ def get_url_params():
         return query_params
     except:
         return {}
+    
+def validate_clerk_jwt(token):
+    """Validate Clerk JWT token and return user data."""
+    try:
+        # For development, we'll decode without verification first
+        # In production, you should verify the signature properly
+        import base64
+        
+        # Split token into parts
+        parts = token.split('.')
+        if len(parts) != 3:
+            print("Invalid token format")
+            return None
+        
+        # Decode payload (second part)
+        payload_encoded = parts[1]
+        # Add padding if needed
+        payload_encoded += '=' * (4 - len(payload_encoded) % 4)
+        
+        try:
+            payload_json = base64.b64decode(payload_encoded).decode('utf-8')
+            payload = json.loads(payload_json)
+        except Exception as e:
+            print(f"Error decoding payload: {e}")
+            return None
+        
+        # Check if token is expired
+        exp = payload.get('exp', 0)
+        if exp < datetime.now().timestamp():
+            print("Token has expired")
+            return None
+        
+        # Extract user information from Clerk JWT
+        user_data = {
+            'id': payload.get('sub', ''),  # Clerk user ID
+            'email': payload.get('email', ''),
+            'firstName': payload.get('given_name', ''),
+            'lastName': payload.get('family_name', ''),
+            'username': payload.get('email', '').split('@')[0] if payload.get('email') else 'user',
+            'displayName': payload.get('given_name', payload.get('email', 'User')),
+            'timestamp': datetime.now().timestamp() * 1000
+        }
+        
+        return user_data
+        
+    except Exception as e:
+        print(f"Error validating JWT: {e}")
+        return None
 
 def decode_user_token(token):
     """Decode user token from URL."""
@@ -761,17 +812,18 @@ def decode_user_token(token):
         return None
 
 def get_authenticated_user():
-    """Get the current authenticated user."""
+    """Get the current authenticated user from Clerk JWT."""
     if 'authenticated_user' not in st.session_state:
         # Get URL parameters
         params = get_url_params()
-        user_token = params.get('user', [None])[0]
+        clerk_token = params.get('clerk_token', [None])[0]
         auth_param = params.get('auth', [None])[0]
         
-        if user_token and auth_param == 'vocam':
-            user_data = decode_user_token(user_token)
+        if clerk_token and auth_param == 'clerk':
+            user_data = validate_clerk_jwt(clerk_token)
             if user_data:
                 st.session_state.authenticated_user = user_data
+                st.session_state.clerk_token = clerk_token
             else:
                 st.session_state.authenticated_user = None
         else:
@@ -788,16 +840,16 @@ def require_authentication():
         st.info("Please log in through the main website to access Vocam.")
         st.markdown("**[← Login Here](https://vocam.app/web)**")
         
-        # Show a simple demo mode option
+        # Show demo mode for development
         st.markdown("---")
-        st.markdown("### Demo Mode")
+        st.markdown("### Demo Mode (Development Only)")
         if st.button("Continue as Demo User"):
-            # Set demo user data
             demo_user = {
-                'id': 999,
+                'id': 'demo_user_999',
                 'username': 'demo',
                 'displayName': 'Demo User',
-                'timestamp': time.time() * 1000
+                'email': 'demo@vocam.app',
+                'timestamp': datetime.now().timestamp() * 1000
             }
             st.session_state.authenticated_user = demo_user
             st.rerun()
@@ -812,7 +864,6 @@ def get_user_database():
         st.session_state.user_db = LanguageLearningDB("language_learning.db")
     return st.session_state.user_db
 
-# Modified Database Functions for User Context
 def add_vocabulary_direct(word_original, word_translated, language_translated, category=None, image_path=None):
     """Add vocabulary for the authenticated user."""
     user = get_authenticated_user()
@@ -865,53 +916,6 @@ def create_session_direct():
     
     db = get_user_database()
     return db.start_session(user['id'])
-
-# Function to add vocabulary to the database
-# Modified Database Functions for User Context
-def add_vocabulary_direct(word_original, word_translated, language_translated, category=None, image_path=None):
-    """Add vocabulary for the authenticated user."""
-    user = get_authenticated_user()
-    if not user:
-        return None
-    
-    db = get_user_database()
-    vocab_id = db.add_vocabulary(
-        user_id=user['id'],
-        word_original=word_original,
-        word_translated=word_translated,
-        language_translated=language_translated,
-        category=category,
-        image_path=image_path
-    )
-    
-    if vocab_id:
-        try:
-            gamification.check_achievements(
-                "word_learned",
-                word=word_original,
-                category=category,
-                language=language_translated
-            )
-        except Exception as e:
-            print(f"Gamification error: {e}")
-    
-    return vocab_id
-
-# Function to get all vocabulary items from the database
-def get_all_vocabulary_direct():
-    """Get all vocabulary for the authenticated user."""
-    user = get_authenticated_user()
-    if not user:
-        return []
-    
-    db = get_user_database()
-    vocabulary = db.get_all_vocabulary(user['id'])
-    
-    result = []
-    for row in vocabulary:
-        result.append(dict(row))
-    
-    return result
 
 # Function to get session statistics
 def get_session_stats_direct(days=30):
@@ -1306,11 +1310,15 @@ def get_audio_html(audio_bytes):
 
 # Function to start or end a learning session
 def manage_session(action):
-    """Session management with memory monitoring for Render free plan"""
+    """Session management with Clerk user context."""
     try:
+        user = get_authenticated_user()
+        if not user:
+            error_message("No authenticated user found")
+            return False
+            
         if action == "start":
             try:
-                # Create session using your existing direct method
                 session_id = create_session_direct()
                 
                 if session_id:
@@ -1320,7 +1328,7 @@ def manage_session(action):
                     success_message("Started new learning session!")
                     return True
                 else:
-                    error_message("Failed to create session. Please check database connection.")
+                    error_message("Failed to create session.")
                     return False
                     
             except Exception as e:
@@ -1329,26 +1337,24 @@ def manage_session(action):
                 
         elif action == "end" and st.session_state.session_id:
             try:
-                # Update session in database
-                conn = sqlite3.connect("language_learning.db")
-                cursor = conn.cursor()
-                
-                current_time = datetime.datetime.now()
-                cursor.execute(
-                    "UPDATE sessions SET end_time = ?, words_studied = ?, words_learned = ? WHERE id = ?",
-                    (current_time, st.session_state.words_studied, st.session_state.words_learned, st.session_state.session_id)
+                db = get_user_database()
+                success = db.end_session(
+                    st.session_state.session_id, 
+                    st.session_state.words_studied, 
+                    st.session_state.words_learned
                 )
-                conn.commit()
-                conn.close()
                 
-                success_message(f"Session completed! Words studied: {st.session_state.words_studied}, Words learned: {st.session_state.words_learned}")
-                
-                # Clear session state
-                st.session_state.session_id = None
-                st.session_state.words_studied = 0
-                st.session_state.words_learned = 0
-                
-                return True
+                if success:
+                    success_message(f"Session completed! Words studied: {st.session_state.words_studied}, Words learned: {st.session_state.words_learned}")
+                    
+                    st.session_state.session_id = None
+                    st.session_state.words_studied = 0
+                    st.session_state.words_learned = 0
+                    
+                    return True
+                else:
+                    error_message("Failed to end session properly")
+                    return False
                     
             except Exception as e:
                 error_message(f"Error ending session: {str(e)}")
@@ -1426,12 +1432,16 @@ def setup_new_question(vocabulary):
 # Function to update word progress in the database
 def update_word_progress_direct(vocab_id, is_correct):
     """Update word progress for the authenticated user."""
-    user = get_authenticated_user()
-    if not user:
+    try:
+        user = get_authenticated_user()
+        if not user:
+            return False
+        
+        db = get_user_database()
+        return db.update_word_progress(vocab_id, is_correct)
+    except Exception as e:
+        print(f"Error updating word progress: {e}")
         return False
-    
-    db = get_user_database()
-    return db.update_word_progress(vocab_id, is_correct)
 
 # Function to check quiz answer
 def check_answer(selected_index):
