@@ -7,6 +7,7 @@ services:
       pip install --no-cache-dir --upgrade pip &&
       pip install --no-cache-dir -r requirements.txt &&
       echo "Build completed successfully"
+    # SIMPLIFIED: Just run Streamlit directly (no complex server)
     startCommand: streamlit run main.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --server.fileWatcherType none --browser.gatherUsageStats false --server.maxUploadSize 10
     envVars:
       - key: PYTHON_VERSION
@@ -16,24 +17,20 @@ services:
       - key: PYTHONDONTWRITEBYTECODE  
         value: "1"
       
-      # Clerk secret key (you'll set this manually in Render dashboard)
+      # Only need Clerk secret key now
       - key: CLERK_SECRET_KEY
         sync: false
       
-      # Basic threading limits
+      # Basic optimizations
       - key: OMP_NUM_THREADS
         value: "2"
       - key: OPENBLAS_NUM_THREADS
         value: "2"
-      
-      # Streamlit optimizations
       - key: STREAMLIT_SERVER_MAX_UPLOAD_SIZE
         value: "10"
       - key: STREAMLIT_BROWSER_GATHER_USAGE_STATS
         value: "false"
       - key: STREAMLIT_SERVER_FILE_WATCHER_TYPE
         value: "none"
-      
-      # Cache optimizations
       - key: TORCH_HOME
         value: "/tmp/torch"

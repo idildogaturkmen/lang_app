@@ -19,6 +19,6 @@ torch>=1.13.0
 torchvision>=0.14.0
 pytesseract>=0.3.10,<1.0.0
 
-# Clerk JWT validation
+# Only need these for Clerk JWT validation
 PyJWT>=2.8.0,<3.0.0
 requests>=2.31.0,<3.0.0
