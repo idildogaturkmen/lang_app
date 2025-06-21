@@ -24,10 +24,30 @@ from ultralytics import YOLO
 import json
 from urllib.parse import parse_qs
 from database import LanguageLearningDB
-import jwt
 
-# Clerk Configuration
-CLERK_SECRET_KEY = os.environ.get("CLERK_SECRET_KEY", "")
+# Supabase Configuration
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://csszlzpsfwmsezursivk.supabase.co")
+SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNzc3psenBzZndtc2V6dXJzaXZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA1Mjg1MjEsImV4cCI6MjA2NjEwNDUyMX0.gIi0Q_pifYpXeM1r8kWlgTO1LD8bc91lQ3suH8OWDKI")
+
+def validate_environment():
+    """Validate required environment variables are present."""
+    required_vars = [
+        'SUPABASE_URL',
+        'SUPABASE_ANON_KEY'
+    ]
+    
+    missing_vars = []
+    for var in required_vars:
+        if not os.environ.get(var):
+            missing_vars.append(var)
+    
+    if missing_vars:
+        raise EnvironmentError(f"Missing required environment variables: {missing_vars}")
+    
+    return True
+
+# Call this at startup
+validate_environment()
 
 # Authentication Functions
 def get_url_params():
@@ -38,36 +58,73 @@ def get_url_params():
     except:
         return {}
 
-def decode_user_token(token):
-    """Decode user token from URL."""
+def validate_supabase_token(token):
+    """Validate Supabase access token and return user data."""
     try:
-        user_data = json.loads(base64.b64decode(token).decode('utf-8'))
+        # For now, we'll use a simple approach
+        # In production, you should verify the JWT properly
+        import base64
         
-        # Validate token timestamp (token should be recent)
-        current_time = time.time() * 1000
-        token_time = user_data.get('timestamp', 0)
-        
-        # Token should be no older than 1 hour
-        if current_time - token_time > 3600000:
+        # Split token into parts (JWT structure: header.payload.signature)
+        parts = token.split('.')
+        if len(parts) != 3:
+            print("Invalid token format")
             return None
-            
+        
+        # Decode payload (second part)
+        payload_encoded = parts[1]
+        # Add padding if needed for base64 decoding
+        payload_encoded += '=' * (4 - len(payload_encoded) % 4)
+        
+        try:
+            payload_json = base64.b64decode(payload_encoded).decode('utf-8')
+            payload = json.loads(payload_json)
+        except Exception as e:
+            print(f"Error decoding payload: {e}")
+            return None
+        
+        # Check if token is expired
+        exp = payload.get('exp', 0)
+        if exp < datetime.now().timestamp():
+            print("Token has expired")
+            return None
+        
+        # Extract user information from Supabase JWT
+        user_data = {
+            'id': payload.get('sub', ''),  # Supabase user ID
+            'email': payload.get('email', ''),
+            'aud': payload.get('aud', ''),
+            'role': payload.get('role', ''),
+            'username': payload.get('email', '').split('@')[0] if payload.get('email') else 'user',
+            'displayName': payload.get('email', 'User'),
+            'timestamp': datetime.now().timestamp() * 1000
+        }
+        
         return user_data
+        
     except Exception as e:
-        print(f"Error decoding user token: {e}")
+        print(f"Error validating Supabase token: {e}")
         return None
 
 def get_authenticated_user():
-    """Get the current authenticated user."""
+    """Get the current authenticated user from Supabase."""
     if 'authenticated_user' not in st.session_state:
         # Get URL parameters
         params = get_url_params()
-        user_token = params.get('user', [None])[0]
-        auth_param = params.get('auth', [None])[0]
+        auth_token = params.get('auth_token', [None])[0]
+        auth_provider = params.get('auth_provider', [None])[0]
+        user_email = params.get('user_email', [None])[0]
+        user_id = params.get('user_id', [None])[0]
         
-        if user_token and auth_param == 'vocam':
-            user_data = decode_user_token(user_token)
+        if auth_token and auth_provider == 'supabase':
+            user_data = validate_supabase_token(auth_token)
             if user_data:
+                # Add additional data from URL params
+                user_data['email'] = user_email or user_data.get('email', '')
+                user_data['id'] = user_id or user_data.get('id', '')
+                
                 st.session_state.authenticated_user = user_data
+                st.session_state.supabase_token = auth_token
             else:
                 st.session_state.authenticated_user = None
         else:
@@ -84,16 +141,16 @@ def require_authentication():
         st.info("Please log in through the main website to access Vocam.")
         st.markdown("**[← Login Here](https://vocam.app/web)**")
         
-        # Show a simple demo mode option
+        # Show demo mode for development
         st.markdown("---")
-        st.markdown("### Demo Mode")
+        st.markdown("### Demo Mode (Development Only)")
         if st.button("Continue as Demo User"):
-            # Set demo user data
             demo_user = {
-                'id': 999,
+                'id': 'demo_user_999',
                 'username': 'demo',
                 'displayName': 'Demo User',
-                'timestamp': time.time() * 1000
+                'email': 'demo@vocam.app',
+                'timestamp': datetime.now().timestamp() * 1000
             }
             st.session_state.authenticated_user = demo_user
             st.rerun()
@@ -102,7 +159,96 @@ def require_authentication():
     
     return user
 
+def get_user_database():
+    """Get database instance for the authenticated user."""
+    if 'user_db' not in st.session_state:
+        st.session_state.user_db = LanguageLearningDB("language_learning.db")
+    return st.session_state.user_db
+
+def add_vocabulary_direct(word_original, word_translated, language_translated, category=None, image_path=None):
+    """Add vocabulary for the authenticated user."""
+    user = get_authenticated_user()
+    if not user:
+        return None
+    
+    db = get_user_database()
+    vocab_id = db.add_vocabulary(
+        user_id=user['id'],
+        word_original=word_original,
+        word_translated=word_translated,
+        language_translated=language_translated,
+        category=category,
+        image_path=image_path
+    )
+    
+    if vocab_id:
+        try:
+            gamification.check_achievements(
+                "word_learned",
+                word=word_original,
+                category=category,
+                language=language_translated
+            )
+        except Exception as e:
+            print(f"Gamification error: {e}")
+    
+    return vocab_id
+
+def get_all_vocabulary_direct():
+    """Get all vocabulary for the authenticated user."""
+    user = get_authenticated_user()
+    if not user:
+        return []
+    
+    db = get_user_database()
+    vocabulary = db.get_all_vocabulary(user_id=user['id'])
+    
+    result = []
+    for row in vocabulary:
+        result.append(dict(row))
+    
+    return result
+
+def create_session_direct():
+    """Create a session for the authenticated user."""
+    user = get_authenticated_user()
+    if not user:
+        return None
+    
+    db = get_user_database()
+    return db.start_session(user['id'])
+
+def get_session_stats_direct(days=30):
+    """Get session statistics for the authenticated user."""
+    user = get_authenticated_user()
+    if not user:
+        return {}
+    
+    db = get_user_database()
+    stats = db.get_session_stats(user['id'], days)
+    return dict(stats) if stats else {}
+
+def update_word_progress_direct(vocab_id, is_correct):
+    """Update word progress for the authenticated user."""
+    try:
+        user = get_authenticated_user()
+        if not user:
+            return False
+        
+        db = get_user_database()
+        return db.update_word_progress(vocab_id, is_correct)
+    except Exception as e:
+        print(f"Error updating word progress: {e}")
+        return False
+
+# Initialize the user and require authentication
 user = require_authentication()
+
+# Display user info in sidebar for debugging
+st.sidebar.markdown("---")
+st.sidebar.markdown("### User Info")
+st.sidebar.markdown(f"**Email:** {user.get('email', 'Unknown')}")
+st.sidebar.markdown(f"**User ID:** {user.get('id', 'Unknown')[:8]}...")
 
 def get_user_database():
     """Get database instance."""
@@ -167,7 +313,7 @@ def detect_objects_yolov8(image, confidence_threshold=0.5):
     except Exception as e:
         print(f"YOLOv8 detection error: {e}")
         return [], np.array(image)
-    
+
 
 # First, display Python version for
 st.set_page_config(
@@ -280,30 +426,6 @@ except ImportError as e:
     
     # Replace cv2 with our dummy implementation
     cv2 = DummyCV2()
-
-# Import other dependencies with careful error handling
-try:
-    import torch
-except ImportError as e:
-    # Dummy torch for fallback
-    class DummyTorch:
-        def __init__(self):
-            self.hub = type('obj', (object,), {
-                'load': lambda *args, **kwargs: DummyModel()
-            })
-            
-    class DummyModel:
-        def __call__(self, *args, **kwargs):
-            return type('obj', (object,), {
-                'xyxy': [[]], 
-                'render': lambda: [[np.zeros((300, 300, 3), dtype=np.uint8)]],
-                'names': {0: 'unknown'}
-            })
-            
-        def eval(self):
-            return self
-            
-    torch = DummyTorch()
 
 
 # Try importing gTTS
@@ -928,81 +1050,20 @@ def get_session_stats_direct(days=30):
     stats = db.get_session_stats(user['id'], days)
     return dict(stats) if stats else {}
 
-# Function to check if database is properly set up
+# Check database setup and initialize
 def check_database_setup():
     """Check if the database is properly set up and try to fix if needed."""
     try:
-        conn = sqlite3.connect("language_learning.db")
-        cursor = conn.cursor()
-        
-        # Check if tables exist
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-        tables = [table[0] for table in cursor.fetchall()]
-        
-        required_tables = ['vocabulary', 'user_progress', 'sessions', 'camera_translations']
-        missing_tables = [table for table in required_tables if table not in tables]
-        
-        if missing_tables:
-            # Create missing tables
-            if 'vocabulary' in missing_tables:
-                cursor.execute('''
-                CREATE TABLE IF NOT EXISTS vocabulary (
-                    id INTEGER PRIMARY KEY,
-                    word_original TEXT NOT NULL,
-                    word_translated TEXT NOT NULL,
-                    language_translated TEXT NOT NULL,
-                    category TEXT,
-                    image_path TEXT,
-                    date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    source TEXT DEFAULT 'manual'
-                );
-                ''')
-            
-            if 'user_progress' in missing_tables:
-                cursor.execute('''
-                CREATE TABLE IF NOT EXISTS user_progress (
-                    id INTEGER PRIMARY KEY,
-                    vocabulary_id INTEGER,
-                    review_count INTEGER DEFAULT 0,
-                    correct_count INTEGER DEFAULT 0,
-                    last_reviewed TIMESTAMP,
-                    proficiency_level INTEGER DEFAULT 0,
-                    FOREIGN KEY (vocabulary_id) REFERENCES vocabulary (id)
-                );
-                ''')
-            
-            if 'sessions' in missing_tables:
-                cursor.execute('''
-                CREATE TABLE IF NOT EXISTS sessions (
-                    id INTEGER PRIMARY KEY,
-                    start_time TIMESTAMP,
-                    end_time TIMESTAMP,
-                    words_studied INTEGER DEFAULT 0,
-                    words_learned INTEGER DEFAULT 0
-                );
-                ''')
-            
-            if 'camera_translations' in missing_tables:
-                cursor.execute('''
-                CREATE TABLE IF NOT EXISTS camera_translations (
-                    id INTEGER PRIMARY KEY,
-                    image_path TEXT,
-                    detected_text TEXT,
-                    translated_text TEXT,
-                    source_language TEXT,
-                    target_language TEXT,
-                    date_captured TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    is_saved_to_vocabulary BOOLEAN DEFAULT 0
-                );
-                ''')
-            
-            conn.commit()
-        
-        conn.close()
+        db = get_user_database()
+        # Test connection by getting vocabulary count
+        vocabulary = get_all_vocabulary_direct()
         return True
     except Exception as e:
         error_message(f"Database error: {e}")
         return False
+
+if 'db_checked' not in st.session_state:
+    st.session_state.db_checked = check_database_setup()
     
 def prepare_vocabulary_for_diverse_questions(vocabulary, languages):
     """Enhance vocabulary data to support diverse question types."""
@@ -1117,13 +1178,11 @@ if 'faster_rcnn_model_loaded' not in st.session_state:
     st.session_state.faster_rcnn_model_loaded = False
 
 
+# Initialize gamification
 def get_gamification():
-    # Initialize GamificationSystem without the translate function for now
     return GamificationSystem()
 
-# Initialize gamification
 gamification = get_gamification()
-# Make sure state is explicitly initialized
 gamification.initialize_state()
 
 
