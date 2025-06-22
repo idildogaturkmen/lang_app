@@ -216,13 +216,37 @@ def get_all_vocabulary_direct():
     return result
 
 def create_session_direct():
-    """Create a session for the authenticated user."""
-    user = get_authenticated_user()
-    if not user:
+    """Create a session for the authenticated user - FIXED VERSION."""
+    try:
+        user = get_authenticated_user()
+        if not user:
+            print("❌ No authenticated user found in create_session_direct")
+            return None
+        
+        print(f"Creating session for user: {user.get('id', 'Unknown ID')}")
+        
+        db = get_user_database()
+        
+        # Debug: Check if database connection works
+        try:
+            # Test database connection
+            test_query = db.cursor.execute("SELECT 1").fetchone()
+            print("✅ Database connection test successful")
+        except Exception as db_error:
+            print(f"❌ Database connection error: {db_error}")
+            return None
+        
+        session_id = db.start_session(user['id'])
+        print(f"Database returned session_id: {session_id}")
+        
+        return session_id
+        
+    except Exception as e:
+        print(f"❌ Error in create_session_direct: {e}")
+        import traceback
+        traceback.print_exc()
         return None
-    
-    db = get_user_database()
-    return db.start_session(user['id'])
+
 
 def get_session_stats_direct(days=30):
     """Get session statistics for the authenticated user."""
@@ -251,10 +275,27 @@ def update_word_progress_direct(vocab_id, is_correct):
 user = require_authentication()
 
 def get_user_database():
-    """Get database instance."""
-    if 'user_db' not in st.session_state:
-        st.session_state.user_db = LanguageLearningDB("language_learning.db")
-    return st.session_state.user_db
+    """Get database instance for the authenticated user - FIXED VERSION."""
+    try:
+        if 'user_db' not in st.session_state:
+            print("🔄 Creating new database instance...")
+            st.session_state.user_db = LanguageLearningDB("language_learning.db")
+            print("✅ Database instance created successfully")
+        else:
+            print("✅ Using existing database instance")
+        
+        return st.session_state.user_db
+        
+    except Exception as e:
+        print(f"❌ Error getting database: {e}")
+        # Try to create a new instance
+        try:
+            db = LanguageLearningDB("language_learning.db")
+            st.session_state.user_db = db
+            return db
+        except Exception as e2:
+            print(f"❌ Failed to create fallback database: {e2}")
+            return None
 
 @st.cache_resource
 def load_yolov8_nano():
@@ -1363,7 +1404,7 @@ def get_audio_html(audio_bytes):
 
 # Function to start or end a learning session
 def manage_session(action):
-    """Session management with Clerk user context."""
+    """Session management with Supabase user context - FIXED VERSION."""
     try:
         user = get_authenticated_user()
         if not user:
@@ -1372,6 +1413,9 @@ def manage_session(action):
             
         if action == "start":
             try:
+                # Debug: Print user info
+                print(f"Starting session for user: {user.get('id', 'Unknown ID')}")
+                
                 session_id = create_session_direct()
                 
                 if session_id:
@@ -1379,13 +1423,18 @@ def manage_session(action):
                     st.session_state.words_studied = 0
                     st.session_state.words_learned = 0
                     success_message("Started new learning session!")
+                    print(f"✅ Session started successfully with ID: {session_id}")
                     return True
                 else:
-                    error_message("Failed to create session.")
+                    error_message("Failed to create session. Please check database connection.")
+                    print("❌ create_session_direct() returned None")
                     return False
                     
             except Exception as e:
                 error_message(f"Error starting session: {str(e)}")
+                print(f"❌ Session start error: {e}")
+                import traceback
+                traceback.print_exc()
                 return False
                 
         elif action == "end" and st.session_state.session_id:
@@ -1411,12 +1460,16 @@ def manage_session(action):
                     
             except Exception as e:
                 error_message(f"Error ending session: {str(e)}")
+                print(f"❌ Session end error: {e}")
                 return False
         
         return False
         
     except Exception as e:
         error_message(f"Session management error: {str(e)}")
+        print(f"❌ Session management error: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
     
@@ -1667,24 +1720,21 @@ with st.sidebar.expander("ℹ️ Need Help?"):
 # Display appropriate content based on selected mode
 if app_mode == "Camera Mode":
     style_title("📸 Camera Mode")
-    # Use the enhanced info message
     info_message("Take a photo or upload an image to identify objects and learn new vocabulary.")
     
-    # Session management
+    # Session management - FIXED VERSION
     session_container = st.container()
     with session_container:
         col1, col2 = st.columns(2)
+        
         with col1:
-            # Always create a placeholder for the start button
             start_button_placeholder = st.empty()
             
-            # Conditionally show the button or message
             if st.session_state.session_id is None:
                 if start_button_placeholder.button("Start Learning Session", key="start_session_btn"):
                     if manage_session("start"):
                         st.rerun()
             else:
-                # Show session info in the same place
                 start_button_placeholder.markdown(
                     f'<div class="info-box" style="margin: 0.5rem 0; height: 38px; display: flex; align-items: center;">'
                     f'Session in progress - Words: {st.session_state.words_learned}'
@@ -1693,16 +1743,13 @@ if app_mode == "Camera Mode":
                 )
         
         with col2:
-            # Always create a placeholder for the end button
             end_button_placeholder = st.empty()
             
-            # Only show the end button when a session is active
             if st.session_state.session_id is not None:
                 if end_button_placeholder.button("End Session", key="end_session_btn"):
                     if manage_session("end"):
                         st.rerun()
             else:
-                # Empty space with same height to maintain layout
                 end_button_placeholder.markdown(
                     '<div style="height: 38px;"></div>', 
                     unsafe_allow_html=True
