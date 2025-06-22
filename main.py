@@ -94,41 +94,68 @@ def require_authentication():
 user = require_authentication()
 
 def get_user_database():
-    """Get database instance."""
+    """Get database instance with comprehensive error handling."""
     if 'user_db' not in st.session_state:
+        print("🔄 Initializing fresh database connection...")
+        
         try:
-            print("🔄 Initializing database connection...")
+            # Step 1: Check file system
+            import os
+            current_dir = os.getcwd()
+            print(f"🔍 Current directory: {current_dir}")
+            print(f"🔍 Directory contents: {os.listdir('.')}")
             
-            # Ensure database directory exists
             db_path = "language_learning.db"
-            print(f"🔍 Database path: {db_path}")
+            db_exists = os.path.exists(db_path)
+            print(f"🔍 Database file exists: {db_exists}")
             
-            # Create database instance
-            st.session_state.user_db = LanguageLearningDB(db_path)
-            print("✅ Database instance created")
+            if db_exists:
+                db_size = os.path.getsize(db_path)
+                print(f"🔍 Database file size: {db_size} bytes")
             
-            # Test the connection
-            st.session_state.user_db.cursor.execute("SELECT 1")
-            result = st.session_state.user_db.cursor.fetchone()
-            print(f"✅ Database connection test successful: {result}")
+            # Step 2: Create database instance
+            print("🔍 Creating LanguageLearningDB instance...")
+            db_instance = LanguageLearningDB(db_path)
+            print(f"✅ Database instance created: {type(db_instance)}")
+            
+            # Step 3: Test connection
+            print("🔍 Testing database connection...")
+            test_query = "SELECT sqlite_version();"
+            db_instance.cursor.execute(test_query)
+            version = db_instance.cursor.fetchone()
+            print(f"✅ SQLite version: {version[0] if version else 'Unknown'}")
+            
+            # Step 4: Ensure all tables exist
+            print("🔍 Ensuring all tables exist...")
+            db_instance._create_tables()
+            print("✅ Tables verified/created")
+            
+            # Step 5: List all tables
+            db_instance.cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+            tables = db_instance.cursor.fetchall()
+            print(f"✅ Available tables: {[t[0] for t in tables]}")
+            
+            st.session_state.user_db = db_instance
+            print("✅ Database stored in session state")
             
         except Exception as e:
-            print(f"❌ Database initialization failed: {str(e)}")
+            print(f"❌ Database initialization error: {str(e)}")
             import traceback
-            print(f"🔍 Database error traceback: {traceback.format_exc()}")
+            print(f"🔍 Traceback: {traceback.format_exc()}")
             
-            # Try to create a simple fallback database
+            # Create minimal fallback
             try:
-                print("🔄 Attempting fallback database creation...")
+                print("🔄 Creating minimal fallback database...")
                 import sqlite3
-                conn = sqlite3.connect("language_learning.db")
+                
+                conn = sqlite3.connect(db_path, check_same_thread=False)
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 
-                # Create basic sessions table
+                # Create minimal sessions table
                 cursor.execute('''
                 CREATE TABLE IF NOT EXISTS sessions (
-                    id INTEGER PRIMARY KEY,
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id TEXT,
                     start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     end_time TIMESTAMP,
@@ -136,16 +163,30 @@ def get_user_database():
                     words_learned INTEGER DEFAULT 0
                 );
                 ''')
+                
+                cursor.execute('''
+                CREATE TABLE IF NOT EXISTS vocabulary (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    word_original TEXT NOT NULL,
+                    word_translated TEXT NOT NULL,
+                    language_translated TEXT NOT NULL,
+                    category TEXT,
+                    image_path TEXT,
+                    date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    source TEXT DEFAULT 'manual'
+                );
+                ''')
+                
                 conn.commit()
                 conn.close()
-                print("✅ Fallback database created")
+                print("✅ Minimal database created")
                 
-                # Try again with our class
-                st.session_state.user_db = LanguageLearningDB("language_learning.db")
-                print("✅ Database connection successful after fallback")
+                # Try our class again
+                st.session_state.user_db = LanguageLearningDB(db_path)
+                print("✅ Fallback database connection successful")
                 
             except Exception as fallback_error:
-                print(f"❌ Fallback database creation failed: {fallback_error}")
+                print(f"❌ Even fallback failed: {fallback_error}")
                 raise e
     
     return st.session_state.user_db
@@ -837,50 +878,116 @@ def get_all_vocabulary_direct():
         return result
 
 def create_session_direct():
-    """Create a session for the authenticated user."""
+    """Create a session for the authenticated user with comprehensive debugging."""
+    print("=" * 50)
+    print("🚀 SESSION CREATION DEBUG START")
+    print("=" * 50)
+    
+    # Step 1: Check user authentication
     user = get_authenticated_user()
+    print(f"🔍 Step 1 - User check: {user is not None}")
     if not user:
-        print("❌ No authenticated user found")
+        print("❌ FAILURE: No authenticated user found")
         return None
     
+    print(f"✅ User found: {user.get('email', 'no_email')}")
+    print(f"🔍 User ID: {user.get('id', 'no_id')}")
+    print(f"🔍 User keys: {list(user.keys())}")
+    
+    # Step 2: Database connection
     try:
-        print(f"🔄 Starting session creation process...")
-        print(f"🔍 User data: {user}")
-        
-        # Test database connection first
+        print("🔍 Step 2 - Getting database connection...")
         db = get_user_database()
-        print(f"✅ Database instance created")
+        print(f"✅ Database object created: {type(db)}")
         
-        # Test if we can execute a simple query
-        test_query = "SELECT name FROM sqlite_master WHERE type='table';"
-        db.cursor.execute(test_query)
-        tables = db.cursor.fetchall()
-        print(f"✅ Database connection verified. Tables: {[t[0] for t in tables]}")
+        # Step 3: Test basic database functionality
+        print("🔍 Step 3 - Testing database connection...")
         
-        # Check if sessions table exists
-        if not any('sessions' in str(table) for table in tables):
-            print("⚠️ Sessions table not found, creating it...")
-            db._create_tables()
-            print("✅ Tables created")
-        
-        # Try to create session
-        user_id = user.get('id', 'unknown_user')
-        print(f"🔍 Creating session for user_id: {user_id}")
-        
-        session_id = db.start_session(user_id)
-        print(f"✅ Session created successfully with ID: {session_id}")
-        
-        if session_id:
-            return session_id
-        else:
-            print("❌ Session creation returned None")
+        # Check if connection exists
+        if not hasattr(db, 'conn') or db.conn is None:
+            print("❌ FAILURE: Database connection is None")
             return None
         
+        # Test simple query
+        test_result = db.cursor.execute("SELECT 1 as test").fetchone()
+        print(f"✅ Basic query test: {test_result}")
+        
+        # Step 4: Check sessions table
+        print("🔍 Step 4 - Checking sessions table...")
+        tables_query = "SELECT name FROM sqlite_master WHERE type='table' AND name='sessions';"
+        db.cursor.execute(tables_query)
+        sessions_table = db.cursor.fetchone()
+        print(f"🔍 Sessions table exists: {sessions_table is not None}")
+        
+        if not sessions_table:
+            print("⚠️ Sessions table missing, creating...")
+            db.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT,
+                start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                end_time TIMESTAMP,
+                words_studied INTEGER DEFAULT 0,
+                words_learned INTEGER DEFAULT 0
+            );
+            ''')
+            db.conn.commit()
+            print("✅ Sessions table created")
+        
+        # Step 5: Get table schema
+        print("🔍 Step 5 - Checking table schema...")
+        schema_query = "PRAGMA table_info(sessions);"
+        db.cursor.execute(schema_query)
+        schema = db.cursor.fetchall()
+        print(f"🔍 Sessions table schema: {[dict(row) for row in schema]}")
+        
+        # Step 6: Prepare session data
+        user_id = user.get('id', f"user_{user.get('email', 'unknown')}")
+        print(f"🔍 Step 6 - Using user_id: '{user_id}'")
+        
+        # Step 7: Attempt session creation with manual SQL
+        print("🔍 Step 7 - Creating session with manual SQL...")
+        
+        import datetime
+        current_time = datetime.datetime.now()
+        print(f"🔍 Current time: {current_time}")
+        
+        # Manual insert
+        insert_query = """
+        INSERT INTO sessions (user_id, start_time, words_studied, words_learned)
+        VALUES (?, ?, 0, 0)
+        """
+        
+        db.cursor.execute(insert_query, (user_id, current_time))
+        session_id = db.cursor.lastrowid
+        db.conn.commit()
+        
+        print(f"✅ Manual session creation successful! Session ID: {session_id}")
+        
+        # Step 8: Verify the session was created
+        verify_query = "SELECT * FROM sessions WHERE id = ?"
+        db.cursor.execute(verify_query, (session_id,))
+        created_session = db.cursor.fetchone()
+        print(f"🔍 Step 8 - Session verification: {dict(created_session) if created_session else 'NOT FOUND'}")
+        
+        if created_session:
+            print("=" * 50)
+            print("🎉 SESSION CREATION SUCCESS!")
+            print(f"📋 Session ID: {session_id}")
+            print("=" * 50)
+            return session_id
+        else:
+            print("❌ FAILURE: Session not found after creation")
+            return None
+            
     except Exception as e:
-        print(f"❌ Session creation error: {str(e)}")
+        print(f"❌ CRITICAL ERROR in session creation:")
         print(f"🔍 Error type: {type(e).__name__}")
+        print(f"🔍 Error message: {str(e)}")
         import traceback
-        print(f"🔍 Full traceback: {traceback.format_exc()}")
+        print(f"🔍 Full traceback:")
+        print(traceback.format_exc())
+        print("=" * 50)
         return None
 
 # Function to get session statistics
@@ -1087,10 +1194,33 @@ def get_gamification():
     # Initialize GamificationSystem without the translate function for now
     return GamificationSystem()
 
-# Initialize gamification
-gamification = get_gamification()
-# Make sure state is explicitly initialized
-gamification.initialize_state()
+def get_user_scoped_gamification():
+    """Get user-scoped gamification instance."""
+    user = get_authenticated_user()
+    if not user:
+        return get_gamification()
+    
+    user_id = user.get('id', user.get('email', 'unknown'))
+    gamification_key = f"gamification_{user_id}"
+    
+    if gamification_key not in st.session_state:
+        print(f"🔄 Creating new gamification instance for user: {user_id}")
+        st.session_state[gamification_key] = get_gamification()
+        st.session_state[gamification_key].initialize_state()
+        
+        # Reset user-specific data
+        st.session_state.level = 1
+        st.session_state.points = 0
+        st.session_state.streak_days = 0
+        st.session_state.daily_challenges = []
+        st.session_state.word_of_the_day = None
+        
+        print(f"✅ Fresh gamification state created for user: {user_id}")
+    
+    return st.session_state[gamification_key]
+
+# Initialize user-scoped gamification
+gamification = get_user_scoped_gamification()
 
 
 # Function to translate text
@@ -2558,7 +2688,9 @@ elif app_mode == "Statistics":
             
 elif app_mode == "My Progress":
     try:
-        gamification.render_dashboard()
+        # Use user-scoped gamification
+        user_gamification = get_user_scoped_gamification()
+        user_gamification.render_dashboard()
     except Exception as e:
         error_message("There was an error displaying the Progress. The system might be initializing.")
         info_message("Please try again in a moment or add some vocabulary first to initialize the system.")
