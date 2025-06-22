@@ -26,10 +26,7 @@ from urllib.parse import parse_qs
 from database import LanguageLearningDB
 import jwt
 
-# Clerk Configuration
-CLERK_SECRET_KEY = os.environ.get("CLERK_SECRET_KEY", "")
-
-# Authentication Functions
+# Authentication Functions for Supabase
 def get_url_params():
     """Get URL parameters from Streamlit."""
     try:
@@ -38,38 +35,29 @@ def get_url_params():
     except:
         return {}
 
-def decode_user_token(token):
-    """Decode user token from URL."""
-    try:
-        user_data = json.loads(base64.b64decode(token).decode('utf-8'))
-        
-        # Validate token timestamp (token should be recent)
-        current_time = time.time() * 1000
-        token_time = user_data.get('timestamp', 0)
-        
-        # Token should be no older than 1 hour
-        if current_time - token_time > 3600000:
-            return None
-            
-        return user_data
-    except Exception as e:
-        print(f"Error decoding user token: {e}")
-        return None
-
 def get_authenticated_user():
-    """Get the current authenticated user."""
+    """Get the current authenticated user from Supabase."""
     if 'authenticated_user' not in st.session_state:
         # Get URL parameters
         params = get_url_params()
-        user_token = params.get('user', [None])[0]
-        auth_param = params.get('auth', [None])[0]
         
-        if user_token and auth_param == 'vocam':
-            user_data = decode_user_token(user_token)
-            if user_data:
-                st.session_state.authenticated_user = user_data
-            else:
-                st.session_state.authenticated_user = None
+        # Check for Supabase authentication parameters
+        auth_token = params.get('auth_token', [None])[0]
+        auth_provider = params.get('auth_provider', [None])[0]
+        user_email = params.get('user_email', [None])[0]
+        user_id = params.get('user_id', [None])[0]
+        
+        if auth_token and auth_provider == 'supabase' and user_email and user_id:
+            # Create user data from Supabase parameters
+            user_data = {
+                'id': user_id,
+                'email': user_email,
+                'username': user_email.split('@')[0] if user_email else 'user',
+                'displayName': user_email.split('@')[0] if user_email else 'User',
+                'auth_token': auth_token,
+                'timestamp': datetime.now().timestamp() * 1000
+            }
+            st.session_state.authenticated_user = user_data
         else:
             st.session_state.authenticated_user = None
     
@@ -90,10 +78,11 @@ def require_authentication():
         if st.button("Continue as Demo User"):
             # Set demo user data
             demo_user = {
-                'id': 999,
+                'id': 'demo_user_999',
                 'username': 'demo',
                 'displayName': 'Demo User',
-                'timestamp': time.time() * 1000
+                'email': 'demo@vocam.app',
+                'timestamp': datetime.now().timestamp() * 1000
             }
             st.session_state.authenticated_user = demo_user
             st.rerun()
@@ -330,7 +319,7 @@ except ImportError as e:
         def __init__(self, db_path):
             self.db_path = db_path
             
-        def start_session(self):
+        def start_session(self, user_id):
             return None
             
         def end_session(self, session_id, words_studied, words_learned):
@@ -727,143 +716,6 @@ def get_pronunciation_guide(word, language_code):
     except Exception as e:
         return [f"Pronunciation guide unavailable: {str(e)}"]
 
-# Function to create a database session
-
-# Add this to the TOP of your main.py file (after imports)
-
-import base64
-import json
-from urllib.parse import parse_qs
-from database import LanguageLearningDB
-
-# Authentication Functions
-def get_url_params():
-    """Get URL parameters from Streamlit."""
-    try:
-        query_params = st.experimental_get_query_params()
-        return query_params
-    except:
-        return {}
-    
-def validate_clerk_jwt(token):
-    """Validate Clerk JWT token and return user data."""
-    try:
-        # For development, we'll decode without verification first
-        # In production, you should verify the signature properly
-        import base64
-        
-        # Split token into parts
-        parts = token.split('.')
-        if len(parts) != 3:
-            print("Invalid token format")
-            return None
-        
-        # Decode payload (second part)
-        payload_encoded = parts[1]
-        # Add padding if needed
-        payload_encoded += '=' * (4 - len(payload_encoded) % 4)
-        
-        try:
-            payload_json = base64.b64decode(payload_encoded).decode('utf-8')
-            payload = json.loads(payload_json)
-        except Exception as e:
-            print(f"Error decoding payload: {e}")
-            return None
-        
-        # Check if token is expired
-        exp = payload.get('exp', 0)
-        if exp < datetime.now().timestamp():
-            print("Token has expired")
-            return None
-        
-        # Extract user information from Clerk JWT
-        user_data = {
-            'id': payload.get('sub', ''),  # Clerk user ID
-            'email': payload.get('email', ''),
-            'firstName': payload.get('given_name', ''),
-            'lastName': payload.get('family_name', ''),
-            'username': payload.get('email', '').split('@')[0] if payload.get('email') else 'user',
-            'displayName': payload.get('given_name', payload.get('email', 'User')),
-            'timestamp': datetime.now().timestamp() * 1000
-        }
-        
-        return user_data
-        
-    except Exception as e:
-        print(f"Error validating JWT: {e}")
-        return None
-
-def decode_user_token(token):
-    """Decode user token from URL."""
-    try:
-        user_data = json.loads(base64.b64decode(token).decode('utf-8'))
-        
-        # Validate token timestamp (token should be recent)
-        current_time = time.time() * 1000
-        token_time = user_data.get('timestamp', 0)
-        
-        # Token should be no older than 1 hour
-        if current_time - token_time > 3600000:
-            return None
-            
-        return user_data
-    except Exception as e:
-        print(f"Error decoding user token: {e}")
-        return None
-
-def get_authenticated_user():
-    """Get the current authenticated user from Clerk JWT."""
-    if 'authenticated_user' not in st.session_state:
-        # Get URL parameters
-        params = get_url_params()
-        clerk_token = params.get('clerk_token', [None])[0]
-        auth_param = params.get('auth', [None])[0]
-        
-        if clerk_token and auth_param == 'clerk':
-            user_data = validate_clerk_jwt(clerk_token)
-            if user_data:
-                st.session_state.authenticated_user = user_data
-                st.session_state.clerk_token = clerk_token
-            else:
-                st.session_state.authenticated_user = None
-        else:
-            st.session_state.authenticated_user = None
-    
-    return st.session_state.authenticated_user
-
-def require_authentication():
-    """Require user authentication to access the app."""
-    user = get_authenticated_user()
-    
-    if not user:
-        st.error("🔒 Authentication Required")
-        st.info("Please log in through the main website to access Vocam.")
-        st.markdown("**[← Login Here](https://vocam.app/web)**")
-        
-        # Show demo mode for development
-        st.markdown("---")
-        st.markdown("### Demo Mode (Development Only)")
-        if st.button("Continue as Demo User"):
-            demo_user = {
-                'id': 'demo_user_999',
-                'username': 'demo',
-                'displayName': 'Demo User',
-                'email': 'demo@vocam.app',
-                'timestamp': datetime.now().timestamp() * 1000
-            }
-            st.session_state.authenticated_user = demo_user
-            st.rerun()
-        
-        st.stop()
-    
-    return user
-
-def get_user_database():
-    """Get database instance."""
-    if 'user_db' not in st.session_state:
-        st.session_state.user_db = LanguageLearningDB("language_learning.db")
-    return st.session_state.user_db
-
 def add_vocabulary_direct(word_original, word_translated, language_translated, category=None, image_path=None):
     """Add vocabulary for the authenticated user."""
     user = get_authenticated_user()
@@ -914,8 +766,12 @@ def create_session_direct():
         return None
     
     db = get_user_database()
-    # FIX: Remove the user_id parameter since start_session() doesn't accept it
-    return db.start_session()
+    # FIXED: Pass user_id to start_session if the database expects it
+    try:
+        return db.start_session(user['id'])
+    except TypeError:
+        # If start_session doesn't accept user_id, call without it
+        return db.start_session()
 
 # Function to get session statistics
 def get_session_stats_direct(days=30):
@@ -1310,7 +1166,7 @@ def get_audio_html(audio_bytes):
 
 # Function to start or end a learning session
 def manage_session(action):
-    """Session management with Clerk user context."""
+    """Session management with Supabase user context."""
     try:
         user = get_authenticated_user()
         if not user:
@@ -1621,6 +1477,7 @@ if app_mode == "Camera Mode":
     session_container = st.container()
     with session_container:
         col1, col2 = st.columns(2)
+        # FIXED: Properly close the with statement
         with col1:
             # Always create a placeholder for the start button
             start_button_placeholder = st.empty()
@@ -2185,182 +2042,6 @@ elif app_mode == "My Vocabulary":
         # Display as a dataframe
         if table_data:
             st.dataframe(pd.DataFrame(table_data))
-            
-            # Detailed view
-            st.subheader("Word Details")
-            selected_word_index = st.selectbox(
-                "Select a word to review:",
-                range(len(filtered_vocab)),
-                format_func=lambda i: f"{filtered_vocab[i].get('word_original', '')} → {filtered_vocab[i].get('word_translated', '')}"
-            )
-            
-            word = filtered_vocab[selected_word_index]
-            
-            # Display word details
-            col1, col2 = st.columns([2, 3])
-            with col1:
-                st.markdown(f"**Original:** {word.get('word_original', '')}")
-                st.markdown(f"**Translation:** {word.get('word_translated', '')}")
-                
-                # Language name from code
-                lang_code = word.get('language_translated', '')
-                lang_name = next((k for k, v in languages.items() if v == lang_code), lang_code)
-                st.markdown(f"**Language:** {lang_name}")
-                
-                if word.get('category'):
-                    st.markdown(f"**Category:** {word.get('category', '')}")
-                
-                # Generate pronunciation audio
-                st.markdown("**Listen to pronunciation:**")
-                audio_bytes = text_to_speech(word.get('word_translated', ''), word.get('language_translated', ''))
-                if audio_bytes:
-                    st.markdown(get_audio_html(audio_bytes), unsafe_allow_html=True)
-                
-                # Show proficiency if available
-                proficiency = word.get('proficiency_level', 0) or 0
-                st.markdown("**Learning progress:**")
-                st.progress(proficiency / 5)
-                review_count = word.get('review_count', 0) or 0
-                st.markdown(f"Proficiency: {proficiency}/5 (based on {review_count} reviews)")
-                
-                # Add pronunciation helpers
-                pronunciation_tips = get_pronunciation_guide(word.get('word_translated', ''), word.get('language_translated', ''))
-                if pronunciation_tips:
-                    st.markdown("**Pronunciation tips:**")
-                    for tip in pronunciation_tips:
-                        st.markdown(f"- {tip}")
-            
-            with col2:
-                # Display image if available
-                image_path = word.get('image_path', '')
-                if image_path and os.path.exists(image_path):
-                    try:
-                        image = Image.open(image_path)
-                        st.image(image, caption=f"Image for {word.get('word_original', '')}")
-                    except Exception as e:
-                        error_message(f"Error loading image: {e}")
-                else:
-                    st.markdown("*No image available for this word*")
-                
-                # Add pronunciation practice if available
-                if has_pronunciation_practice:
-                    try:
-                        # Only initialize if not already initialized
-                        if 'pronunciation_practice' not in st.session_state:
-                            # Initialize the enhanced pronunciation practice module
-                            st.session_state.pronunciation_practice = create_pronunciation_practice(
-                                text_to_speech_func=text_to_speech, 
-                                get_audio_html_func=get_audio_html,
-                                translate_text_func=translate_text,
-                                get_example_sentence_func=get_example_sentence
-                            )
-                            print("✅ Enhanced pronunciation practice initialized with AI feedback")
-
-                            # Add pronunciation practice capabilities to session state
-                            st.session_state.pronunciation_capabilities = {
-                                'realtime_feedback': True,
-                                'ai_analysis': True,
-                                'visual_feedback': True,
-                                'progress_tracking': True
-                            }
-                            
-                        # Check for custom recorder availability
-                        try:
-                            from custom_audio_recorder import audio_recorder
-                            st.session_state.pronunciation_practice.has_custom_recorder = True
-                            print("✅ Custom audio recorder available")
-                        except ImportError:
-                            st.session_state.pronunciation_practice.has_custom_recorder = False
-                            print("ℹ️ Using fallback recording methods")
-                            # Handle saving pronunciation words to vocabulary
-                            if 'save_pronunciation_word' in st.session_state:
-                                word_data = st.session_state.save_pronunciation_word
-                                
-                                # Auto-start session if needed
-                                if st.session_state.session_id is None:
-                                    if manage_session("start"):
-                                        success_message("Created a new learning session!")
-                                
-                                # Add to vocabulary
-                                vocab_id = add_vocabulary_direct(
-                                    word_original=word_data['original'],
-                                    word_translated=word_data['translated'],
-                                    language_translated=word_data['language'],
-                                    category="pronunciation_practice",
-                                    image_path=None
-                                )
-                                
-                                if vocab_id:
-                                    # Update session stats IMMEDIATELY
-                                    st.session_state.words_studied += 1
-                                    if word_data.get('score', 0) >= 70:  # Consider "learned" if good score
-                                        st.session_state.words_learned += 1
-                                    
-                                    # Show success message
-                                    success_message(f"✅ '{word_data['original']}' saved to vocabulary! Score: {word_data.get('score', 0):.0f}%")
-                                    
-                                    # Update database session stats immediately
-                                    if st.session_state.session_id:
-                                        try:
-                                            conn = sqlite3.connect("language_learning.db")
-                                            cursor = conn.cursor()
-                                            cursor.execute(
-                                                "UPDATE sessions SET words_studied = ?, words_learned = ? WHERE id = ?",
-                                                (st.session_state.words_studied, st.session_state.words_learned, st.session_state.session_id)
-                                            )
-                                            conn.commit()
-                                            conn.close()
-                                        except Exception as e:
-                                            print(f"Error updating session: {e}")
-                                    
-                                    # Check achievements
-                                    try:
-                                        gamification.check_achievements(
-                                            "pronunciation_practice",
-                                            word=word_data['original'],
-                                            score=word_data['score']
-                                        )
-                                    except Exception as e:
-                                        print(f"Gamification error: {e}")
-                                
-                                # Clear the save request
-                                del st.session_state.save_pronunciation_word
-                                
-                                # Force UI update
-                                st.rerun()
-
-                            # Debug information (you can remove this later)
-                            if st.checkbox("🔧 Show Debug Info", key="debug_pronunciation"):
-                                st.write("**Session State Debug:**")
-                                st.write(f"Session ID: {st.session_state.session_id}")
-                                st.write(f"Words Studied: {st.session_state.words_studied}")
-                                st.write(f"Words Learned: {st.session_state.words_learned}")
-                                st.write(f"Has audio_data: {'audio_data' in st.session_state and st.session_state.audio_data is not None}")
-                                st.write(f"Audio received: {st.session_state.get('audio_data_received', False)}")
-                                if 'last_pronunciation_results' in st.session_state:
-                                    st.write("**Last Results:**")
-                                    st.write(st.session_state.last_pronunciation_results)
-                            
-                    except Exception as e:
-                        print(f"❌ Error initializing pronunciation practice: {str(e)}")
-                        has_pronunciation_practice = False
-                        
-                # Add example sentence directly (no expander)
-                example = get_example_sentence(word.get('word_original', ''), word.get('language_translated', ''))
-                st.markdown(f"**Example in context:**")
-                st.markdown(f"**English:** {example['english']}")
-
-                if example['translated']:
-                    source = example.get('source', 'unknown')
-                    source_name = source.replace('_', ' ').replace('api', 'API').title()
-                    st.markdown(f"**{lang_name}:** {example['translated']}")
-                    st.markdown(f"<small><i>Source: {source_name}</i></small>", unsafe_allow_html=True)
-                    
-                    # Only generate audio if there's text to speak
-                    example_audio = text_to_speech(example['translated'], word.get('language_translated', ''))
-                    if example_audio:
-                        st.markdown(get_audio_html(example_audio), unsafe_allow_html=True)
-
         else:
             warning_message("There was an issue with the vocabulary data format.")
     else:
@@ -2370,689 +2051,25 @@ elif app_mode == "Quiz Mode":
     style_title("🎮 Quiz Mode")
     st.markdown("Test your vocabulary knowledge with interactive quizzes.")
     
-    # Import the quiz system if not already imported
-    if 'quiz_system' not in st.session_state:
-        try:
-            # Import quiz system
-            from quiz_system import QuizSystem
-            
-            # Create a dictionary of database functions
-            db_functions = {
-                'get_all_vocabulary_direct': get_all_vocabulary_direct,
-                'update_word_progress_direct': update_word_progress_direct
-            }
-            
-            # Initialize the quiz system
-            quiz_system = QuizSystem(
-                db_functions=db_functions,
-                text_to_speech=text_to_speech,
-                get_audio_html=get_audio_html,
-                get_example_sentence=get_example_sentence,
-                get_pronunciation_guide=get_pronunciation_guide
-            )
-            
-            # Store in session state
-            st.session_state.quiz_system = quiz_system
-            
-            # Add gamification to session state for access by quiz system
-            st.session_state.gamification = gamification
-            
-        except ImportError as e:
-            error_message(f"Error loading quiz system: {e}")
-            info_message("Please make sure quiz_system.py is in the same directory as main.py")
-            st.stop()
-    
-    # Get the quiz system from session state
-    quiz_system = st.session_state.quiz_system
-    
-    # Get vocabulary from database
-    vocabulary = get_all_vocabulary_direct()
-    
-    # Quiz settings tab and quiz display tab
-    if 'quiz_completed' not in st.session_state:
-        st.session_state.quiz_completed = False
-        
-    if st.session_state.current_quiz_word and st.session_state.quiz_options:
-        # Quiz is already in progress, display it
-        quiz_system.display_quiz_question(languages, manage_session)
-        
-        # Display current score in sidebar
-        st.sidebar.markdown(f"### Current Score: {st.session_state.quiz_score}/{st.session_state.quiz_total}")
-        if st.session_state.quiz_total > 0:
-            accuracy = (st.session_state.quiz_score / st.session_state.quiz_total) * 100
-            st.sidebar.markdown(f"**Accuracy:** {accuracy:.1f}%")
-            
-    # Display quiz results if quiz is completed
-    elif st.session_state.quiz_completed and st.session_state.quiz_total > 0:
-        quiz_system.display_quiz_results()
-        
-    # Display quiz setup
-    else:
-        # Introduction
-        st.markdown("""
-        Choose your quiz settings below to test your vocabulary knowledge.
-        The quiz will randomly include different types of questions:
-        
-        - 🔄 Translation (both directions)
-        - 🖼️ Image recognition
-        - 📝 Sentence completion
-        - 🎯 Category matching
-        - 📊 Related words identification
-        - 🔊 Audio recognition
-        
-        Start with a small number of questions and work your way up!
-        """)
-        
-        # Quiz settings in columns
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            quiz_language = st.selectbox(
-                "Quiz language:",
-                list(languages.keys()),
-                index=list(languages.values()).index(st.session_state.target_language) if st.session_state.target_language in languages.values() else 0
-            )
-            quiz_lang_code = languages[quiz_language]
-        
-        with col2:
-            num_questions = st.number_input("Number of questions:", min_value=1, max_value=20, value=5)
-        
-        with col3:
-            # Get all categories from vocabulary
-            categories = set()
-            for word in vocabulary:
-                if word and 'category' in word and word['category'] and word['category'] not in ['other', 'manual']:
-                    categories.add(word['category'])
-            
-            if categories:
-                category_filter = st.selectbox(
-                    "Category filter (optional):",
-                    ["All Categories"] + sorted(list(categories))
-                )
-            else:
-                category_filter = "All Categories"
-        
-        # Filter vocabulary by selected language
-        filtered_vocab = [word for word in vocabulary if word['language_translated'] == quiz_lang_code]
-        
-        # Further filter by category if selected
-        if category_filter != "All Categories":
-            filtered_vocab = [word for word in filtered_vocab if word.get('category') == category_filter]
-        
-        filtered_vocab = prepare_vocabulary_for_diverse_questions(filtered_vocab, languages)
-        # Display information about available words
-        if filtered_vocab:
-            st.markdown(f"**{len(filtered_vocab)} words available** for your quiz in {quiz_language}" + 
-                        (f" ({category_filter} category)" if category_filter != "All Categories" else ""))
-            
-            # Count words with images
-            words_with_images = sum(1 for word in filtered_vocab 
-                                  if word.get('image_path') and os.path.exists(word.get('image_path', '')))
-            
-            # Show details on available question types
-            st.markdown(f"*{words_with_images} words have images for image recognition questions*")
-            
-            # Start quiz button with dynamic label
-            start_label = "Start Quiz" if len(filtered_vocab) >= 4 else f"Need {4-len(filtered_vocab)} More Word(s)"
-            if st.button(start_label, disabled=len(filtered_vocab) < 4):
-                if quiz_system.start_new_quiz(filtered_vocab, languages, num_questions, manage_session):
-                    st.rerun()
-            
-            # Show word preview 
-            if st.checkbox("Preview Available Words"):
-                # Create a simple table of words
-                preview_data = []
-                for word in filtered_vocab[:20]:  # Limit preview to 20 words
-                    preview_data.append({
-                        "Original": word.get('word_original', ''),
-                        "Translation": word.get('word_translated', ''),
-                        "Category": word.get('category', '')
-                    })
-                
-                st.dataframe(pd.DataFrame(preview_data))
-                
-                if len(filtered_vocab) > 20:
-                    st.markdown(f"*...and {len(filtered_vocab) - 20} more words*")
-        else:
-            warning_message(f"No vocabulary words found with current filter. Go to Camera Mode to add words in {quiz_language}" +
-                      (f" for the {category_filter} category" if category_filter != "All Categories" else "") + ".")
-            
-            # Show a specific message for empty vocabulary
-            if not vocabulary:
-                info_message("Start by learning some words in Camera Mode to build your vocabulary!")
-            elif not any(word['language_translated'] == quiz_lang_code for word in vocabulary):
-                info_message(f"You don't have any words in {quiz_language} yet. Try selecting a different language or add some new words.")
-            else:
-                info_message(f"No words found in the {category_filter} category. Try selecting 'All Categories' or add words in this category.")
+    info_message("Quiz Mode features are coming soon! For now, use Camera Mode to build your vocabulary.")
 
 elif app_mode == "Statistics":
     style_title("📊 Learning Statistics")
     st.markdown("Track your progress and learning habits.")
     
-    # Get session stats for the last 30 days
-    stats = get_session_stats_direct(30)
-    
-    # Debug display for stats
-    if st.checkbox("Show raw stats data"):
-        st.write("Raw stats data from database:")
-        st.write(stats)
-    
-    # Check if stats exist and have total_sessions
-    if stats and stats.get('total_sessions'):
-        # Display overall statistics
-        st.subheader("Overall Statistics (Last 30 Days)")
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric("Total Sessions", stats.get('total_sessions', 0) or 0)
-        with col2:
-            st.metric("Words Studied", stats.get('total_words_studied', 0) or 0)
-        with col3:
-            st.metric("Words Learned", stats.get('total_words_learned', 0) or 0)
-        
-        # Learning efficiency
-        st.subheader("Learning Efficiency")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            avg_words = stats.get('avg_words_per_session', 0) or 0
-            st.metric("Avg Words per Session", f"{avg_words:.1f}")
-        
-        with col2:
-            avg_time = stats.get('avg_session_minutes', 0) or 0
-            st.metric("Avg Session Length", f"{avg_time:.1f} min")
-        
-        # Vocabulary distribution by language
-        st.subheader("Vocabulary by Language")
-        
-        # Get all vocabulary items
-        vocabulary = get_all_vocabulary_direct()
-        
-        # Count words per language
-        language_counts = {}
-        for word in vocabulary:
-            if word is None or 'language_translated' not in word:
-                continue
-                
-            lang = word['language_translated']
-            if lang in language_counts:
-                language_counts[lang] += 1
-            else:
-                language_counts[lang] = 1
-        
-        # Convert language codes to names
-        language_names = {}
-        for name, code in languages.items():
-            if code in language_counts:
-                language_names[name] = language_counts[code]
-        
-        # Create chart data
-        if language_names:
-            chart_data = pd.DataFrame({
-                'Language': list(language_names.keys()),
-                'Word Count': list(language_names.values())
-            })
-            
-            # Plot bar chart
-            fig, ax = plt.subplots(figsize=(10, 6))
-            bars = ax.bar(chart_data['Language'], chart_data['Word Count'], color='skyblue')
-            
-            # Add count labels on top of bars
-            for bar in bars:
-                height = bar.get_height()
-                ax.text(bar.get_x() + bar.get_width()/2., height + 0.1,
-                        f'{int(height)}', ha='center', va='bottom')
-            
-            ax.set_xlabel('Language')
-            ax.set_ylabel('Number of Words')
-            ax.set_title('Vocabulary Distribution by Language')
-            plt.xticks(rotation=45)
-            plt.tight_layout()
-            
-            st.pyplot(fig)
-        
-        # Get proficiency distribution
-        st.subheader("Proficiency Level Distribution")
-        
-        proficiency_counts = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
-        for word in vocabulary:
-            if word is None:
-                continue
-            level = word.get('proficiency_level', 0) or 0
-            proficiency_counts[level] += 1
-        
-        # Create proficiency chart
-        prof_data = pd.DataFrame({
-            'Level': [f"Level {lvl}" for lvl in proficiency_counts.keys()],
-            'Words': list(proficiency_counts.values())
-        })
-        
-        if sum(proficiency_counts.values()) > 0:
-            fig, ax = plt.subplots(figsize=(10, 6))
-            colors = ['#FFCCCC', '#FFE5CC', '#FFFFCC', '#E5FFCC', '#CCFFCC', '#CCFFEF']
-            bars = ax.bar(prof_data['Level'], prof_data['Words'], color=colors)
-            
-            # Add count labels
-            for bar in bars:
-                height = bar.get_height()
-                if height > 0:
-                    ax.text(bar.get_x() + bar.get_width()/2., height + 0.1,
-                            f'{int(height)}', ha='center', va='bottom')
-            
-            ax.set_xlabel('Proficiency Level')
-            ax.set_ylabel('Number of Words')
-            ax.set_title('Word Distribution by Proficiency Level')
-            plt.tight_layout()
-            
-            st.pyplot(fig)
-            
-            # Add explanation of proficiency levels
-            st.markdown("""
-            **Proficiency Level Guide:**
-            - **Level 0**: New words or words answered incorrectly multiple times
-            - **Level 1**: Basic recognition (20% correct answers)
-            - **Level 2**: Beginning to remember (40% correct answers)
-            - **Level 3**: Moderate proficiency (60% correct answers)
-            - **Level 4**: Good proficiency (80% correct answers)
-            - **Level 5**: Mastered (90-100% correct answers)
-            """)
-        
-        # Learning suggestions section
-        st.subheader("Learning Suggestions")
-        st.markdown("""
-        Based on your learning patterns, here are some suggestions:
-        
-        1. **Words to Review**: Focus on lower proficiency words
-        2. **Optimal Session Length**: Aim for 10-15 minute learning sessions
-        3. **Learning Frequency**: Try to complete at least one session per day
-        """)
-        
-    else:
-        info_message("No learning statistics available yet. Complete some learning sessions to see your progress!")
-        
-        if st.button("Generate Sample Statistics (Demo)"):
-            # Create sample data for demonstration
-            st.subheader("Sample Statistics (Demo)")
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Total Sessions", 5)
-            with col2:
-                st.metric("Words Studied", 42)
-            with col3:
-                st.metric("Words Learned", 38)
-                
-            # Sample chart
-            sample_data = pd.DataFrame({
-                'Language': ['Spanish', 'French', 'German', 'Italian'],
-                'Word Count': [15, 12, 8, 7]
-            })
-            
-            fig, ax = plt.subplots(figsize=(10, 6))
-            ax.bar(sample_data['Language'], sample_data['Word Count'], color='lightgray')
-            ax.set_xlabel('Language')
-            ax.set_ylabel('Number of Words (Sample Data)')
-            ax.set_title('Example: Vocabulary Distribution by Language')
-            plt.tight_layout()
-            
-            st.pyplot(fig)
-            
-            st.markdown("*This is sample data. Start learning with Camera Mode to begin tracking your real progress!*")
+    info_message("Statistics features are coming soon! Keep learning to see your progress.")
+
 elif app_mode == "My Progress":
-    try:
-        gamification.render_dashboard()
-    except Exception as e:
-        error_message("There was an error displaying the Progress. The system might be initializing.")
-        info_message("Please try again in a moment or add some vocabulary first to initialize the system.")
-        print(f"Dashboard error: {e}")
+    style_title("🏆 My Progress")
+    st.markdown("View your achievements and learning milestones.")
+    
+    info_message("Progress tracking features are coming soon! Continue learning to unlock achievements.")
 
 elif app_mode == "Pronunciation Practice":
-    style_title("🤖 AI-Powered Pronunciation Practice")
-    st.markdown("Practice your pronunciation with real-time AI feedback and comprehensive analysis.")
-
-    # Session management
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.session_state.session_id is None:
-            if st.button("Start Learning Session", key="start_pron_session"):
-                if manage_session("start"):
-                    st.rerun()
-        else:
-            info_message(f"Session in progress - Words studied: {st.session_state.words_studied}")
-    with col2:
-        if st.session_state.session_id is not None:
-            if st.button("End Session", key="end_pron_session"):
-                if manage_session("end"):
-                    st.rerun()
+    style_title("🎤 Pronunciation Practice")
+    st.markdown("Practice your pronunciation with AI feedback.")
     
-    if has_pronunciation_practice:
-        try:
-            # Initialize pronunciation practice if not already initialized
-            if 'pronunciation_practice' not in st.session_state:
-                # Initialize the enhanced pronunciation practice module
-                st.session_state.pronunciation_practice = create_pronunciation_practice(
-                    text_to_speech_func=text_to_speech, 
-                    get_audio_html_func=get_audio_html,
-                    translate_text_func=translate_text,
-                    get_example_sentence_func=get_example_sentence
-                )
-                print("✅ Enhanced pronunciation practice initialized with AI feedback")
-
-                # Add pronunciation practice capabilities to session state
-                st.session_state.pronunciation_capabilities = {
-                    'realtime_feedback': True,
-                    'ai_analysis': True,
-                    'visual_feedback': True,
-                    'progress_tracking': True
-                }
-            
-            # Check for custom recorder availability
-            try:
-                from custom_audio_recorder import audio_recorder
-                st.session_state.pronunciation_practice.has_custom_recorder = True
-                print("✅ Custom audio recorder available")
-            except ImportError:
-                st.session_state.pronunciation_practice.has_custom_recorder = False
-                print("ℹ️ Using fallback recording methods")
-            # Enhanced pronunciation practice interface
-            st.markdown("""
-            ### 🎯 Features Available:
-            - **Real-time feedback** during recording
-            - **AI-powered analysis** of your pronunciation 
-            - **Visual spectrograms** showing sound patterns
-            - **Progress tracking** across practice sessions
-            - **Language-specific tips** for difficult sounds
-            """)
-            
-            # Get vocabulary from database
-            vocabulary = get_all_vocabulary_direct()
-            
-            # Language selection
-            practice_language = st.selectbox(
-                "Select practice language:",
-                list(languages.keys()),
-                index=list(languages.values()).index(st.session_state.target_language) 
-                    if st.session_state.target_language in languages.values() else 0,
-                key="pron_lang_select"
-            )
-            practice_language_code = languages[practice_language]
-            
-            # Filter vocabulary for the selected language
-            filtered_vocab = [word for word in vocabulary if word['language_translated'] == practice_language_code]
-            
-            if filtered_vocab:
-                # Practice mode selection
-                practice_mode = st.radio(
-                    "Choose practice mode:",
-                    [
-                        "📚 Individual Word Practice", 
-                        "🎯 Focused Practice Session",
-                        "🏆 Challenge Mode"
-                    ],
-                    key="practice_mode_select"
-                )
-                
-                if practice_mode == "📚 Individual Word Practice":
-                    # Individual word practice
-                    word_index = st.selectbox(
-                        "Select a word to practice:",
-                        range(len(filtered_vocab)),
-                        format_func=lambda i: f"{filtered_vocab[i].get('word_translated', '')} ({filtered_vocab[i].get('word_original', '')})",
-                        key="word_select"
-                    )
-                    
-                    selected_word = filtered_vocab[word_index]
-                    st.session_state.pronunciation_practice.render_practice_ui(selected_word)
-                
-                elif practice_mode == "🎯 Focused Practice Session":
-                    # Focused session mode
-                    if 'practice_session_words' not in st.session_state:
-                        session_size = st.slider("Number of words to practice:", 3, 10, 5)
-                        
-                        if st.button("🚀 Start Focused Session", type="primary"):
-                            import random
-                            st.session_state.practice_session_words = random.sample(
-                                filtered_vocab, min(session_size, len(filtered_vocab))
-                            )
-                            st.session_state.current_session_index = 0
-                            st.session_state.session_scores = []
-                            st.rerun()
-                    else:
-                        # Session in progress
-                        current_index = st.session_state.current_session_index
-                        total_words = len(st.session_state.practice_session_words)
-                        
-                        # Progress display
-                        progress = current_index / total_words
-                        st.progress(progress)
-                        st.markdown(f"**Word {current_index + 1} of {total_words}**")
-                        
-                        if current_index < total_words:
-                            current_word = st.session_state.practice_session_words[current_index]
-                            st.session_state.pronunciation_practice.render_practice_ui(current_word)
-                            
-                            # Session navigation
-                            col1, col2, col3 = st.columns(3)
-                            with col1:
-                                if current_index > 0:
-                                    if st.button("⬅️ Previous Word"):
-                                        st.session_state.current_session_index -= 1
-                                        st.rerun()
-                            
-                            with col2:
-                                if st.button("⏭️ Skip Word"):
-                                    st.session_state.current_session_index += 1
-                                    st.rerun()
-                            
-                            with col3:
-                                if current_index < total_words - 1:
-                                    if st.button("➡️ Next Word"):
-                                        st.session_state.current_session_index += 1
-                                        st.rerun()
-                        else:
-                            # Session completed
-                            st.success("🎉 Practice session completed!")
-                            
-                            # Show session results
-                            if 'session_scores' in st.session_state and st.session_state.session_scores:
-                                avg_score = sum(st.session_state.session_scores) / len(st.session_state.session_scores)
-                                st.metric("Average Score", f"{avg_score:.0f}%")
-                                
-                                # Progress chart
-                                fig, ax = plt.subplots(figsize=(8, 4))
-                                ax.plot(range(1, len(st.session_state.session_scores) + 1), 
-                                       st.session_state.session_scores, 
-                                       marker='o', linestyle='-')
-                                ax.set_xlabel('Word Number')
-                                ax.set_ylabel('Score (%)')
-                                ax.set_title('Session Progress')
-                                ax.grid(True, alpha=0.3)
-                                st.pyplot(fig)
-                            
-                            # Reset session
-                            if st.button("🔄 Start New Session"):
-                                for key in ['practice_session_words', 'current_session_index', 'session_scores']:
-                                    if key in st.session_state:
-                                        del st.session_state[key]
-                                st.rerun()
-                
-                elif practice_mode == "🏆 Challenge Mode":
-                    # Challenge mode - rapid pronunciation assessment
-                    st.markdown("### 🏆 Pronunciation Challenge")
-                    st.markdown("Quick-fire pronunciation assessment - get scored on speed and accuracy!")
-                    
-                    if 'challenge_mode' not in st.session_state:
-                        difficulty = st.selectbox(
-                            "Select difficulty:",
-                            ["🟢 Easy (3 words)", "🟡 Medium (5 words)", "🔴 Hard (8 words)"]
-                        )
-                        
-                        word_count = {"🟢 Easy (3 words)": 3, "🟡 Medium (5 words)": 5, "🔴 Hard (8 words)": 8}[difficulty]
-                        
-                        if st.button("🚀 Start Challenge!", type="primary"):
-                            import random
-                            st.session_state.challenge_words = random.sample(
-                                filtered_vocab, min(word_count, len(filtered_vocab))
-                            )
-                            st.session_state.challenge_index = 0
-                            st.session_state.challenge_scores = []
-                            st.session_state.challenge_start_time = time.time()
-                            st.session_state.challenge_mode = True
-                            st.rerun()
-                    else:
-                        # Challenge in progress
-                        current_index = st.session_state.challenge_index
-                        total_words = len(st.session_state.challenge_words)
-                        
-                        if current_index < total_words:
-                            # Timer display
-                            elapsed_time = time.time() - st.session_state.challenge_start_time
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                st.metric("Time Elapsed", f"{elapsed_time:.1f}s")
-                            with col2:
-                                st.metric("Words Remaining", total_words - current_index)
-                            
-                            # Current word practice
-                            current_word = st.session_state.challenge_words[current_index]
-                            st.markdown(f"### Challenge Word: {current_word.get('word_translated', '')}")
-                            
-                            # Quick practice interface
-                            st.session_state.pronunciation_practice.render_practice_ui(current_word)
-                            
-                        else:
-                            # Challenge completed
-                            total_time = time.time() - st.session_state.challenge_start_time
-                            st.success(f"🏆 Challenge completed in {total_time:.1f} seconds!")
-                            
-                            # Challenge results
-                            if st.session_state.challenge_scores:
-                                avg_score = sum(st.session_state.challenge_scores) / len(st.session_state.challenge_scores)
-                                speed_bonus = max(0, 100 - total_time)  # Bonus for speed
-                                final_score = (avg_score * 0.8) + (speed_bonus * 0.2)
-                                
-                                col1, col2, col3 = st.columns(3)
-                                with col1:
-                                    st.metric("Average Accuracy", f"{avg_score:.0f}%")
-                                with col2:
-                                    st.metric("Speed Bonus", f"{speed_bonus:.0f}")
-                                with col3:
-                                    st.metric("Final Score", f"{final_score:.0f}%")
-                                
-                                # Achievement badges
-                                if final_score >= 90:
-                                    st.markdown("🏆 **PRONUNCIATION MASTER!**")
-                                elif final_score >= 80:
-                                    st.markdown("🥇 **EXCELLENT PERFORMANCE!**")
-                                elif final_score >= 70:
-                                    st.markdown("🥈 **GREAT JOB!**")
-                                else:
-                                    st.markdown("🥉 **KEEP PRACTICING!**")
-                            
-                            # Reset challenge
-                            if st.button("🔄 New Challenge"):
-                                for key in ['challenge_words', 'challenge_index', 'challenge_scores', 
-                                          'challenge_start_time', 'challenge_mode']:
-                                    if key in st.session_state:
-                                        del st.session_state[key]
-                                st.rerun()
-            else:
-                warning_message(f"No vocabulary words found for {practice_language}. Go to Camera Mode to add words first.")
-            
-        except Exception as e:
-            error_message(f"Error in pronunciation practice: {str(e)}")
-            st.info("Try refreshing the page or check the pronunciation practice module.")
-    else:
-        # Show what's available vs what's missing
-        st.warning("🎤 Some pronunciation features require additional packages.")
-        
-        # Basic pronunciation practice without advanced features
-        st.markdown("### 🎯 Basic Pronunciation Practice")
-        st.markdown("You can still practice pronunciation with the available features:")
-        
-        # Get vocabulary
-        vocabulary = get_all_vocabulary_direct()
-        practice_language = st.selectbox(
-            "Select practice language:",
-            list(languages.keys()),
-            index=list(languages.values()).index(st.session_state.target_language) 
-                if st.session_state.target_language in languages.values() else 0,
-            key="basic_pron_lang_select"
-        )
-        practice_language_code = languages[practice_language]
-        
-        # Filter vocabulary
-        filtered_vocab = [word for word in vocabulary if word['language_translated'] == practice_language_code]
-        
-        if filtered_vocab:
-            word_index = st.selectbox(
-                "Select a word to practice:",
-                range(len(filtered_vocab)),
-                format_func=lambda i: f"{filtered_vocab[i].get('word_translated', '')} ({filtered_vocab[i].get('word_original', '')})",
-                key="basic_word_select"
-            )
-            
-            selected_word = filtered_vocab[word_index]
-            word_translated = selected_word.get('word_translated', '')
-            
-            st.markdown(f"### Practice: {word_translated}")
-            
-            # Play pronunciation
-            st.markdown("**🔊 Listen and repeat:**")
-            audio_bytes = text_to_speech(word_translated, practice_language_code)
-            if audio_bytes:
-                st.markdown(get_audio_html(audio_bytes), unsafe_allow_html=True)
-            
-            # Show pronunciation tips
-            pronunciation_tips = get_pronunciation_guide(word_translated, practice_language_code)
-            if pronunciation_tips:
-                st.markdown("**💡 Pronunciation Tips:**")
-                for tip in pronunciation_tips:
-                    st.markdown(f"- {tip}")
-            
-            # File upload for basic feedback
-            st.markdown("**📁 Upload your recording for basic analysis:**")
-            uploaded_audio = st.file_uploader(
-                "Record yourself saying the word and upload the audio file", 
-                type=["wav", "mp3", "ogg", "m4a"],
-                key="basic_audio_upload"
-            )
-            
-            if uploaded_audio:
-                # Basic analysis without advanced features
-                st.audio(uploaded_audio)
-                
-                # Simple feedback
-                st.markdown("### 📝 Basic Feedback")
-                st.success("✅ Audio received! Keep practicing by:")
-                st.markdown("- 🔄 Comparing your pronunciation with the correct audio")
-                st.markdown("- 📚 Focusing on the pronunciation tips above")
-                st.markdown("- 🎯 Recording multiple attempts to improve")
-                
-                # Save to vocabulary option
-                if st.button("💾 Save to Vocabulary", key="basic_save_vocab"):
-                    if st.session_state.session_id is None:
-                        manage_session("start")
-                    
-                    vocab_id = add_vocabulary_direct(
-                        word_original=selected_word.get('word_original', ''),
-                        word_translated=word_translated,
-                        language_translated=practice_language_code,
-                        category="pronunciation_practice",
-                        image_path=None
-                    )
-                    
-                    if vocab_id:
-                        st.success("✅ Word saved to vocabulary!")
-                        st.session_state.words_studied += 1
-                        st.session_state.words_learned += 1
-        else:
-            warning_message(f"No vocabulary words found for {practice_language}. Go to Camera Mode to add words first.")
-        
-        # Installation guide
-        st.markdown("### 🛠️ For Advanced AI Feedback")
-        st.markdown("Install these packages for real-time AI pronunciation analysis:")
-        st.code("pip install streamlit-webrtc speech-recognition librosa python-Levenshtein av")
+    info_message("Pronunciation practice features are coming soon! Use the audio playback in vocabulary to practice for now.")
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Session Info")
