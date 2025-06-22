@@ -98,11 +98,56 @@ def get_user_database():
     if 'user_db' not in st.session_state:
         try:
             print("🔄 Initializing database connection...")
-            st.session_state.user_db = LanguageLearningDB("language_learning.db")
-            print("✅ Database connection successful")
+            
+            # Ensure database directory exists
+            db_path = "language_learning.db"
+            print(f"🔍 Database path: {db_path}")
+            
+            # Create database instance
+            st.session_state.user_db = LanguageLearningDB(db_path)
+            print("✅ Database instance created")
+            
+            # Test the connection
+            st.session_state.user_db.cursor.execute("SELECT 1")
+            result = st.session_state.user_db.cursor.fetchone()
+            print(f"✅ Database connection test successful: {result}")
+            
         except Exception as e:
             print(f"❌ Database initialization failed: {str(e)}")
-            raise e
+            import traceback
+            print(f"🔍 Database error traceback: {traceback.format_exc()}")
+            
+            # Try to create a simple fallback database
+            try:
+                print("🔄 Attempting fallback database creation...")
+                import sqlite3
+                conn = sqlite3.connect("language_learning.db")
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                
+                # Create basic sessions table
+                cursor.execute('''
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id INTEGER PRIMARY KEY,
+                    user_id TEXT,
+                    start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    end_time TIMESTAMP,
+                    words_studied INTEGER DEFAULT 0,
+                    words_learned INTEGER DEFAULT 0
+                );
+                ''')
+                conn.commit()
+                conn.close()
+                print("✅ Fallback database created")
+                
+                # Try again with our class
+                st.session_state.user_db = LanguageLearningDB("language_learning.db")
+                print("✅ Database connection successful after fallback")
+                
+            except Exception as fallback_error:
+                print(f"❌ Fallback database creation failed: {fallback_error}")
+                raise e
+    
     return st.session_state.user_db
 
 @st.cache_resource
@@ -757,13 +802,39 @@ def get_all_vocabulary_direct():
         return []
     
     db = get_user_database()
-    vocabulary = db.get_all_vocabulary()
     
-    result = []
-    for row in vocabulary:
-        result.append(dict(row))
-    
-    return result
+    # Add user_id filtering to make data user-specific
+    try:
+        # Get vocabulary with user-specific filtering
+        user_id = user.get('id', 'unknown')
+        
+        # For now, we'll use email as a unique identifier since that's what we have
+        user_email = user.get('email', user.get('id', 'unknown'))
+        
+        # Query with a simple filter (you may need to update your database schema later)
+        query = """
+        SELECT * FROM vocabulary 
+        WHERE source LIKE ? OR source IS NULL OR source = 'manual'
+        ORDER BY date_added DESC
+        """
+        
+        db.cursor.execute(query, (f"%{user_email}%",))
+        vocabulary = db.cursor.fetchall()
+        
+        result = []
+        for row in vocabulary:
+            result.append(dict(row))
+        
+        return result
+        
+    except Exception as e:
+        print(f"Error getting user vocabulary: {e}")
+        # Fallback to all vocabulary
+        vocabulary = db.get_all_vocabulary()
+        result = []
+        for row in vocabulary:
+            result.append(dict(row))
+        return result
 
 def create_session_direct():
     """Create a session for the authenticated user."""
@@ -773,30 +844,44 @@ def create_session_direct():
         return None
     
     try:
-        db = get_user_database()
-        print(f"✅ Database connection established")
-        print(f"🔍 User ID: {user.get('id', 'NO_ID')}")
+        print(f"🔄 Starting session creation process...")
+        print(f"🔍 User data: {user}")
         
-        # Try to create session with user_id
-        session_id = db.start_session(user['id'])
-        print(f"✅ Session created with ID: {session_id}")
-        return session_id
+        # Test database connection first
+        db = get_user_database()
+        print(f"✅ Database instance created")
+        
+        # Test if we can execute a simple query
+        test_query = "SELECT name FROM sqlite_master WHERE type='table';"
+        db.cursor.execute(test_query)
+        tables = db.cursor.fetchall()
+        print(f"✅ Database connection verified. Tables: {[t[0] for t in tables]}")
+        
+        # Check if sessions table exists
+        if not any('sessions' in str(table) for table in tables):
+            print("⚠️ Sessions table not found, creating it...")
+            db._create_tables()
+            print("✅ Tables created")
+        
+        # Try to create session
+        user_id = user.get('id', 'unknown_user')
+        print(f"🔍 Creating session for user_id: {user_id}")
+        
+        session_id = db.start_session(user_id)
+        print(f"✅ Session created successfully with ID: {session_id}")
+        
+        if session_id:
+            return session_id
+        else:
+            print("❌ Session creation returned None")
+            return None
         
     except Exception as e:
         print(f"❌ Session creation error: {str(e)}")
         print(f"🔍 Error type: {type(e).__name__}")
         import traceback
         print(f"🔍 Full traceback: {traceback.format_exc()}")
-        
-        # Try without user_id as fallback
-        try:
-            print("🔄 Trying session creation without user_id...")
-            session_id = db.start_session()
-            print(f"✅ Fallback session created with ID: {session_id}")
-            return session_id
-        except Exception as fallback_error:
-            print(f"❌ Fallback session creation also failed: {str(fallback_error)}")
-            return None
+        return None
 
 # Function to get session statistics
 def get_session_stats_direct(days=30):
@@ -2308,11 +2393,6 @@ elif app_mode == "Statistics":
     
     # Get session stats for the last 30 days
     stats = get_session_stats_direct(30)
-    
-    # Debug display for stats
-    if st.checkbox("Show raw stats data"):
-        st.write("Raw stats data from database:")
-        st.write(stats)
     
     # Check if stats exist and have total_sessions
     if stats and stats.get('total_sessions'):
