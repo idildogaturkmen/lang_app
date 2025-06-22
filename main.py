@@ -25,6 +25,12 @@ import json
 from urllib.parse import parse_qs
 from database import LanguageLearningDB
 
+
+st.set_page_config(
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
 # Supabase Configuration
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://csszlzpsfwmsezursivk.supabase.co")
 SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNzc3psenBzZndtc2V6dXJzaXZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA1Mjg1MjEsImV4cCI6MjA2NjEwNDUyMX0.gIi0Q_pifYpXeM1r8kWlgTO1LD8bc91lQ3suH8OWDKI")
@@ -244,12 +250,6 @@ def update_word_progress_direct(vocab_id, is_correct):
 # Initialize the user and require authentication
 user = require_authentication()
 
-# Display user info in sidebar for debugging
-st.sidebar.markdown("---")
-st.sidebar.markdown("### User Info")
-st.sidebar.markdown(f"**Email:** {user.get('email', 'Unknown')}")
-st.sidebar.markdown(f"**User ID:** {user.get('id', 'Unknown')[:8]}...")
-
 def get_user_database():
     """Get database instance."""
     if 'user_db' not in st.session_state:
@@ -314,12 +314,6 @@ def detect_objects_yolov8(image, confidence_threshold=0.5):
         print(f"YOLOv8 detection error: {e}")
         return [], np.array(image)
 
-
-# First, display Python version for
-st.set_page_config(
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 # Import the UI enhancement module
 from vocam_ui import (
