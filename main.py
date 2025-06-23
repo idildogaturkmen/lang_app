@@ -26,6 +26,210 @@ from urllib.parse import parse_qs
 from database import LanguageLearningDB
 import jwt
 
+class SupabaseDB:
+    def __init__(self):
+        # Supabase connection details
+        self.supabase_url = "https://csszlzpsfwmsezursivk.supabase.co"
+        self.supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNzc3psenBzZndtc2V6dXJzaXZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA1Mjg1MjEsImV4cCI6MjA2NjEwNDUyMX0.gIi0Q_pifYpXeM1r8kWlgTO1LD8bc91lQ3suH8OWDKI"
+        
+    def get_user_id(self):
+        """Get current user ID from authentication."""
+        user = get_authenticated_user()
+        if user:
+            return user.get('id')  # This returns the UUID from Supabase auth
+        return None
+    
+    def add_vocabulary(self, word_original, word_translated, language_translated, category=None, image_path=None):
+        """Add vocabulary to Supabase."""
+        user_id = self.get_user_id()
+        if not user_id:
+            print("❌ No user ID found")
+            return None
+            
+        try:
+            import requests
+            
+            # Get auth token from user session
+            user = get_authenticated_user()
+            auth_token = user.get('auth_token') if user else None
+            
+            headers = {
+                'apikey': self.supabase_key,
+                'Authorization': f'Bearer {auth_token or self.supabase_key}',
+                'Content-Type': 'application/json'
+            }
+            
+            data = {
+                'user_id': user_id,  # Use UUID as string (matches your TEXT column)
+                'word_original': word_original,
+                'word_translated': word_translated,
+                'language_translated': language_translated,
+                'category': category,
+                'image_path': image_path,
+                'source': f'user_{user_id}'
+            }
+            
+            print(f"🔄 Adding vocabulary to Supabase for user: {user_id}")
+            
+            response = requests.post(
+                f'{self.supabase_url}/rest/v1/vocabulary',
+                headers=headers,
+                json=data
+            )
+            
+            print(f"📡 Supabase response status: {response.status_code}")
+            
+            if response.status_code == 201:
+                result = response.json()
+                vocab_id = result[0]['id'] if result else None
+                print(f"✅ Vocabulary saved to Supabase with ID: {vocab_id}")
+                return vocab_id
+            else:
+                print(f"❌ Supabase error: {response.status_code} - {response.text}")
+                return None
+                
+        except Exception as e:
+            print(f"❌ Error adding vocabulary to Supabase: {e}")
+            return None
+    
+    def get_all_vocabulary(self):
+        """Get all vocabulary for current user from Supabase."""
+        user_id = self.get_user_id()
+        if not user_id:
+            print("❌ No user ID found")
+            return []
+            
+        try:
+            import requests
+            
+            # Get auth token from user session
+            user = get_authenticated_user()
+            auth_token = user.get('auth_token') if user else None
+            
+            headers = {
+                'apikey': self.supabase_key,
+                'Authorization': f'Bearer {auth_token or self.supabase_key}',
+            }
+            
+            print(f"🔄 Getting vocabulary from Supabase for user: {user_id}")
+            
+            # Get vocabulary with user progress using a left join
+            url = f'{self.supabase_url}/rest/v1/vocabulary?user_id=eq.{user_id}&select=*,user_progress(*)'
+            
+            response = requests.get(url, headers=headers)
+            
+            print(f"📡 Supabase response status: {response.status_code}")
+            
+            if response.status_code == 200:
+                vocabulary = response.json()
+                print(f"✅ Retrieved {len(vocabulary)} vocabulary items from Supabase")
+                
+                # Debug: Print what we got
+                for item in vocabulary[:2]:  # Print first 2 items for debugging
+                    print(f"📝 Sample vocab: {item.get('word_original')} -> {item.get('word_translated')}")
+                
+                return vocabulary
+            else:
+                print(f"❌ Supabase error: {response.status_code} - {response.text}")
+                return []
+                
+        except Exception as e:
+            print(f"❌ Error getting vocabulary from Supabase: {e}")
+            return []
+    
+    def start_session(self):
+        """Start a new learning session in Supabase."""
+        user_id = self.get_user_id()
+        if not user_id:
+            print("❌ No user ID found")
+            return None
+            
+        try:
+            import requests
+            from datetime import datetime
+            
+            # Get auth token from user session
+            user = get_authenticated_user()
+            auth_token = user.get('auth_token') if user else None
+            
+            headers = {
+                'apikey': self.supabase_key,
+                'Authorization': f'Bearer {auth_token or self.supabase_key}',
+                'Content-Type': 'application/json'
+            }
+            
+            data = {
+                'user_id': user_id,
+                'start_time': datetime.now().isoformat(),
+                'words_studied': 0,
+                'words_learned': 0,
+                'session_type': 'camera_mode'
+            }
+            
+            print(f"🔄 Starting session in Supabase for user: {user_id}")
+            
+            response = requests.post(
+                f'{self.supabase_url}/rest/v1/sessions',
+                headers=headers,
+                json=data
+            )
+            
+            print(f"📡 Session response status: {response.status_code}")
+            
+            if response.status_code == 201:
+                result = response.json()
+                session_id = result[0]['id'] if result else None
+                print(f"✅ Session created in Supabase: {session_id}")
+                return session_id
+            else:
+                print(f"❌ Supabase session error: {response.status_code} - {response.text}")
+                return None
+                
+        except Exception as e:
+            print(f"❌ Error starting session in Supabase: {e}")
+            return None
+    
+    def end_session(self, session_id, words_studied, words_learned):
+        """End a learning session in Supabase."""
+        if not session_id:
+            return False
+            
+        try:
+            import requests
+            from datetime import datetime
+            
+            # Get auth token from user session
+            user = get_authenticated_user()
+            auth_token = user.get('auth_token') if user else None
+            
+            headers = {
+                'apikey': self.supabase_key,
+                'Authorization': f'Bearer {auth_token or self.supabase_key}',
+                'Content-Type': 'application/json'
+            }
+            
+            data = {
+                'end_time': datetime.now().isoformat(),
+                'words_studied': words_studied,
+                'words_learned': words_learned
+            }
+            
+            print(f"🔄 Ending session {session_id} in Supabase")
+            
+            response = requests.patch(
+                f'{self.supabase_url}/rest/v1/sessions?id=eq.{session_id}',
+                headers=headers,
+                json=data
+            )
+            
+            print(f"📡 End session response status: {response.status_code}")
+            
+            return response.status_code == 204  # Supabase returns 204 for successful updates
+                
+        except Exception as e:
+            print(f"❌ Error ending session in Supabase: {e}")
+            return False
+        
 # Authentication Functions for Supabase
 def get_url_params():
     """Get URL parameters from Streamlit."""
@@ -139,38 +343,11 @@ user = require_authentication()
 clear_user_session_data()
 
 def get_user_database():
-    """Get database instance with comprehensive error handling."""
-    if 'user_db' not in st.session_state:
-        print("🔄 Initializing fresh database connection...")
-        
-        try:
-            db_path = get_database_path()  # Use the new function
-            print(f"🔍 Database path: {db_path}")
-            
-            # Check if database exists
-            db_exists = os.path.exists(db_path)
-            print(f"🔍 Database file exists: {db_exists}")
-            
-            if db_exists:
-                db_size = os.path.getsize(db_path)
-                print(f"🔍 Database file size: {db_size} bytes")
-            
-            # Create database instance
-            db_instance = LanguageLearningDB(db_path)
-            print(f"✅ Database instance created: {type(db_instance)}")
-            
-            # Test connection and ensure tables exist
-            db_instance._create_tables()
-            print("✅ Tables verified/created")
-            
-            st.session_state.user_db = db_instance
-            print("✅ Database stored in session state")
-            
-        except Exception as e:
-            print(f"❌ Database initialization error: {str(e)}")
-            raise e
-    
-    return st.session_state.user_db
+    """Get Supabase database instance."""
+    if 'supabase_db' not in st.session_state:
+        st.session_state.supabase_db = SupabaseDB()
+        print("✅ Supabase database connection initialized")
+    return st.session_state.supabase_db
 
 @st.cache_resource
 def load_yolov8_nano():
@@ -840,58 +1017,18 @@ def display_quiz_image(word, caption=""):
         return False
     
 def add_vocabulary_direct(word_original, word_translated, language_translated, category=None, image_path=None):
-    """Add vocabulary for the authenticated user."""
+    """Add vocabulary using Supabase."""
     user = get_authenticated_user()
     if not user:
+        print("❌ No authenticated user for vocabulary save")
         return None
     
     try:
-        conn = sqlite3.connect(get_database_path(), timeout=10.0)  # Use the new function
-        cursor = conn.cursor()
+        db = get_user_database()
+        vocab_id = db.add_vocabulary(word_original, word_translated, language_translated, category, image_path)
         
-        # Get user identifier
-        user_email = user.get('email', user.get('id', 'unknown'))
-        print(f"💾 Saving vocabulary for user: {user_email}")
-        
-        # Check if this word already exists for this user
-        cursor.execute(
-            "SELECT id FROM vocabulary WHERE word_original = ? AND language_translated = ? AND source LIKE ?",
-            (word_original, language_translated, f"%{user_email}%")
-        )
-        existing_word = cursor.fetchone()
-        
-        if existing_word:
-            vocab_id = existing_word[0]
-            cursor.execute(
-                "UPDATE vocabulary SET word_translated = ?, category = ?, image_path = ? WHERE id = ?",
-                (word_translated, category, image_path, vocab_id)
-            )
-            info_message(f"Word '{word_original}' already exists. Updating with new information.")
-        else:
-            from datetime import datetime
-            current_time = datetime.now()
-            
-            # Insert with user-specific source
-            cursor.execute('''
-            INSERT INTO vocabulary 
-            (word_original, word_translated, language_translated, category, image_path, date_added, source)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (word_original, word_translated, language_translated, category, image_path, current_time, f"user_{user_email}"))
-            
-            vocab_id = cursor.lastrowid
-            print(f"✅ Vocabulary saved with ID: {vocab_id}")
-            
-            # Initialize user progress
-            cursor.execute('''
-            INSERT INTO user_progress (vocabulary_id, last_reviewed, proficiency_level)
-            VALUES (?, ?, 0)
-            ''', (vocab_id, current_time))
-        
-        conn.commit()
-        conn.close()
-        
-        # Gamification
         if vocab_id:
+            print(f"✅ Vocabulary saved to Supabase with ID: {vocab_id}")
             try:
                 gamification.check_achievements(
                     "word_learned",
@@ -901,145 +1038,74 @@ def add_vocabulary_direct(word_original, word_translated, language_translated, c
                 )
             except Exception as e:
                 print(f"Gamification error: {e}")
+        else:
+            print("❌ Failed to save vocabulary to Supabase")
         
         return vocab_id
-        
     except Exception as e:
         error_message(f"Error saving vocabulary: {str(e)}")
+        print(f"❌ Vocabulary save error: {e}")
         return None
 
 def get_all_vocabulary_direct():
-    """Get all vocabulary for the authenticated user."""
+    """Get all vocabulary using Supabase."""
     user = get_authenticated_user()
     if not user:
-        print("❌ No authenticated user found")
+        print("❌ No authenticated user for vocabulary retrieval")
         return []
     
     try:
-        conn = sqlite3.connect(get_database_path())
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
+        db = get_user_database()
+        vocabulary = db.get_all_vocabulary()
         
-        # Get user identifier
-        user_email = user.get('email', user.get('id', 'unknown'))
-        print(f"🔍 Looking for vocabulary for user: {user_email}")
-        
-        # First, let's see all vocabulary and their sources
-        cursor.execute("SELECT word_original, source FROM vocabulary")
-        all_vocab_debug = cursor.fetchall()
-        print(f"🔍 All vocabulary in database:")
-        for vocab in all_vocab_debug:
-            print(f"  - {vocab[0]} (source: {vocab[1]})")
-        
-        # Try multiple filtering approaches
-        print(f"🔍 Searching with patterns: '%{user_email}%' and 'user_{user_email}'")
-        
-        # Method 1: Try exact user source match
-        cursor.execute('''
-        SELECT v.id, v.word_original, v.word_translated, v.language_translated,
-               v.category, v.image_path, v.date_added, v.source,
-               up.proficiency_level, up.review_count, up.correct_count, up.last_reviewed
-        FROM vocabulary v
-        LEFT JOIN user_progress up ON v.id = up.vocabulary_id
-        WHERE v.source = ?
-        ORDER BY v.date_added DESC
-        ''', (f"user_{user_email}",))
-        
-        method1_results = cursor.fetchall()
-        print(f"🔍 Method 1 (exact match 'user_{user_email}'): {len(method1_results)} results")
-        
-        # Method 2: Try LIKE pattern match
-        cursor.execute('''
-        SELECT v.id, v.word_original, v.word_translated, v.language_translated,
-               v.category, v.image_path, v.date_added, v.source,
-               up.proficiency_level, up.review_count, up.correct_count, up.last_reviewed
-        FROM vocabulary v
-        LEFT JOIN user_progress up ON v.id = up.vocabulary_id
-        WHERE v.source LIKE ?
-        ORDER BY v.date_added DESC
-        ''', (f"%{user_email}%",))
-        
-        method2_results = cursor.fetchall()
-        print(f"🔍 Method 2 (LIKE '%{user_email}%'): {len(method2_results)} results")
-        
-        # Method 3: If no user-specific results, get recent vocabulary (temporary fallback)
-        if len(method1_results) == 0 and len(method2_results) == 0:
-            print("🔍 No user-specific vocabulary found, checking recent entries...")
-            cursor.execute('''
-            SELECT v.id, v.word_original, v.word_translated, v.language_translated,
-                   v.category, v.image_path, v.date_added, v.source,
-                   up.proficiency_level, up.review_count, up.correct_count, up.last_reviewed
-            FROM vocabulary v
-            LEFT JOIN user_progress up ON v.id = up.vocabulary_id
-            WHERE v.date_added >= datetime('now', '-7 days')
-            ORDER BY v.date_added DESC
-            ''')
+        # Convert to the format expected by the app
+        formatted_vocab = []
+        for item in vocabulary:
+            # Flatten user_progress data if it exists
+            progress = item.get('user_progress', [])
+            progress_data = progress[0] if progress else {}
             
-            method3_results = cursor.fetchall()
-            print(f"🔍 Method 3 (recent entries): {len(method3_results)} results")
-            results = method3_results
-        else:
-            # Use whichever method returned results
-            results = method1_results if len(method1_results) > 0 else method2_results
+            formatted_item = {
+                'id': item['id'],
+                'word_original': item['word_original'],
+                'word_translated': item['word_translated'],
+                'language_translated': item['language_translated'],
+                'category': item.get('category'),
+                'image_path': item.get('image_path'),
+                'date_added': item['date_added'],
+                'source': item.get('source'),
+                'proficiency_level': progress_data.get('proficiency_level', 0),
+                'review_count': progress_data.get('review_count', 0),
+                'correct_count': progress_data.get('correct_count', 0),
+                'last_reviewed': progress_data.get('last_reviewed')
+            }
+            formatted_vocab.append(formatted_item)
         
-        # Convert to list of dictionaries
-        vocabulary = []
-        for row in results:
-            vocab_dict = dict(row)
-            vocabulary.append(vocab_dict)
-            print(f"  ✅ Found: {vocab_dict['word_original']} -> {vocab_dict['word_translated']} (source: {vocab_dict['source']})")
-        
-        conn.close()
-        print(f"📊 Returning {len(vocabulary)} vocabulary entries for user: {user_email}")
-        
-        return vocabulary
+        print(f"📊 Retrieved {len(formatted_vocab)} vocabulary items for user")
+        return formatted_vocab
         
     except Exception as e:
-        print(f"❌ Error getting user vocabulary: {e}")
-        import traceback
-        print(f"🔍 Traceback: {traceback.format_exc()}")
+        print(f"❌ Error getting vocabulary: {e}")
         return []
+
     
 def create_session_direct():
-    """Create a session - simplified approach."""
+    """Create session using Supabase."""
     user = get_authenticated_user()
     if not user:
-        print("❌ No authenticated user found")
+        print("❌ No authenticated user for session creation")
         return None
     
     try:
-        from datetime import datetime
-        
-        conn = sqlite3.connect(get_database_path())  # Use the new function
-        cursor = conn.cursor()
-        
-        # Ensure sessions table exists
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS sessions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            end_time TIMESTAMP,
-            words_studied INTEGER DEFAULT 0,
-            words_learned INTEGER DEFAULT 0
-        );
-        ''')
-        
-        # Insert new session
-        current_time = datetime.now()
-        cursor.execute(
-            "INSERT INTO sessions (start_time, words_studied, words_learned) VALUES (?, 0, 0)",
-            (current_time,)
-        )
-        
-        session_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
-        
-        print(f"✅ Session created successfully: {session_id}")
+        db = get_user_database()
+        session_id = db.start_session()
+        if session_id:
+            print(f"✅ Session created in Supabase: {session_id}")
+        else:
+            print("❌ Failed to create session in Supabase")
         return session_id
-        
     except Exception as e:
-        print(f"❌ Session creation error: {e}")
+        print(f"❌ Error creating session: {e}")
         return None
 
 # Function to get session statistics
@@ -1545,16 +1611,12 @@ def get_audio_html(audio_bytes):
 
 # Function to start or end a learning session
 def manage_session(action):
-    """Session management with Supabase user context."""
+    """Session management with Supabase."""
     try:
         user = get_authenticated_user()
         if not user:
-            # Allow demo mode to work
-            if st.session_state.get('authenticated_user', {}).get('username') == 'demo':
-                user = st.session_state.authenticated_user
-            else:
-                error_message("No authenticated user found")
-                return False
+            error_message("No authenticated user found")
+            return False
             
         if action == "start":
             try:
@@ -1576,29 +1638,24 @@ def manage_session(action):
                 
         elif action == "end" and st.session_state.session_id:
             try:
-                # Use direct SQLite approach for ending session
-                import sqlite3
-                from datetime import datetime
-                
-                conn = sqlite3.connect("language_learning.db")
-                cursor = conn.cursor()
-                
-                # Update the session with end time and stats
-                current_time = datetime.now()
-                cursor.execute(
-                    "UPDATE sessions SET end_time = ?, words_studied = ?, words_learned = ? WHERE id = ?",
-                    (current_time, st.session_state.words_studied, st.session_state.words_learned, st.session_state.session_id)
+                db = get_user_database()
+                success = db.end_session(
+                    st.session_state.session_id, 
+                    st.session_state.words_studied, 
+                    st.session_state.words_learned
                 )
-                conn.commit()
-                conn.close()
                 
-                success_message(f"Session completed! Words studied: {st.session_state.words_studied}, Words learned: {st.session_state.words_learned}")
-                
-                st.session_state.session_id = None
-                st.session_state.words_studied = 0
-                st.session_state.words_learned = 0
-                
-                return True
+                if success:
+                    success_message(f"Session completed! Words studied: {st.session_state.words_studied}, Words learned: {st.session_state.words_learned}")
+                    
+                    st.session_state.session_id = None
+                    st.session_state.words_studied = 0
+                    st.session_state.words_learned = 0
+                    
+                    return True
+                else:
+                    error_message("Failed to end session properly")
+                    return False
                     
             except Exception as e:
                 error_message(f"Error ending session: {str(e)}")
@@ -1609,7 +1666,6 @@ def manage_session(action):
     except Exception as e:
         error_message(f"Session management error: {str(e)}")
         return False
-
     
 # Function to save image
 def save_image(image, label, detection_bbox=None):
@@ -3391,58 +3447,32 @@ elif app_mode == "Pronunciation Practice":
 
 def debug_database_status():
     """Debug function to check database status."""
-    if st.sidebar.button("🔍 Debug Database"):
+    if st.sidebar.button("🔍 Debug Supabase"):
         user = get_authenticated_user()
-        db_path = get_database_path()
         
-        st.sidebar.markdown("### Database Debug Info")
+        st.sidebar.markdown("### Supabase Debug Info")
         st.sidebar.markdown(f"**User:** {user.get('email', 'Unknown') if user else 'None'}")
-        st.sidebar.markdown(f"**DB Path:** {db_path}")
-        st.sidebar.markdown(f"**DB Exists:** {os.path.exists(db_path)}")
+        st.sidebar.markdown(f"**User ID:** {user.get('id', 'Unknown') if user else 'None'}")
         
-        if os.path.exists(db_path):
-            st.sidebar.markdown(f"**DB Size:** {os.path.getsize(db_path)} bytes")
-            
+        if user:
             try:
-                conn = sqlite3.connect(db_path)
-                cursor = conn.cursor()
+                db = get_user_database()
+                vocabulary = db.get_all_vocabulary()
+                st.sidebar.markdown(f"**Vocabulary Count:** {len(vocabulary)}")
                 
-                # Check total vocabulary
-                cursor.execute("SELECT COUNT(*) FROM vocabulary")
-                total_vocab = cursor.fetchone()[0]
-                st.sidebar.markdown(f"**Total Vocab:** {total_vocab}")
-                
-                # Check vocabulary sources
-                cursor.execute("SELECT DISTINCT source FROM vocabulary")
-                sources = cursor.fetchall()
-                st.sidebar.markdown(f"**Sources:** {[s[0] for s in sources]}")
-                
-                if user:
-                    user_email = user.get('email', 'unknown')
+                if vocabulary:
+                    st.sidebar.markdown("**Sample Vocabulary:**")
+                    for vocab in vocabulary[:3]:
+                        st.sidebar.markdown(f"- {vocab.get('word_original')} → {vocab.get('word_translated')}")
+                else:
+                    st.sidebar.markdown("**No vocabulary found**")
                     
-                    # Check exact match
-                    cursor.execute("SELECT COUNT(*) FROM vocabulary WHERE source = ?", (f"user_{user_email}",))
-                    exact_match = cursor.fetchone()[0]
-                    st.sidebar.markdown(f"**Exact Match:** {exact_match}")
-                    
-                    # Check LIKE match
-                    cursor.execute("SELECT COUNT(*) FROM vocabulary WHERE source LIKE ?", (f"%{user_email}%",))
-                    like_match = cursor.fetchone()[0]
-                    st.sidebar.markdown(f"**Like Match:** {like_match}")
-                    
-                    # Show actual vocabulary
-                    cursor.execute("SELECT word_original, source FROM vocabulary LIMIT 5")
-                    sample_vocab = cursor.fetchall()
-                    st.sidebar.markdown("**Sample Vocab:**")
-                    for word, source in sample_vocab:
-                        st.sidebar.markdown(f"- {word} ({source})")
-                
-                conn.close()
             except Exception as e:
-                st.sidebar.error(f"DB Error: {e}")
+                st.sidebar.error(f"Supabase Error: {e}")
 
-# Add this to your sidebar temporarily
+# Call the function
 debug_database_status()
+
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Session Info")
