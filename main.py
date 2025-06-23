@@ -236,17 +236,20 @@ def get_user_database():
     
     return st.session_state.user_db
 
+import logging
+
 @st.cache_resource
 def load_yolov8_nano():
     """Load ultra-lightweight YOLOv8 Nano - only 4MB!"""
     try:
-        print("Loading YOLOv8 Nano detector...")
-        model = YOLO('yolov8n.pt')  # Downloads automatically first time
-        model.to('cpu')  # Force CPU usage for memory efficiency
-        print("✅ YOLOv8 Nano loaded successfully!")
+        # Log to console/file but not to Streamlit UI
+        logging.info("Loading YOLOv8 Nano detector...")
+        model = YOLO('yolov8n.pt')
+        model.to('cpu')
+        logging.info("✅ YOLOv8 Nano loaded successfully!")
         return model
     except Exception as e:
-        print(f"❌ Error loading YOLOv8: {e}")
+        logging.error(f"❌ Error loading YOLOv8: {e}")
         return None
 
 def detect_objects_yolov8(image, confidence_threshold=0.5):
@@ -859,27 +862,66 @@ def add_vocabulary_direct(word_original, word_translated, language_translated, c
     if not user:
         return None
     
-    db = get_user_database()
-    vocab_id = db.add_vocabulary(
-        word_original=word_original,
-        word_translated=word_translated,
-        language_translated=language_translated,
-        category=category,
-        image_path=image_path
-    )
-    
-    if vocab_id:
-        try:
-            gamification.check_achievements(
-                "word_learned",
-                word=word_original,
-                category=category,
-                language=language_translated
+    try:
+        conn = sqlite3.connect("language_learning.db", timeout=10.0)
+        cursor = conn.cursor()
+        
+        # Get user identifier
+        user_email = user.get('email', user.get('id', 'unknown'))
+        
+        # Check if this word already exists for this user
+        cursor.execute(
+            "SELECT id FROM vocabulary WHERE word_original = ? AND language_translated = ? AND source LIKE ?",
+            (word_original, language_translated, f"%{user_email}%")
+        )
+        existing_word = cursor.fetchone()
+        
+        if existing_word:
+            vocab_id = existing_word[0]
+            cursor.execute(
+                "UPDATE vocabulary SET word_translated = ?, category = ?, image_path = ? WHERE id = ?",
+                (word_translated, category, image_path, vocab_id)
             )
-        except Exception as e:
-            print(f"Gamification error: {e}")
-    
-    return vocab_id
+            info_message(f"Word '{word_original}' already exists. Updating with new information.")
+        else:
+            from datetime import datetime
+            current_time = datetime.now()
+            
+            # Insert with user-specific source
+            cursor.execute('''
+            INSERT INTO vocabulary 
+            (word_original, word_translated, language_translated, category, image_path, date_added, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (word_original, word_translated, language_translated, category, image_path, current_time, f"user_{user_email}"))
+            
+            vocab_id = cursor.lastrowid
+            
+            # Initialize user progress
+            cursor.execute('''
+            INSERT INTO user_progress (vocabulary_id, last_reviewed, proficiency_level)
+            VALUES (?, ?, 0)
+            ''', (vocab_id, current_time))
+        
+        conn.commit()
+        conn.close()
+        
+        # Gamification
+        if vocab_id:
+            try:
+                gamification.check_achievements(
+                    "word_learned",
+                    word=word_original,
+                    category=category,
+                    language=language_translated
+                )
+            except Exception as e:
+                print(f"Gamification error: {e}")
+        
+        return vocab_id
+        
+    except Exception as e:
+        error_message(f"Error saving vocabulary: {str(e)}")
+        return None
 
 def get_all_vocabulary_direct():
     """Get all vocabulary for the authenticated user."""
