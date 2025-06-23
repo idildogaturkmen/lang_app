@@ -856,6 +856,29 @@ def get_pronunciation_guide(word, language_code):
     except Exception as e:
         return [f"Pronunciation guide unavailable: {str(e)}"]
 
+def display_quiz_image(word, caption=""):
+    """Display an image for quiz questions, prioritizing cropped versions."""
+    image_path = word.get('image_path', '')
+    if not image_path or not os.path.exists(image_path):
+        return False
+    
+    try:
+        # Use cropped version if available
+        display_image_path = get_cropped_image_path(image_path)
+        image = Image.open(display_image_path)
+        
+        # Display with appropriate sizing for quiz
+        st.image(image, caption=caption, width=300)
+        
+        # Add context if it's a cropped image
+        if "_cropped.jpg" in display_image_path:
+            st.markdown("*🎯 Focused view of detected object*")
+        
+        return True
+    except Exception as e:
+        print(f"Error displaying quiz image: {e}")
+        return False
+    
 def add_vocabulary_direct(word_original, word_translated, language_translated, category=None, image_path=None):
     """Add vocabulary for the authenticated user."""
     user = get_authenticated_user()
@@ -1564,23 +1587,75 @@ def manage_session(action):
 
     
 # Function to save image
-def save_image(image, label):
+def save_image(image, label, detection_bbox=None):
+    """Save both original and cropped versions of the image."""
     try:
-        # Convert PIL Image to OpenCV format
+        # Convert PIL Image to numpy array
         img_array = np.array(image)
-        img_cv = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
         
         # Create directory if it doesn't exist
         os.makedirs("object_images", exist_ok=True)
         
-        # Save image
-        filename = f"object_images/{label}_{int(time.time())}.jpg"
-        cv2.imwrite(filename, img_cv)
+        timestamp = int(time.time())
+        base_filename = f"object_images/{label}_{timestamp}"
         
-        return filename
+        # Save original image
+        original_filename = f"{base_filename}_original.jpg"
+        img_cv_original = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+        cv2.imwrite(original_filename, img_cv_original)
+        
+        # If we have bounding box coordinates, save cropped version
+        if detection_bbox:
+            left, top, right, bottom = [int(x) for x in detection_bbox]
+            
+            # Add some padding around the object (10% of object size)
+            height, width = img_array.shape[:2]
+            obj_width = right - left
+            obj_height = bottom - top
+            
+            padding_x = max(10, int(obj_width * 0.1))
+            padding_y = max(10, int(obj_height * 0.1))
+            
+            # Calculate crop boundaries with padding
+            crop_left = max(0, left - padding_x)
+            crop_top = max(0, top - padding_y)
+            crop_right = min(width, right + padding_x)
+            crop_bottom = min(height, bottom + padding_y)
+            
+            # Crop the image
+            cropped_img = img_array[crop_top:crop_bottom, crop_left:crop_right]
+            
+            # Save cropped image
+            cropped_filename = f"{base_filename}_cropped.jpg"
+            img_cv_cropped = cv2.cvtColor(cropped_img, cv2.COLOR_RGB2BGR)
+            cv2.imwrite(cropped_filename, img_cv_cropped)
+            
+            print(f"✅ Saved images: {original_filename} and {cropped_filename}")
+            return cropped_filename  # Return cropped version as primary
+        else:
+            print(f"✅ Saved original image: {original_filename}")
+            return original_filename
+            
     except Exception as e:
         error_message(f"Error saving image: {e}")
         return None
+
+def get_cropped_image_path(image_path):
+    """Get the cropped version of an image path if it exists."""
+    if not image_path:
+        return image_path
+    
+    # Check if this is already a cropped image
+    if "_cropped.jpg" in image_path:
+        return image_path
+    
+    # Try to find cropped version
+    cropped_path = image_path.replace(".jpg", "_cropped.jpg")
+    if os.path.exists(cropped_path):
+        return cropped_path
+    
+    # Fall back to original
+    return image_path
 
 # Function to start a new quiz
 def start_new_quiz(vocabulary, num_questions=5):
@@ -2072,8 +2147,8 @@ if app_mode == "Camera Mode":
                                     label = detection['label']
                                     translated_label = translate_text(label, st.session_state.target_language)
                                     
-                                    # Save the image
-                                    image_path = save_image(image, label)
+                                    # Save the image with bounding box info for cropping
+                                    image_path = save_image(image, label, detection['bbox'])  # Pass bbox
                                     
                                     # Get object category
                                     category = get_object_category(label)
@@ -2430,8 +2505,19 @@ elif app_mode == "My Vocabulary":
                 image_path = word.get('image_path', '')
                 if image_path and os.path.exists(image_path):
                     try:
-                        image = Image.open(image_path)
-                        st.image(image, caption=f"Image for {word.get('word_original', '')}")
+                        # Use cropped version if available
+                        display_image_path = get_cropped_image_path(image_path)
+                        image = Image.open(display_image_path)
+                        
+                        # Show cropped image with clear caption
+                        st.image(image, caption=f"📷 {word.get('word_original', '')} - Cropped from detection")
+                        
+                        # Optionally show if this is a cropped vs original image
+                        if "_cropped.jpg" in display_image_path:
+                            st.markdown("*🎯 Showing focused crop of detected object*")
+                        else:
+                            st.markdown("*📸 Showing full original image*")
+                            
                     except Exception as e:
                         error_message(f"Error loading image: {e}")
                 else:
@@ -2474,13 +2560,14 @@ elif app_mode == "Quiz Mode":
                 'update_word_progress_direct': update_word_progress_direct
             }
             
-            # Initialize the quiz system
+            # Initialize the quiz system with image display function
             quiz_system = QuizSystem(
                 db_functions=db_functions,
                 text_to_speech=text_to_speech,
                 get_audio_html=get_audio_html,
                 get_example_sentence=get_example_sentence,
-                get_pronunciation_guide=get_pronunciation_guide
+                get_pronunciation_guide=get_pronunciation_guide,
+                display_quiz_image=display_quiz_image  # Add this line
             )
             
             # Store in session state
