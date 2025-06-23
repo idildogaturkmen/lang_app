@@ -926,21 +926,21 @@ def create_session_direct():
     """Create a session - simplified approach."""
     user = get_authenticated_user()
     if not user:
+        print("❌ No authenticated user found")
         return None
     
     try:
         # Use direct SQLite approach since the class method might be failing
         import sqlite3
-        import datetime
+        from datetime import datetime
         
         conn = sqlite3.connect("language_learning.db")
         cursor = conn.cursor()
         
-        # Ensure sessions table exists
+        # Ensure sessions table exists (without user_id for now to match original schema)
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS sessions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT,
             start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             end_time TIMESTAMP,
             words_studied INTEGER DEFAULT 0,
@@ -948,11 +948,11 @@ def create_session_direct():
         );
         ''')
         
-        # Insert new session
-        user_id = user.get('id', user.get('email', 'unknown'))
+        # Insert new session (without user_id to match original schema)
+        current_time = datetime.now()
         cursor.execute(
-            "INSERT INTO sessions (user_id, start_time, words_studied, words_learned) VALUES (?, ?, 0, 0)",
-            (user_id, datetime.datetime.now())
+            "INSERT INTO sessions (start_time, words_studied, words_learned) VALUES (?, 0, 0)",
+            (current_time,)
         )
         
         session_id = cursor.lastrowid
@@ -964,6 +964,7 @@ def create_session_direct():
         
     except Exception as e:
         print(f"❌ Session creation error: {e}")
+        return None  # IMPORTANT: Return None on error
 
 # Function to get session statistics
 def get_session_stats_direct(days=30):
@@ -991,7 +992,7 @@ def check_database_setup():
         missing_tables = [table for table in required_tables if table not in tables]
         
         if missing_tables:
-            # Create missing tables
+            # Create missing tables with ORIGINAL schema (no user_id in sessions)
             if 'vocabulary' in missing_tables:
                 cursor.execute('''
                 CREATE TABLE IF NOT EXISTS vocabulary (
@@ -1390,8 +1391,12 @@ def manage_session(action):
     try:
         user = get_authenticated_user()
         if not user:
-            error_message("No authenticated user found")
-            return False
+            # Allow demo mode to work
+            if st.session_state.get('authenticated_user', {}).get('username') == 'demo':
+                user = st.session_state.authenticated_user
+            else:
+                error_message("No authenticated user found")
+                return False
             
         if action == "start":
             try:
@@ -1413,24 +1418,29 @@ def manage_session(action):
                 
         elif action == "end" and st.session_state.session_id:
             try:
-                db = get_user_database()
-                success = db.end_session(
-                    st.session_state.session_id, 
-                    st.session_state.words_studied, 
-                    st.session_state.words_learned
-                )
+                # Use direct SQLite approach for ending session
+                import sqlite3
+                from datetime import datetime
                 
-                if success:
-                    success_message(f"Session completed! Words studied: {st.session_state.words_studied}, Words learned: {st.session_state.words_learned}")
-                    
-                    st.session_state.session_id = None
-                    st.session_state.words_studied = 0
-                    st.session_state.words_learned = 0
-                    
-                    return True
-                else:
-                    error_message("Failed to end session properly")
-                    return False
+                conn = sqlite3.connect("language_learning.db")
+                cursor = conn.cursor()
+                
+                # Update the session with end time and stats
+                current_time = datetime.now()
+                cursor.execute(
+                    "UPDATE sessions SET end_time = ?, words_studied = ?, words_learned = ? WHERE id = ?",
+                    (current_time, st.session_state.words_studied, st.session_state.words_learned, st.session_state.session_id)
+                )
+                conn.commit()
+                conn.close()
+                
+                success_message(f"Session completed! Words studied: {st.session_state.words_studied}, Words learned: {st.session_state.words_learned}")
+                
+                st.session_state.session_id = None
+                st.session_state.words_studied = 0
+                st.session_state.words_learned = 0
+                
+                return True
                     
             except Exception as e:
                 error_message(f"Error ending session: {str(e)}")
