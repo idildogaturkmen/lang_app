@@ -880,37 +880,81 @@ def enhance_image(image, enhance_type="auto"):
 
 # Function to detect text in image (OCR)
 def detect_text_in_image(image):
-    """Detect text in image using OCR."""
+    """Detect text in image using OCR with better error handling."""
     try:
-        if not has_tesseract:
-            return "OCR functionality requires installing pytesseract."
+        # First try to import and configure pytesseract
+        try:
+            import pytesseract
+            # Try to configure tesseract path for different environments
+            import shutil
+            
+            # Check if tesseract is available in PATH
+            tesseract_cmd = shutil.which('tesseract')
+            if tesseract_cmd:
+                pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+            else:
+                # Try common installation paths
+                possible_paths = [
+                    '/usr/bin/tesseract',
+                    '/usr/local/bin/tesseract',
+                    '/opt/homebrew/bin/tesseract',
+                    'C:\\Program Files\\Tesseract-OCR\\tesseract.exe',
+                    'C:\\Program Files (x86)\\Tesseract-OCR\\tesseract.exe'
+                ]
+                
+                for path in possible_paths:
+                    if os.path.exists(path):
+                        pytesseract.pytesseract.tesseract_cmd = path
+                        break
+                else:
+                    return "Tesseract OCR is not installed on this system. Text detection is not available."
+            
+        except ImportError:
+            return "OCR functionality requires pytesseract package."
         
         # Convert PIL image to numpy array
         img_array = np.array(image)
         
-        # Convert to grayscale
-        gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+        # Convert to grayscale for better OCR
+        if len(img_array.shape) == 3:
+            gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+        else:
+            gray = img_array
         
-        # Apply threshold to get image with only black and white
-        _, binary = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)
+        # Apply image preprocessing for better OCR
+        # Resize image if too small
+        height, width = gray.shape
+        if height < 300 or width < 300:
+            scale_factor = max(300/height, 300/width)
+            new_height = int(height * scale_factor)
+            new_width = int(width * scale_factor)
+            gray = cv2.resize(gray, (new_width, new_height), interpolation=cv2.INTER_CUBIC)
         
-        # Apply dilation and erosion to remove noise
-        kernel = np.ones((1, 1), np.uint8)
-        processed = cv2.dilate(binary, kernel, iterations=1)
-        processed = cv2.erode(processed, kernel, iterations=1)
+        # Apply threshold to get better contrast
+        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         
-        # Invert back
-        processed = cv2.bitwise_not(processed)
+        # Apply morphological operations to clean up the image
+        kernel = np.ones((2, 2), np.uint8)
+        processed = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+        processed = cv2.morphologyEx(processed, cv2.MORPH_OPEN, kernel)
+        
+        # Configure OCR parameters
+        config = r'--oem 3 --psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 '
         
         # Detect text
-        detected_text = pytesseract.image_to_string(processed)
+        detected_text = pytesseract.image_to_string(processed, config=config)
         
         # Clean and process the text
         detected_text = detected_text.strip()
         
+        if not detected_text:
+            return "No text could be detected in this image. Try using an image with clearer, larger text."
+        
         return detected_text
+        
     except Exception as e:
-        return f"Text detection error: {e}"
+        return f"Text detection error: {str(e)}"
+    
 
 # Function to get example sentence
 def get_example_sentence(word, target_language):
@@ -1072,82 +1116,65 @@ def create_session_direct():
 
 # Function to get session statistics
 def get_session_stats_direct(days=30):
-    """Get session statistics for the authenticated user."""
+    """Get session statistics from Supabase."""
     user = get_authenticated_user()
     if not user:
         return {}
     
     try:
-        conn = sqlite3.connect("language_learning.db")
-        cursor = conn.cursor()
-        
-        # Calculate date for filtering
+        import requests
         from datetime import datetime, timedelta
-        current_time = datetime.now()
-        start_date = current_time - timedelta(days=days)
-        start_date_str = start_date.strftime("%Y-%m-%d")
         
-        # Get user identifier
-        user_email = user.get('email', user.get('id', 'unknown'))
+        db = get_user_database()
+        headers = db.get_headers()
+        user_id = db.get_user_id()
         
-        # Filter sessions to only include recent ones (after user auth was implemented)
-        # This excludes old test sessions
-        cursor.execute(
-            "SELECT COUNT(*) FROM sessions WHERE start_time >= ?",
-            (start_date_str,)
-        )
-        total_sessions = cursor.fetchone()[0]
+        # Calculate date filter
+        start_date = (datetime.now() - timedelta(days=days)).isoformat()
         
-        # Get words studied and learned from recent sessions only
-        cursor.execute(
-            "SELECT SUM(words_studied), SUM(words_learned) FROM sessions WHERE start_time >= ?",
-            (start_date_str,)
-        )
-        result = cursor.fetchone()
-        total_words_studied = result[0] if result[0] else 0
-        total_words_learned = result[1] if result[1] else 0
+        # Get sessions from Supabase
+        sessions_url = f'{db.supabase_url}/rest/v1/sessions?user_id=eq.{user_id}&start_time=gte.{start_date}'
+        sessions_response = requests.get(sessions_url, headers=headers)
         
-        # Calculate averages
-        avg_words_per_session = total_words_studied / total_sessions if total_sessions > 0 else 0
-        
-        # Get session durations for recent sessions only
-        cursor.execute(
-            """
-            SELECT start_time, end_time 
-            FROM sessions 
-            WHERE start_time >= ? AND end_time IS NOT NULL
-            """,
-            (start_date_str,)
-        )
-        
-        # Calculate average session length
-        total_minutes = 0
-        session_count = 0
-        
-        for start_time_str, end_time_str in cursor.fetchall():
-            try:
-                start_time = datetime.fromisoformat(start_time_str.replace(' ', 'T'))
-                end_time = datetime.fromisoformat(end_time_str.replace(' ', 'T'))
-                duration = (end_time - start_time).total_seconds() / 60
-                total_minutes += duration
-                session_count += 1
-            except:
-                pass
-        
-        avg_session_minutes = total_minutes / session_count if session_count > 0 else 0
-        
-        conn.close()
-        
-        return {
-            'total_sessions': total_sessions,
-            'total_words_studied': total_words_studied,
-            'total_words_learned': total_words_learned,
-            'avg_words_per_session': avg_words_per_session,
-            'avg_session_minutes': avg_session_minutes
-        }
-        
+        if sessions_response.status_code == 200:
+            sessions = sessions_response.json()
+            
+            total_sessions = len(sessions)
+            total_words_studied = sum(s.get('words_studied', 0) for s in sessions)
+            total_words_learned = sum(s.get('words_learned', 0) for s in sessions)
+            
+            avg_words_per_session = total_words_studied / total_sessions if total_sessions > 0 else 0
+            
+            # Calculate session durations
+            total_minutes = 0
+            session_count = 0
+            
+            for session in sessions:
+                if session.get('end_time') and session.get('start_time'):
+                    try:
+                        start = datetime.fromisoformat(session['start_time'].replace('Z', '+00:00'))
+                        end = datetime.fromisoformat(session['end_time'].replace('Z', '+00:00'))
+                        duration = (end - start).total_seconds() / 60
+                        total_minutes += duration
+                        session_count += 1
+                    except:
+                        pass
+            
+            avg_session_minutes = total_minutes / session_count if session_count > 0 else 0
+            
+            return {
+                'total_sessions': total_sessions,
+                'total_words_studied': total_words_studied,
+                'total_words_learned': total_words_learned,
+                'avg_words_per_session': avg_words_per_session,
+                'avg_session_minutes': avg_session_minutes
+            }
+        else:
+            print(f"Error getting sessions: {sessions_response.text}")
+            return {}
+            
     except Exception as e:
-        print(f"Error retrieving session stats: {e}")
+        print(f"Error getting session stats: {e}")
         return {}
 
 # Function to check if database is properly set up
@@ -1357,35 +1384,29 @@ def get_gamification():
     return GamificationSystem()
 
 def get_user_scoped_gamification():
-    """Get a completely fresh gamification instance for each user."""
+    """Get gamification instance with Supabase data."""
     user = get_authenticated_user()
     if not user:
         return get_gamification()
     
-    # Always create a fresh instance for this user session
-    user_id = user.get('id', user.get('email', 'unknown'))
+    # Get actual vocabulary count from Supabase
+    actual_vocabulary = get_all_vocabulary_direct()
+    actual_word_count = len(actual_vocabulary)
     
-    # Force reset all gamification session state
-    gamification_keys = [k for k in st.session_state.keys() if 'gamification' in k.lower()]
-    for key in gamification_keys:
-        del st.session_state[key]
+    # Override session state with actual data
+    st.session_state.words_learned = actual_word_count
+    st.session_state.total_words_learned = actual_word_count
+    
+    # Calculate level based on actual vocabulary
+    st.session_state.level = max(1, actual_word_count // 10 + 1)
+    st.session_state.points = actual_word_count * 10
     
     # Create fresh gamification instance
     fresh_gamification = get_gamification()
-    
-    # Force initialize with clean state
-    st.session_state.level = 1
-    st.session_state.points = 0
-    st.session_state.streak_days = 0
-    st.session_state.daily_challenges = []
-    st.session_state.achievements = []
-    st.session_state.badges = []
-    
-    # Initialize the fresh instance
     fresh_gamification.initialize_state()
     
-    print(f"🆕 Created fresh gamification for user: {user_id}")
     return fresh_gamification
+
 # Initialize user-scoped gamification
 gamification = get_user_scoped_gamification()
 
@@ -2650,6 +2671,7 @@ elif app_mode == "Quiz Mode":
     if 'quiz_completed' not in st.session_state:
         st.session_state.quiz_completed = False
         
+    # In your Quiz Mode section, replace the quiz display part with this:
     if st.session_state.current_quiz_word and st.session_state.quiz_options:
         # Quiz is already in progress, display it with custom image handling
         current_word = st.session_state.current_quiz_word
@@ -2685,25 +2707,75 @@ elif app_mode == "Quiz Mode":
             for i, option in enumerate(st.session_state.quiz_options):
                 button_key = f"quiz_option_{i}_{st.session_state.quiz_total}"
                 if st.button(f"{chr(65+i)}. {option['word_translated']}", key=button_key):
+                    # Store the selected answer
+                    st.session_state.selected_answer_index = i
+                    st.session_state.selected_answer = option
+                    
                     is_correct = check_answer(i)
-                    if is_correct:
-                        st.success("✅ Correct!")
-                    else:
-                        st.error(f"❌ Incorrect. The answer was: {current_word['word_translated']}")
                     st.rerun()
         else:
-            # Show the result
+            # Show comprehensive results
             correct_answer = current_word['word_translated']
-            st.info(f"✅ Answer: **{correct_answer}**")
+            selected_answer = st.session_state.get('selected_answer', {}).get('word_translated', 'Unknown')
             
-            # Show example sentence
-            example = get_example_sentence(current_word['word_original'], current_word['language_translated'])
-            if example and example.get('translated'):
-                st.markdown("**Example sentence:**")
-                st.markdown(f"*{example['translated']}*")
+            # Show what user selected vs correct answer
+            if st.session_state.get('selected_answer_index') is not None:
+                if selected_answer == correct_answer:
+                    st.success(f"✅ Correct! You selected: **{selected_answer}**")
+                else:
+                    st.error(f"❌ Incorrect. You selected: **{selected_answer}**")
+                    st.info(f"💡 The correct answer was: **{correct_answer}**")
+            
+            # Comprehensive word information
+            st.markdown("---")
+            st.markdown("### 📚 Learn More About This Word")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown(f"**English:** {current_word['word_original']}")
+                st.markdown(f"**{selected_language}:** {correct_answer}")
+                st.markdown(f"**Category:** {current_word.get('category', 'Unknown')}")
+                
+                # Pronunciation audio
+                st.markdown("**🔊 Pronunciation:**")
+                audio_bytes = text_to_speech(correct_answer, current_word['language_translated'])
+                if audio_bytes:
+                    st.markdown(get_audio_html(audio_bytes), unsafe_allow_html=True)
+                
+                # Pronunciation tips
+                pronunciation_tips = get_pronunciation_guide(correct_answer, current_word['language_translated'])
+                if pronunciation_tips:
+                    st.markdown("**💡 Pronunciation Tips:**")
+                    for tip in pronunciation_tips:
+                        st.markdown(f"- {tip}")
+            
+            with col2:
+                # Example sentences
+                example = get_example_sentence(current_word['word_original'], current_word['language_translated'])
+                st.markdown("**📝 Example Sentences:**")
+                
+                st.markdown(f"**English:** {example['english']}")
+                
+                if example['translated']:
+                    st.markdown(f"**{selected_language}:** {example['translated']}")
+                    
+                    # Audio for example sentence
+                    example_audio = text_to_speech(example['translated'], current_word['language_translated'])
+                    if example_audio:
+                        st.markdown("**🔊 Example Audio:**")
+                        st.markdown(get_audio_html(example_audio), unsafe_allow_html=True)
+                else:
+                    st.markdown("*Example translation not available*")
             
             # Next question button
             if st.button("➡️ Next Question", key=f"next_q_{st.session_state.quiz_total}"):
+                # Clear selected answer for next question
+                if 'selected_answer_index' in st.session_state:
+                    del st.session_state.selected_answer_index
+                if 'selected_answer' in st.session_state:
+                    del st.session_state.selected_answer
+                    
                 if setup_new_question(vocabulary):
                     st.rerun()
                 else:
@@ -3026,38 +3098,65 @@ elif app_mode == "My Progress":
         user = get_authenticated_user()
         user_id = user.get('id', user.get('email', 'unknown')) if user else 'unknown'
         
-        # Get user's actual vocabulary count (not from session state)
+        # Get user's actual vocabulary count from Supabase
         actual_vocabulary = get_all_vocabulary_direct()
         actual_word_count = len(actual_vocabulary)
         
-        # Override session state with actual data
+        # Update session state with actual data
         st.session_state.words_learned = actual_word_count
         st.session_state.total_words_learned = actual_word_count
         
-        # Use user-scoped gamification with fresh data
-        user_gamification = get_user_scoped_gamification()
-        
-        # Remove the duplicate header lines - let gamification handle the content
         if actual_word_count == 0:
             st.info("🌱 Start learning words in Camera Mode to see your progress!")
-            st.markdown("**Current Level:** 1 (Beginner)")
-            st.markdown("**Total Points:** 0")
+            
+            # Show basic progress without gamification
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Level", "1")
+            with col2:
+                st.metric("Words Learned", "0")
+            with col3:
+                st.metric("Points", "0")
+                
             st.markdown("**Achievements:** None yet - start learning to unlock achievements!")
         else:
-            # Show actual user progress without additional headers
-            user_gamification.render_dashboard()
+            # Show actual user progress with updated gamification
+            user_gamification = get_user_scoped_gamification()
+            
+            # Don't call render_dashboard, create our own display
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Level", st.session_state.level)
+            with col2:
+                st.metric("Words Learned", actual_word_count)
+            with col3:
+                st.metric("Points", st.session_state.points)
+            
+            # Progress bar to next level
+            current_level_min = (st.session_state.level - 1) * 10
+            next_level_min = st.session_state.level * 10
+            progress = (actual_word_count - current_level_min) / 10
+            
+            st.markdown("### 📈 Progress to Next Level")
+            st.progress(min(progress, 1.0))
+            st.markdown(f"**{actual_word_count}/{next_level_min} words** to reach Level {st.session_state.level + 1}")
+            
+            # Show vocabulary by language
+            if actual_vocabulary:
+                st.markdown("### 🌍 Learning Progress by Language")
+                
+                language_stats = {}
+                for word in actual_vocabulary:
+                    lang = word.get('language_translated', 'unknown')
+                    lang_name = next((k for k, v in languages.items() if v == lang), lang)
+                    language_stats[lang_name] = language_stats.get(lang_name, 0) + 1
+                
+                for lang, count in language_stats.items():
+                    st.markdown(f"**{lang}:** {count} words")
             
     except Exception as e:
-        error_message("There was an error displaying the Progress. The system might be initializing.")
-        info_message("Please try again in a moment or add some vocabulary first to initialize the system.")
-        print(f"Dashboard error: {e}")
-        
-        # Show basic progress as fallback
-        user = get_authenticated_user()
-        vocabulary_count = len(get_all_vocabulary_direct())
-        st.markdown(f"**Words Learned:** {vocabulary_count}")
-        st.markdown(f"**Level:** 1")
-        st.markdown(f"**Points:** 0")
+        error_message("There was an error displaying progress.")
+        print(f"Progress error: {e}")
 
 elif app_mode == "Pronunciation Practice":
     style_title("Pronunciation Practice")
@@ -3416,28 +3515,5 @@ if st.session_state.session_id:
 else:
     st.sidebar.warning("No active session")
     st.sidebar.markdown("*Start a session in Camera Mode to track progress*")
-
-# Add this to your sidebar temporarily
-if st.sidebar.button("🔧 Show All Vocabulary (Debug)"):
-    try:
-        conn = sqlite3.connect(get_database_path())
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-        SELECT v.id, v.word_original, v.word_translated, v.language_translated,
-               v.category, v.image_path, v.date_added, v.source
-        FROM vocabulary v
-        ORDER BY v.date_added DESC
-        ''')
-        
-        all_vocab = cursor.fetchall()
-        st.sidebar.markdown(f"**All Vocabulary ({len(all_vocab)}):**")
-        for vocab in all_vocab:
-            st.sidebar.markdown(f"- {vocab['word_original']} → {vocab['word_translated']} (source: {vocab['source']})")
-        
-        conn.close()
-    except Exception as e:
-        st.sidebar.error(f"Error: {e}")
 
 add_footer()
