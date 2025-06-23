@@ -28,7 +28,6 @@ import jwt
 
 class SupabaseDB:
     def __init__(self):
-        # Supabase connection details
         self.supabase_url = "https://csszlzpsfwmsezursivk.supabase.co"
         self.supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNzc3psenBzZndtc2V6dXJzaXZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA1Mjg1MjEsImV4cCI6MjA2NjEwNDUyMX0.gIi0Q_pifYpXeM1r8kWlgTO1LD8bc91lQ3suH8OWDKI"
         
@@ -36,34 +35,23 @@ class SupabaseDB:
         """Get current user ID from authentication."""
         user = get_authenticated_user()
         if user:
-            user_id = user.get('id')
+            user_id = str(user.get('id'))  # Ensure it's a string
             print(f"🔍 Retrieved user ID: {user_id}")
             return user_id
         print("❌ No authenticated user found")
         return None
     
-    def get_auth_headers(self):
-        """Get authentication headers for Supabase API calls."""
-        user = get_authenticated_user()
-        auth_token = user.get('auth_token') if user else None
-        
-        headers = {
+    def get_headers(self):
+        """Get standard headers for API requests."""
+        return {
             'apikey': self.supabase_key,
-            'Content-Type': 'application/json'
+            'Authorization': f'Bearer {self.supabase_key}',
+            'Content-Type': 'application/json',
+            'Prefer': 'return=representation'
         }
-        
-        # Try using the auth token if available, otherwise use the anon key
-        if auth_token:
-            headers['Authorization'] = f'Bearer {auth_token}'
-            print(f"🔑 Using user auth token")
-        else:
-            headers['Authorization'] = f'Bearer {self.supabase_key}'
-            print(f"🔑 Using anon key")
-        
-        return headers
     
     def add_vocabulary(self, word_original, word_translated, language_translated, category=None, image_path=None):
-        """Add vocabulary to Supabase."""
+        """Add vocabulary to Supabase with comprehensive error handling."""
         user_id = self.get_user_id()
         if not user_id:
             print("❌ No user ID found for vocabulary addition")
@@ -72,43 +60,52 @@ class SupabaseDB:
         try:
             import requests
             
-            headers = self.get_auth_headers()
+            headers = self.get_headers()
             
             data = {
                 'user_id': user_id,
                 'word_original': word_original,
                 'word_translated': word_translated,
                 'language_translated': language_translated,
-                'category': category,
+                'category': category or 'other',
                 'image_path': image_path,
                 'source': f'user_{user_id}'
             }
             
-            print(f"🔄 Adding vocabulary to Supabase for user: {user_id}")
+            print(f"🔄 Adding vocabulary to Supabase")
+            print(f"📝 User ID: {user_id}")
             print(f"📝 Data: {word_original} -> {word_translated}")
             
             response = requests.post(
                 f'{self.supabase_url}/rest/v1/vocabulary',
                 headers=headers,
-                json=data
+                json=data,
+                timeout=30
             )
             
-            print(f"📡 Supabase ADD response: {response.status_code}")
+            print(f"📡 ADD Response Status: {response.status_code}")
+            print(f"📡 ADD Response Headers: {dict(response.headers)}")
             
-            if response.status_code == 201:
+            if response.status_code in [200, 201]:
                 result = response.json()
-                vocab_id = result[0]['id'] if result else None
-                print(f"✅ Vocabulary saved to Supabase with ID: {vocab_id}")
-                return vocab_id
+                print(f"📡 ADD Response Data: {result}")
+                
+                if result and len(result) > 0:
+                    vocab_id = result[0].get('id')
+                    print(f"✅ Vocabulary saved to Supabase with ID: {vocab_id}")
+                    return vocab_id
+                else:
+                    print(f"❌ Empty response from Supabase")
+                    return None
             else:
                 print(f"❌ Supabase ADD error: {response.status_code}")
-                print(f"❌ Response: {response.text}")
+                print(f"❌ Response Text: {response.text}")
                 return None
                 
         except Exception as e:
             print(f"❌ Exception adding vocabulary to Supabase: {e}")
             import traceback
-            print(f"🔍 Traceback: {traceback.format_exc()}")
+            print(f"🔍 Full traceback: {traceback.format_exc()}")
             return None
     
     def get_all_vocabulary(self):
@@ -121,28 +118,27 @@ class SupabaseDB:
         try:
             import requests
             
-            headers = self.get_auth_headers()
+            headers = self.get_headers()
             
             print(f"🔄 Getting vocabulary from Supabase for user: {user_id}")
             
-            # Simple query first to test
-            url = f'{self.supabase_url}/rest/v1/vocabulary?user_id=eq.{user_id}'
+            # Query with user_id filter
+            url = f'{self.supabase_url}/rest/v1/vocabulary?user_id=eq.{user_id}&order=date_added.desc'
             print(f"🔗 Request URL: {url}")
             
-            response = requests.get(url, headers=headers)
+            response = requests.get(url, headers=headers, timeout=30)
             
-            print(f"📡 Supabase GET response: {response.status_code}")
+            print(f"📡 GET Response Status: {response.status_code}")
             
             if response.status_code == 200:
                 vocabulary = response.json()
                 print(f"✅ Retrieved {len(vocabulary)} vocabulary items from Supabase")
                 
-                # Debug: Print what we got
                 if vocabulary:
-                    for item in vocabulary[:2]:  # Print first 2 items for debugging
-                        print(f"📝 Sample vocab: {item.get('word_original')} -> {item.get('word_translated')}")
+                    for item in vocabulary[:2]:
+                        print(f"📝 Sample: {item.get('word_original')} -> {item.get('word_translated')} (ID: {item.get('id')})")
                 else:
-                    print("📝 No vocabulary items found")
+                    print("📝 No vocabulary items found for this user")
                 
                 return vocabulary
             else:
@@ -151,9 +147,9 @@ class SupabaseDB:
                 return []
                 
         except Exception as e:
-            print(f"❌ Exception getting vocabulary from Supabase: {e}")
+            print(f"❌ Exception getting vocabulary: {e}")
             import traceback
-            print(f"🔍 Traceback: {traceback.format_exc()}")
+            print(f"🔍 Full traceback: {traceback.format_exc()}")
             return []
     
     def start_session(self):
@@ -167,7 +163,7 @@ class SupabaseDB:
             import requests
             from datetime import datetime
             
-            headers = self.get_auth_headers()
+            headers = self.get_headers()
             
             data = {
                 'user_id': user_id,
@@ -177,44 +173,53 @@ class SupabaseDB:
                 'session_type': 'camera_mode'
             }
             
-            print(f"🔄 Starting session in Supabase for user: {user_id}")
+            print(f"🔄 Starting session in Supabase")
+            print(f"📝 User ID: {user_id}")
             print(f"📝 Session data: {data}")
             
             response = requests.post(
                 f'{self.supabase_url}/rest/v1/sessions',
                 headers=headers,
-                json=data
+                json=data,
+                timeout=30
             )
             
-            print(f"📡 Session response: {response.status_code}")
+            print(f"📡 Session Response Status: {response.status_code}")
+            print(f"📡 Session Response Headers: {dict(response.headers)}")
             
-            if response.status_code == 201:
+            if response.status_code in [200, 201]:
                 result = response.json()
-                session_id = result[0]['id'] if result else None
-                print(f"✅ Session created in Supabase: {session_id}")
-                return session_id
+                print(f"📡 Session Response Data: {result}")
+                
+                if result and len(result) > 0:
+                    session_id = result[0].get('id')
+                    print(f"✅ Session created in Supabase with ID: {session_id}")
+                    return session_id
+                else:
+                    print(f"❌ Empty session response from Supabase")
+                    return None
             else:
                 print(f"❌ Supabase session error: {response.status_code}")
                 print(f"❌ Response: {response.text}")
                 return None
                 
         except Exception as e:
-            print(f"❌ Exception starting session in Supabase: {e}")
+            print(f"❌ Exception starting session: {e}")
             import traceback
-            print(f"🔍 Traceback: {traceback.format_exc()}")
+            print(f"🔍 Full traceback: {traceback.format_exc()}")
             return None
     
     def end_session(self, session_id, words_studied, words_learned):
         """End a learning session in Supabase."""
         if not session_id:
-            print("❌ No session ID provided")
+            print("❌ No session ID provided for ending")
             return False
             
         try:
             import requests
             from datetime import datetime
             
-            headers = self.get_auth_headers()
+            headers = self.get_headers()
             
             data = {
                 'end_time': datetime.now().isoformat(),
@@ -222,20 +227,28 @@ class SupabaseDB:
                 'words_learned': words_learned
             }
             
-            print(f"🔄 Ending session {session_id} in Supabase")
+            print(f"🔄 Ending session {session_id}")
+            print(f"📝 End session data: {data}")
             
             response = requests.patch(
                 f'{self.supabase_url}/rest/v1/sessions?id=eq.{session_id}',
                 headers=headers,
-                json=data
+                json=data,
+                timeout=30
             )
             
-            print(f"📡 End session response: {response.status_code}")
+            print(f"📡 End Session Response Status: {response.status_code}")
             
-            return response.status_code == 204  # Supabase returns 204 for successful updates
+            success = response.status_code in [200, 204]
+            if success:
+                print(f"✅ Session {session_id} ended successfully")
+            else:
+                print(f"❌ Failed to end session: {response.text}")
+            
+            return success
                 
         except Exception as e:
-            print(f"❌ Exception ending session in Supabase: {e}")
+            print(f"❌ Exception ending session: {e}")
             return False
         
 # Authentication Functions for Supabase
@@ -3468,89 +3481,60 @@ elif app_mode == "Pronunciation Practice":
         st.markdown("Install these packages for real-time AI pronunciation analysis:")
         st.code("pip install streamlit-webrtc speech-recognition librosa python-Levenshtein av")
 
-def debug_database_status():
-    """Debug function to check database status."""
-    if st.sidebar.button("🔍 Debug Supabase"):
+def comprehensive_supabase_test():
+    """Comprehensive test of all Supabase operations."""
+    if st.sidebar.button("🧪 Full Supabase Test"):
         user = get_authenticated_user()
-        
-        st.sidebar.markdown("### Supabase Debug Info")
-        st.sidebar.markdown(f"**User:** {user.get('email', 'Unknown') if user else 'None'}")
-        st.sidebar.markdown(f"**User ID:** {user.get('id', 'Unknown') if user else 'None'}")
-        
-        if user:
-            try:
-                db = get_user_database()
-                vocabulary = db.get_all_vocabulary()
-                st.sidebar.markdown(f"**Vocabulary Count:** {len(vocabulary)}")
-                
-                if vocabulary:
-                    st.sidebar.markdown("**Sample Vocabulary:**")
-                    for vocab in vocabulary[:3]:
-                        st.sidebar.markdown(f"- {vocab.get('word_original')} → {vocab.get('word_translated')}")
-                else:
-                    st.sidebar.markdown("**No vocabulary found**")
-                    
-            except Exception as e:
-                st.sidebar.error(f"Supabase Error: {e}")
-
-# Call the function
-debug_database_status()
-
-def test_supabase_connection():
-    """Test Supabase connection and permissions."""
-    if st.sidebar.button("🧪 Test Supabase Connection"):
-        user = get_authenticated_user()
-        st.sidebar.markdown("### Supabase Connection Test")
+        st.sidebar.markdown("### Comprehensive Supabase Test")
         
         if not user:
             st.sidebar.error("❌ No authenticated user")
             return
             
-        st.sidebar.markdown(f"**User Email:** {user.get('email')}")
+        st.sidebar.markdown(f"**User:** {user.get('email')}")
         st.sidebar.markdown(f"**User ID:** {user.get('id')}")
-        st.sidebar.markdown(f"**Has Auth Token:** {user.get('auth_token') is not None}")
         
         try:
-            import requests
-            
             db = get_user_database()
-            headers = db.get_auth_headers()
             
-            # Test basic connection
-            response = requests.get(
-                f'{db.supabase_url}/rest/v1/',
-                headers={'apikey': db.supabase_key}
-            )
+            # Test 1: Check existing vocabulary
+            st.sidebar.markdown("**1. Getting existing vocabulary...**")
+            existing_vocab = db.get_all_vocabulary()
+            st.sidebar.markdown(f"Found: {len(existing_vocab)} items")
             
-            st.sidebar.markdown(f"**API Connection:** {'✅ Success' if response.status_code == 200 else '❌ Failed'}")
+            # Test 2: Create a test session
+            st.sidebar.markdown("**2. Creating test session...**")
+            session_id = db.start_session()
+            if session_id:
+                st.sidebar.success(f"✅ Session created: {session_id}")
+                
+                # Test 3: End the test session
+                st.sidebar.markdown("**3. Ending test session...**")
+                if db.end_session(session_id, 1, 1):
+                    st.sidebar.success("✅ Session ended successfully")
+                else:
+                    st.sidebar.error("❌ Failed to end session")
+            else:
+                st.sidebar.error("❌ Failed to create session")
             
-            # Test vocabulary table access
-            vocab_response = requests.get(
-                f'{db.supabase_url}/rest/v1/vocabulary?limit=1',
-                headers=headers
-            )
-            
-            st.sidebar.markdown(f"**Vocabulary Access:** {'✅ Success' if vocab_response.status_code == 200 else '❌ Failed'}")
-            
-            if vocab_response.status_code != 200:
-                st.sidebar.error(f"Vocab Error: {vocab_response.text}")
-            
-            # Test sessions table access
-            session_response = requests.get(
-                f'{db.supabase_url}/rest/v1/sessions?limit=1',
-                headers=headers
-            )
-            
-            st.sidebar.markdown(f"**Sessions Access:** {'✅ Success' if session_response.status_code == 200 else '❌ Failed'}")
-            
-            if session_response.status_code != 200:
-                st.sidebar.error(f"Session Error: {session_response.text}")
+            # Test 4: Add test vocabulary
+            st.sidebar.markdown("**4. Adding test vocabulary...**")
+            vocab_id = db.add_vocabulary("test", "prueba", "es", "test")
+            if vocab_id:
+                st.sidebar.success(f"✅ Vocabulary added: {vocab_id}")
+                
+                # Test 5: Retrieve vocabulary again
+                st.sidebar.markdown("**5. Retrieving vocabulary again...**")
+                new_vocab = db.get_all_vocabulary()
+                st.sidebar.markdown(f"Now found: {len(new_vocab)} items")
+            else:
+                st.sidebar.error("❌ Failed to add vocabulary")
                 
         except Exception as e:
-            st.sidebar.error(f"Connection Error: {e}")
+            st.sidebar.error(f"Test Error: {e}")
 
-# Add this to your sidebar
-test_supabase_connection()
+# Replace your existing debug function with this
+comprehensive_supabase_test()
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Session Info")
