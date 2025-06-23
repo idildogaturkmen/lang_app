@@ -929,41 +929,40 @@ def get_all_vocabulary_direct():
     if not user:
         return []
     
-    db = get_user_database()
-    
-    # Add user_id filtering to make data user-specific
     try:
-        # Get vocabulary with user-specific filtering
-        user_id = user.get('id', 'unknown')
+        conn = sqlite3.connect("language_learning.db")
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
         
-        # For now, we'll use email as a unique identifier since that's what we have
+        # Get user identifier
         user_email = user.get('email', user.get('id', 'unknown'))
         
-        # Query with a simple filter (you may need to update your database schema later)
-        query = """
-        SELECT * FROM vocabulary 
-        WHERE source LIKE ? OR source IS NULL OR source = 'manual'
-        ORDER BY date_added DESC
-        """
+        # Only show vocabulary that belongs to this user
+        # Filter out old test data by only showing entries with user-specific source
+        cursor.execute('''
+        SELECT v.id, v.word_original, v.word_translated, v.language_translated,
+               v.category, v.image_path, v.date_added,
+               up.proficiency_level, up.review_count, up.correct_count, up.last_reviewed
+        FROM vocabulary v
+        LEFT JOIN user_progress up ON v.id = up.vocabulary_id
+        WHERE v.source LIKE ? OR v.source = ?
+        ORDER BY v.date_added DESC
+        ''', (f"%{user_email}%", f"user_{user_email}"))
         
-        db.cursor.execute(query, (f"%{user_email}%",))
-        vocabulary = db.cursor.fetchall()
+        # Convert to list of dictionaries
+        vocabulary = []
+        results = cursor.fetchall()
+        for row in results:
+            vocabulary.append(dict(row))
         
-        result = []
-        for row in vocabulary:
-            result.append(dict(row))
-        
-        return result
+        conn.close()
+        print(f"📊 Found {len(vocabulary)} vocabulary entries for user: {user_email}")
+        return vocabulary
         
     except Exception as e:
         print(f"Error getting user vocabulary: {e}")
-        # Fallback to all vocabulary
-        vocabulary = db.get_all_vocabulary()
-        result = []
-        for row in vocabulary:
-            result.append(dict(row))
-        return result
-
+        return []
+    
 def create_session_direct():
     """Create a session - simplified approach."""
     user = get_authenticated_user()
@@ -1015,9 +1014,78 @@ def get_session_stats_direct(days=30):
     if not user:
         return {}
     
-    db = get_user_database()
-    stats = db.get_session_stats(days)
-    return dict(stats) if stats else {}
+    try:
+        conn = sqlite3.connect("language_learning.db")
+        cursor = conn.cursor()
+        
+        # Calculate date for filtering
+        from datetime import datetime, timedelta
+        current_time = datetime.now()
+        start_date = current_time - timedelta(days=days)
+        start_date_str = start_date.strftime("%Y-%m-%d")
+        
+        # Get user identifier
+        user_email = user.get('email', user.get('id', 'unknown'))
+        
+        # Filter sessions to only include recent ones (after user auth was implemented)
+        # This excludes old test sessions
+        cursor.execute(
+            "SELECT COUNT(*) FROM sessions WHERE start_time >= ?",
+            (start_date_str,)
+        )
+        total_sessions = cursor.fetchone()[0]
+        
+        # Get words studied and learned from recent sessions only
+        cursor.execute(
+            "SELECT SUM(words_studied), SUM(words_learned) FROM sessions WHERE start_time >= ?",
+            (start_date_str,)
+        )
+        result = cursor.fetchone()
+        total_words_studied = result[0] if result[0] else 0
+        total_words_learned = result[1] if result[1] else 0
+        
+        # Calculate averages
+        avg_words_per_session = total_words_studied / total_sessions if total_sessions > 0 else 0
+        
+        # Get session durations for recent sessions only
+        cursor.execute(
+            """
+            SELECT start_time, end_time 
+            FROM sessions 
+            WHERE start_time >= ? AND end_time IS NOT NULL
+            """,
+            (start_date_str,)
+        )
+        
+        # Calculate average session length
+        total_minutes = 0
+        session_count = 0
+        
+        for start_time_str, end_time_str in cursor.fetchall():
+            try:
+                start_time = datetime.fromisoformat(start_time_str.replace(' ', 'T'))
+                end_time = datetime.fromisoformat(end_time_str.replace(' ', 'T'))
+                duration = (end_time - start_time).total_seconds() / 60
+                total_minutes += duration
+                session_count += 1
+            except:
+                pass
+        
+        avg_session_minutes = total_minutes / session_count if session_count > 0 else 0
+        
+        conn.close()
+        
+        return {
+            'total_sessions': total_sessions,
+            'total_words_studied': total_words_studied,
+            'total_words_learned': total_words_learned,
+            'avg_words_per_session': avg_words_per_session,
+            'avg_session_minutes': avg_session_minutes
+        }
+        
+    except Exception as e:
+        print(f"Error retrieving session stats: {e}")
+        return {}
 
 # Function to check if database is properly set up
 def check_database_setup():
@@ -2735,10 +2803,6 @@ elif app_mode == "My Progress":
         # Use user-scoped gamification with fresh data
         user_gamification = get_user_scoped_gamification()
         
-        # Display fresh progress
-        st.markdown(f"### 🎯 Learning Progress for {user.get('email', 'User')}")
-        st.markdown(f"**Actual Words in Vocabulary:** {actual_word_count}")
-        
         if actual_word_count == 0:
             st.info("🌱 Start learning words in Camera Mode to see your progress!")
             st.markdown("**Current Level:** 1 (Beginner)")
@@ -3118,5 +3182,43 @@ if st.session_state.session_id:
 else:
     st.sidebar.warning("No active session")
     st.sidebar.markdown("*Start a session in Camera Mode to track progress*")
+
+# Add this to your sidebar area (after the language selection)
+# TEMPORARY: Add this section to clean up old data
+if st.sidebar.button("🧹 Clean Old Test Data (One Time)"):
+    try:
+        conn = sqlite3.connect("language_learning.db")
+        cursor = conn.cursor()
+        
+        # Delete old vocabulary entries that don't belong to any user
+        cursor.execute("""
+        DELETE FROM vocabulary 
+        WHERE source = 'manual' 
+           OR source IS NULL 
+           OR source NOT LIKE 'user_%'
+           OR date_added < '2024-06-01'
+        """)
+        deleted_vocab = cursor.rowcount
+        
+        # Clean up orphaned user_progress entries
+        cursor.execute("""
+        DELETE FROM user_progress 
+        WHERE vocabulary_id NOT IN (SELECT id FROM vocabulary)
+        """)
+        deleted_progress = cursor.rowcount
+        
+        # Clean up old test sessions
+        cursor.execute("DELETE FROM sessions WHERE start_time < '2024-06-01'")
+        deleted_sessions = cursor.rowcount
+        
+        conn.commit()
+        conn.close()
+        
+        st.sidebar.success(f"✅ Cleaned: {deleted_vocab} vocab, {deleted_progress} progress, {deleted_sessions} sessions")
+        time.sleep(2)
+        st.rerun()
+        
+    except Exception as e:
+        st.sidebar.error(f"Error cleaning: {e}")
 
 add_footer()
