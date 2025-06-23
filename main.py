@@ -242,14 +242,36 @@ import logging
 def load_yolov8_nano():
     """Load ultra-lightweight YOLOv8 Nano - only 4MB!"""
     try:
-        # Log to console/file but not to Streamlit UI
-        logging.info("Loading YOLOv8 Nano detector...")
-        model = YOLO('yolov8n.pt')
-        model.to('cpu')
-        logging.info("✅ YOLOv8 Nano loaded successfully!")
+        import sys
+        import os
+        from contextlib import redirect_stdout, redirect_stderr
+        from io import StringIO
+        
+        # Capture all output during model loading
+        f = StringIO()
+        with redirect_stdout(f), redirect_stderr(f):
+            # Temporarily disable print statements
+            original_print = print
+            def no_print(*args, **kwargs):
+                pass
+            
+            # Replace print function temporarily
+            import builtins
+            builtins.print = no_print
+            
+            try:
+                # Load model silently
+                model = YOLO('yolov8n.pt')
+                model.to('cpu')
+            finally:
+                # Restore print function
+                builtins.print = original_print
+        
         return model
+        
     except Exception as e:
-        logging.error(f"❌ Error loading YOLOv8: {e}")
+        # Only print errors, not loading messages
+        print(f"❌ Error loading YOLOv8: {e}")
         return None
 
 def detect_objects_yolov8(image, confidence_threshold=0.5):
@@ -1761,20 +1783,37 @@ if 'widget_counter' not in st.session_state:
 
 # Main sidebar for navigation
 app_mode_options = ["Camera Mode", "My Vocabulary", "Quiz Mode", "Statistics", "My Progress", "Pronunciation Practice"]
-if 'app_mode' in st.session_state:
-    # Use the session state value as the default index for the selectbox
-    default_index = app_mode_options.index(st.session_state.app_mode) if st.session_state.app_mode in app_mode_options else 0
-else:
-    default_index = 0
 
-app_mode = st.sidebar.selectbox(
+# Get current mode or default
+if 'app_mode' in st.session_state:
+    current_index = app_mode_options.index(st.session_state.app_mode) if st.session_state.app_mode in app_mode_options else 0
+else:
+    current_index = 0
+    st.session_state.app_mode = app_mode_options[0]
+
+# Create selectbox with key to track changes
+new_app_mode = st.sidebar.selectbox(
     "Choose a mode",
     app_mode_options,
-    index=default_index
+    index=current_index,
+    key="app_mode_selector"
 )
 
-# Update session state with the current selection (might be from selectbox or previous setting)
-st.session_state.app_mode = app_mode
+# Force immediate update when selection changes
+if new_app_mode != st.session_state.app_mode:
+    st.session_state.app_mode = new_app_mode
+    # Clear any mode-specific state that might interfere
+    mode_specific_keys = [
+        'quiz_completed', 'current_quiz_word', 'quiz_options', 
+        'words_just_saved', 'detection_checkboxes'
+    ]
+    for key in mode_specific_keys:
+        if key in st.session_state:
+            del st.session_state[key]
+    st.rerun()  # Force immediate rerun
+
+# Use the updated app_mode
+app_mode = st.session_state.app_mode
 
 # Add gamification info to the sidebar
 try:
@@ -2560,14 +2599,13 @@ elif app_mode == "Quiz Mode":
                 'update_word_progress_direct': update_word_progress_direct
             }
             
-            # Initialize the quiz system with image display function
+            # Initialize the quiz system (remove the display_quiz_image parameter)
             quiz_system = QuizSystem(
                 db_functions=db_functions,
                 text_to_speech=text_to_speech,
                 get_audio_html=get_audio_html,
                 get_example_sentence=get_example_sentence,
-                get_pronunciation_guide=get_pronunciation_guide,
-                display_quiz_image=display_quiz_image  # Add this line
+                get_pronunciation_guide=get_pronunciation_guide
             )
             
             # Store in session state
@@ -2592,8 +2630,65 @@ elif app_mode == "Quiz Mode":
         st.session_state.quiz_completed = False
         
     if st.session_state.current_quiz_word and st.session_state.quiz_options:
-        # Quiz is already in progress, display it
-        quiz_system.display_quiz_question(languages, manage_session)
+        # Quiz is already in progress, display it with custom image handling
+        current_word = st.session_state.current_quiz_word
+        
+        # Custom image display before the regular quiz
+        st.markdown("### 🎯 Quiz Question")
+        
+        # Display cropped image if available
+        image_path = current_word.get('image_path', '')
+        has_image = False
+        if image_path and os.path.exists(image_path):
+            display_image_path = get_cropped_image_path(image_path)
+            if os.path.exists(display_image_path):
+                try:
+                    image = Image.open(display_image_path)
+                    st.image(image, caption="What is this object?", width=400)
+                    
+                    if "_cropped.jpg" in display_image_path:
+                        st.markdown("*🎯 Focused view of detected object*")
+                    
+                    has_image = True
+                except Exception as e:
+                    print(f"Error loading quiz image: {e}")
+        
+        # Display the question based on whether we have an image
+        if has_image:
+            st.markdown(f"### What is this object in {selected_language}?")
+        else:
+            st.markdown(f"### Translate: **{current_word['word_original']}** to {selected_language}")
+        
+        # Display answer options
+        if not st.session_state.answered:
+            for i, option in enumerate(st.session_state.quiz_options):
+                button_key = f"quiz_option_{i}_{st.session_state.quiz_total}"
+                if st.button(f"{chr(65+i)}. {option['word_translated']}", key=button_key):
+                    is_correct = check_answer(i)
+                    if is_correct:
+                        st.success("✅ Correct!")
+                    else:
+                        st.error(f"❌ Incorrect. The answer was: {current_word['word_translated']}")
+                    st.rerun()
+        else:
+            # Show the result
+            correct_answer = current_word['word_translated']
+            st.info(f"✅ Answer: **{correct_answer}**")
+            
+            # Show example sentence
+            example = get_example_sentence(current_word['word_original'], current_word['language_translated'])
+            if example and example.get('translated'):
+                st.markdown("**Example sentence:**")
+                st.markdown(f"*{example['translated']}*")
+            
+            # Next question button
+            if st.button("➡️ Next Question", key=f"next_q_{st.session_state.quiz_total}"):
+                if setup_new_question(vocabulary):
+                    st.rerun()
+                else:
+                    st.success("🎉 Quiz completed!")
+                    st.session_state.quiz_completed = True
+                    st.rerun()
         
         # Display current score in sidebar
         st.sidebar.markdown(f"### Current Score: {st.session_state.quiz_score}/{st.session_state.quiz_total}")
@@ -2603,7 +2698,33 @@ elif app_mode == "Quiz Mode":
             
     # Display quiz results if quiz is completed
     elif st.session_state.quiz_completed and st.session_state.quiz_total > 0:
-        quiz_system.display_quiz_results()
+        st.markdown("### 🎉 Quiz Results")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Final Score", f"{st.session_state.quiz_score}/{st.session_state.quiz_total}")
+        with col2:
+            accuracy = (st.session_state.quiz_score / st.session_state.quiz_total) * 100
+            st.metric("Accuracy", f"{accuracy:.1f}%")
+        with col3:
+            if accuracy >= 80:
+                grade = "🏆 Excellent"
+            elif accuracy >= 60:
+                grade = "👍 Good"
+            else:
+                grade = "📚 Keep practicing"
+            st.metric("Grade", grade)
+        
+        # Reset quiz button
+        if st.button("🔄 Start New Quiz"):
+            # Reset quiz state
+            st.session_state.quiz_completed = False
+            st.session_state.current_quiz_word = None
+            st.session_state.quiz_options = []
+            st.session_state.quiz_score = 0
+            st.session_state.quiz_total = 0
+            st.session_state.answered = False
+            st.rerun()
         
     # Display quiz setup
     else:
@@ -2613,7 +2734,7 @@ elif app_mode == "Quiz Mode":
         The quiz will randomly include different types of questions:
         
         - 🔄 Translation (both directions)
-        - 🖼️ Image recognition
+        - 🖼️ Image recognition (with focused object views)
         - 📝 Sentence completion
         - 🎯 Category matching
         - 📊 Related words identification
@@ -2659,6 +2780,7 @@ elif app_mode == "Quiz Mode":
             filtered_vocab = [word for word in filtered_vocab if word.get('category') == category_filter]
         
         filtered_vocab = prepare_vocabulary_for_diverse_questions(filtered_vocab, languages)
+        
         # Display information about available words
         if filtered_vocab:
             st.markdown(f"**{len(filtered_vocab)} words available** for your quiz in {quiz_language}" + 
@@ -2669,12 +2791,12 @@ elif app_mode == "Quiz Mode":
                                   if word.get('image_path') and os.path.exists(word.get('image_path', '')))
             
             # Show details on available question types
-            st.markdown(f"*{words_with_images} words have images for image recognition questions*")
+            st.markdown(f"*{words_with_images} words have images for visual recognition questions*")
             
             # Start quiz button with dynamic label
-            start_label = "Start Quiz" if len(filtered_vocab) >= 4 else f"Need {4-len(filtered_vocab)} More Word(s)"
+            start_label = "🚀 Start Quiz" if len(filtered_vocab) >= 4 else f"Need {4-len(filtered_vocab)} More Word(s)"
             if st.button(start_label, disabled=len(filtered_vocab) < 4):
-                if quiz_system.start_new_quiz(filtered_vocab, languages, num_questions, manage_session):
+                if start_new_quiz(filtered_vocab, num_questions):
                     st.rerun()
             
             # Show word preview 
@@ -2682,10 +2804,12 @@ elif app_mode == "Quiz Mode":
                 # Create a simple table of words
                 preview_data = []
                 for word in filtered_vocab[:20]:  # Limit preview to 20 words
+                    has_image = "✅" if (word.get('image_path') and os.path.exists(word.get('image_path', ''))) else "❌"
                     preview_data.append({
                         "Original": word.get('word_original', ''),
                         "Translation": word.get('word_translated', ''),
-                        "Category": word.get('category', '')
+                        "Category": word.get('category', ''),
+                        "Has Image": has_image
                     })
                 
                 st.dataframe(pd.DataFrame(preview_data))
@@ -2874,6 +2998,7 @@ elif app_mode == "Statistics":
             st.markdown("*This is sample data. Start learning with Camera Mode to begin tracking your real progress!*")
             
 elif app_mode == "My Progress":
+    style_title("My Progress")
     try:
         # Force fresh user data
         user = get_authenticated_user()
