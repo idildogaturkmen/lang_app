@@ -912,10 +912,11 @@ def get_all_vocabulary_direct():
     """Get all vocabulary for the authenticated user."""
     user = get_authenticated_user()
     if not user:
+        print("❌ No authenticated user found")
         return []
     
     try:
-        conn = sqlite3.connect(get_database_path())  # Use the new function
+        conn = sqlite3.connect(get_database_path())
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
@@ -923,40 +924,80 @@ def get_all_vocabulary_direct():
         user_email = user.get('email', user.get('id', 'unknown'))
         print(f"🔍 Looking for vocabulary for user: {user_email}")
         
-        # First, let's see all vocabulary in the database
-        cursor.execute("SELECT COUNT(*) FROM vocabulary")
-        total_vocab = cursor.fetchone()[0]
-        print(f"🔍 Total vocabulary in database: {total_vocab}")
+        # First, let's see all vocabulary and their sources
+        cursor.execute("SELECT word_original, source FROM vocabulary")
+        all_vocab_debug = cursor.fetchall()
+        print(f"🔍 All vocabulary in database:")
+        for vocab in all_vocab_debug:
+            print(f"  - {vocab[0]} (source: {vocab[1]})")
         
-        # Now get user-specific vocabulary
+        # Try multiple filtering approaches
+        print(f"🔍 Searching with patterns: '%{user_email}%' and 'user_{user_email}'")
+        
+        # Method 1: Try exact user source match
         cursor.execute('''
         SELECT v.id, v.word_original, v.word_translated, v.language_translated,
                v.category, v.image_path, v.date_added, v.source,
                up.proficiency_level, up.review_count, up.correct_count, up.last_reviewed
         FROM vocabulary v
         LEFT JOIN user_progress up ON v.id = up.vocabulary_id
-        WHERE v.source LIKE ? OR v.source = ?
+        WHERE v.source = ?
         ORDER BY v.date_added DESC
-        ''', (f"%{user_email}%", f"user_{user_email}"))
+        ''', (f"user_{user_email}",))
+        
+        method1_results = cursor.fetchall()
+        print(f"🔍 Method 1 (exact match 'user_{user_email}'): {len(method1_results)} results")
+        
+        # Method 2: Try LIKE pattern match
+        cursor.execute('''
+        SELECT v.id, v.word_original, v.word_translated, v.language_translated,
+               v.category, v.image_path, v.date_added, v.source,
+               up.proficiency_level, up.review_count, up.correct_count, up.last_reviewed
+        FROM vocabulary v
+        LEFT JOIN user_progress up ON v.id = up.vocabulary_id
+        WHERE v.source LIKE ?
+        ORDER BY v.date_added DESC
+        ''', (f"%{user_email}%",))
+        
+        method2_results = cursor.fetchall()
+        print(f"🔍 Method 2 (LIKE '%{user_email}%'): {len(method2_results)} results")
+        
+        # Method 3: If no user-specific results, get recent vocabulary (temporary fallback)
+        if len(method1_results) == 0 and len(method2_results) == 0:
+            print("🔍 No user-specific vocabulary found, checking recent entries...")
+            cursor.execute('''
+            SELECT v.id, v.word_original, v.word_translated, v.language_translated,
+                   v.category, v.image_path, v.date_added, v.source,
+                   up.proficiency_level, up.review_count, up.correct_count, up.last_reviewed
+            FROM vocabulary v
+            LEFT JOIN user_progress up ON v.id = up.vocabulary_id
+            WHERE v.date_added >= datetime('now', '-7 days')
+            ORDER BY v.date_added DESC
+            ''')
+            
+            method3_results = cursor.fetchall()
+            print(f"🔍 Method 3 (recent entries): {len(method3_results)} results")
+            results = method3_results
+        else:
+            # Use whichever method returned results
+            results = method1_results if len(method1_results) > 0 else method2_results
         
         # Convert to list of dictionaries
         vocabulary = []
-        results = cursor.fetchall()
         for row in results:
-            vocabulary.append(dict(row))
+            vocab_dict = dict(row)
+            vocabulary.append(vocab_dict)
+            print(f"  ✅ Found: {vocab_dict['word_original']} -> {vocab_dict['word_translated']} (source: {vocab_dict['source']})")
         
         conn.close()
-        print(f"📊 Found {len(vocabulary)} vocabulary entries for user: {user_email}")
-        
-        # If no user-specific vocabulary found, check for any vocabulary
-        if len(vocabulary) == 0 and total_vocab > 0:
-            print("⚠️ No user-specific vocabulary found, but database has entries")
-            print("This might be due to user identification issues")
+        print(f"📊 Returning {len(vocabulary)} vocabulary entries for user: {user_email}")
         
         return vocabulary
         
     except Exception as e:
-        print(f"Error getting user vocabulary: {e}")
+        print(f"❌ Error getting user vocabulary: {e}")
+        import traceback
+        print(f"🔍 Traceback: {traceback.format_exc()}")
         return []
     
 def create_session_direct():
@@ -3366,15 +3407,35 @@ def debug_database_status():
                 conn = sqlite3.connect(db_path)
                 cursor = conn.cursor()
                 
+                # Check total vocabulary
                 cursor.execute("SELECT COUNT(*) FROM vocabulary")
                 total_vocab = cursor.fetchone()[0]
                 st.sidebar.markdown(f"**Total Vocab:** {total_vocab}")
                 
+                # Check vocabulary sources
+                cursor.execute("SELECT DISTINCT source FROM vocabulary")
+                sources = cursor.fetchall()
+                st.sidebar.markdown(f"**Sources:** {[s[0] for s in sources]}")
+                
                 if user:
                     user_email = user.get('email', 'unknown')
+                    
+                    # Check exact match
+                    cursor.execute("SELECT COUNT(*) FROM vocabulary WHERE source = ?", (f"user_{user_email}",))
+                    exact_match = cursor.fetchone()[0]
+                    st.sidebar.markdown(f"**Exact Match:** {exact_match}")
+                    
+                    # Check LIKE match
                     cursor.execute("SELECT COUNT(*) FROM vocabulary WHERE source LIKE ?", (f"%{user_email}%",))
-                    user_vocab = cursor.fetchone()[0]
-                    st.sidebar.markdown(f"**User Vocab:** {user_vocab}")
+                    like_match = cursor.fetchone()[0]
+                    st.sidebar.markdown(f"**Like Match:** {like_match}")
+                    
+                    # Show actual vocabulary
+                    cursor.execute("SELECT word_original, source FROM vocabulary LIMIT 5")
+                    sample_vocab = cursor.fetchall()
+                    st.sidebar.markdown("**Sample Vocab:**")
+                    for word, source in sample_vocab:
+                        st.sidebar.markdown(f"- {word} ({source})")
                 
                 conn.close()
             except Exception as e:
@@ -3389,9 +3450,31 @@ if st.session_state.session_id:
     st.sidebar.success(f"Session active")
     st.sidebar.info(f"Words studied: {st.session_state.words_studied}")
     st.sidebar.info(f"Words learned: {st.session_state.words_learned}")
-    st.sidebar.info(f"DEBUG: {st.debug_database_status()}")
 else:
     st.sidebar.warning("No active session")
     st.sidebar.markdown("*Start a session in Camera Mode to track progress*")
+
+# Add this to your sidebar temporarily
+if st.sidebar.button("🔧 Show All Vocabulary (Debug)"):
+    try:
+        conn = sqlite3.connect(get_database_path())
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+        SELECT v.id, v.word_original, v.word_translated, v.language_translated,
+               v.category, v.image_path, v.date_added, v.source
+        FROM vocabulary v
+        ORDER BY v.date_added DESC
+        ''')
+        
+        all_vocab = cursor.fetchall()
+        st.sidebar.markdown(f"**All Vocabulary ({len(all_vocab)}):**")
+        for vocab in all_vocab:
+            st.sidebar.markdown(f"- {vocab['word_original']} → {vocab['word_translated']} (source: {vocab['source']})")
+        
+        conn.close()
+    except Exception as e:
+        st.sidebar.error(f"Error: {e}")
 
 add_footer()
