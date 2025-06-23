@@ -144,13 +144,10 @@ def get_user_database():
         print("🔄 Initializing fresh database connection...")
         
         try:
-            # Step 1: Check file system
-            import os
-            current_dir = os.getcwd()
-            print(f"🔍 Current directory: {current_dir}")
-            print(f"🔍 Directory contents: {os.listdir('.')}")
+            db_path = get_database_path()  # Use the new function
+            print(f"🔍 Database path: {db_path}")
             
-            db_path = "language_learning.db"
+            # Check if database exists
             db_exists = os.path.exists(db_path)
             print(f"🔍 Database file exists: {db_exists}")
             
@@ -158,120 +155,61 @@ def get_user_database():
                 db_size = os.path.getsize(db_path)
                 print(f"🔍 Database file size: {db_size} bytes")
             
-            # Step 2: Create database instance
-            print("🔍 Creating LanguageLearningDB instance...")
+            # Create database instance
             db_instance = LanguageLearningDB(db_path)
             print(f"✅ Database instance created: {type(db_instance)}")
             
-            # Step 3: Test connection
-            print("🔍 Testing database connection...")
-            test_query = "SELECT sqlite_version();"
-            db_instance.cursor.execute(test_query)
-            version = db_instance.cursor.fetchone()
-            print(f"✅ SQLite version: {version[0] if version else 'Unknown'}")
-            
-            # Step 4: Ensure all tables exist
-            print("🔍 Ensuring all tables exist...")
+            # Test connection and ensure tables exist
             db_instance._create_tables()
             print("✅ Tables verified/created")
-            
-            # Step 5: List all tables
-            db_instance.cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-            tables = db_instance.cursor.fetchall()
-            print(f"✅ Available tables: {[t[0] for t in tables]}")
             
             st.session_state.user_db = db_instance
             print("✅ Database stored in session state")
             
         except Exception as e:
             print(f"❌ Database initialization error: {str(e)}")
-            import traceback
-            print(f"🔍 Traceback: {traceback.format_exc()}")
-            
-            # Create minimal fallback
-            try:
-                print("🔄 Creating minimal fallback database...")
-                import sqlite3
-                
-                conn = sqlite3.connect(db_path, check_same_thread=False)
-                conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
-                
-                # Create minimal sessions table
-                cursor.execute('''
-                CREATE TABLE IF NOT EXISTS sessions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id TEXT,
-                    start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    end_time TIMESTAMP,
-                    words_studied INTEGER DEFAULT 0,
-                    words_learned INTEGER DEFAULT 0
-                );
-                ''')
-                
-                cursor.execute('''
-                CREATE TABLE IF NOT EXISTS vocabulary (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    word_original TEXT NOT NULL,
-                    word_translated TEXT NOT NULL,
-                    language_translated TEXT NOT NULL,
-                    category TEXT,
-                    image_path TEXT,
-                    date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    source TEXT DEFAULT 'manual'
-                );
-                ''')
-                
-                conn.commit()
-                conn.close()
-                print("✅ Minimal database created")
-                
-                # Try our class again
-                st.session_state.user_db = LanguageLearningDB(db_path)
-                print("✅ Fallback database connection successful")
-                
-            except Exception as fallback_error:
-                print(f"❌ Even fallback failed: {fallback_error}")
-                raise e
+            raise e
     
     return st.session_state.user_db
-
-import logging
 
 @st.cache_resource
 def load_yolov8_nano():
     """Load ultra-lightweight YOLOv8 Nano - only 4MB!"""
     try:
-        import sys
         import os
-        from contextlib import redirect_stdout, redirect_stderr
+        import sys
+        import warnings
         from io import StringIO
+        from contextlib import redirect_stdout, redirect_stderr
         
-        # Capture all output during model loading
-        f = StringIO()
-        with redirect_stdout(f), redirect_stderr(f):
-            # Temporarily disable print statements
-            original_print = print
-            def no_print(*args, **kwargs):
-                pass
-            
-            # Replace print function temporarily
-            import builtins
-            builtins.print = no_print
+        # Set environment variables to suppress ultralytics output
+        os.environ['ULTRALYTICS_LOGGING_LEVEL'] = 'ERROR'
+        os.environ['YOLO_VERBOSE'] = 'False'
+        
+        # Suppress all warnings
+        warnings.filterwarnings("ignore")
+        
+        # Redirect all output to nowhere
+        devnull = StringIO()
+        
+        with redirect_stdout(devnull), redirect_stderr(devnull):
+            # Also suppress print statements temporarily
+            original_stdout = sys.stdout
+            original_stderr = sys.stderr
+            sys.stdout = devnull
+            sys.stderr = devnull
             
             try:
-                # Load model silently
                 model = YOLO('yolov8n.pt')
                 model.to('cpu')
             finally:
-                # Restore print function
-                builtins.print = original_print
+                # Restore stdout and stderr
+                sys.stdout = original_stdout
+                sys.stderr = original_stderr
         
         return model
         
     except Exception as e:
-        # Only print errors, not loading messages
-        print(f"❌ Error loading YOLOv8: {e}")
         return None
 
 def detect_objects_yolov8(image, confidence_threshold=0.5):
@@ -908,11 +846,12 @@ def add_vocabulary_direct(word_original, word_translated, language_translated, c
         return None
     
     try:
-        conn = sqlite3.connect("language_learning.db", timeout=10.0)
+        conn = sqlite3.connect(get_database_path(), timeout=10.0)  # Use the new function
         cursor = conn.cursor()
         
         # Get user identifier
         user_email = user.get('email', user.get('id', 'unknown'))
+        print(f"💾 Saving vocabulary for user: {user_email}")
         
         # Check if this word already exists for this user
         cursor.execute(
@@ -940,6 +879,7 @@ def add_vocabulary_direct(word_original, word_translated, language_translated, c
             ''', (word_original, word_translated, language_translated, category, image_path, current_time, f"user_{user_email}"))
             
             vocab_id = cursor.lastrowid
+            print(f"✅ Vocabulary saved with ID: {vocab_id}")
             
             # Initialize user progress
             cursor.execute('''
@@ -975,18 +915,23 @@ def get_all_vocabulary_direct():
         return []
     
     try:
-        conn = sqlite3.connect("language_learning.db")
+        conn = sqlite3.connect(get_database_path())  # Use the new function
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
         # Get user identifier
         user_email = user.get('email', user.get('id', 'unknown'))
+        print(f"🔍 Looking for vocabulary for user: {user_email}")
         
-        # Only show vocabulary that belongs to this user
-        # Filter out old test data by only showing entries with user-specific source
+        # First, let's see all vocabulary in the database
+        cursor.execute("SELECT COUNT(*) FROM vocabulary")
+        total_vocab = cursor.fetchone()[0]
+        print(f"🔍 Total vocabulary in database: {total_vocab}")
+        
+        # Now get user-specific vocabulary
         cursor.execute('''
         SELECT v.id, v.word_original, v.word_translated, v.language_translated,
-               v.category, v.image_path, v.date_added,
+               v.category, v.image_path, v.date_added, v.source,
                up.proficiency_level, up.review_count, up.correct_count, up.last_reviewed
         FROM vocabulary v
         LEFT JOIN user_progress up ON v.id = up.vocabulary_id
@@ -1002,6 +947,12 @@ def get_all_vocabulary_direct():
         
         conn.close()
         print(f"📊 Found {len(vocabulary)} vocabulary entries for user: {user_email}")
+        
+        # If no user-specific vocabulary found, check for any vocabulary
+        if len(vocabulary) == 0 and total_vocab > 0:
+            print("⚠️ No user-specific vocabulary found, but database has entries")
+            print("This might be due to user identification issues")
+        
         return vocabulary
         
     except Exception as e:
@@ -1016,14 +967,12 @@ def create_session_direct():
         return None
     
     try:
-        # Use direct SQLite approach since the class method might be failing
-        import sqlite3
         from datetime import datetime
         
-        conn = sqlite3.connect("language_learning.db")
+        conn = sqlite3.connect(get_database_path())  # Use the new function
         cursor = conn.cursor()
         
-        # Ensure sessions table exists (without user_id for now to match original schema)
+        # Ensure sessions table exists
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS sessions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1034,7 +983,7 @@ def create_session_direct():
         );
         ''')
         
-        # Insert new session (without user_id to match original schema)
+        # Insert new session
         current_time = datetime.now()
         cursor.execute(
             "INSERT INTO sessions (start_time, words_studied, words_learned) VALUES (?, 0, 0)",
@@ -1050,7 +999,7 @@ def create_session_direct():
         
     except Exception as e:
         print(f"❌ Session creation error: {e}")
-        return None  # IMPORTANT: Return None on error
+        return None
 
 # Function to get session statistics
 def get_session_stats_direct(days=30):
@@ -1207,7 +1156,20 @@ def check_database_setup():
     except Exception as e:
         error_message(f"Database error: {e}")
         return False
+
+def get_database_path():
+    """Get the correct database path for the environment."""
+    if os.environ.get('RENDER'):
+        # On Render, use /opt/render/project/src/ for persistence
+        db_path = "/opt/render/project/src/language_learning.db"
+    else:
+        # Local development
+        db_path = "language_learning.db"
     
+    # Ensure directory exists
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    return db_path
+  
 def prepare_vocabulary_for_diverse_questions(vocabulary, languages):
     """Enhance vocabulary data to support diverse question types."""
     total_words = len(vocabulary)
@@ -2998,7 +2960,8 @@ elif app_mode == "Statistics":
             st.markdown("*This is sample data. Start learning with Camera Mode to begin tracking your real progress!*")
             
 elif app_mode == "My Progress":
-    style_title("My Progress")
+    style_title("My Progress")  # Clean title without emoji
+    
     try:
         # Force fresh user data
         user = get_authenticated_user()
@@ -3015,13 +2978,14 @@ elif app_mode == "My Progress":
         # Use user-scoped gamification with fresh data
         user_gamification = get_user_scoped_gamification()
         
+        # Remove the duplicate header lines - let gamification handle the content
         if actual_word_count == 0:
             st.info("🌱 Start learning words in Camera Mode to see your progress!")
             st.markdown("**Current Level:** 1 (Beginner)")
             st.markdown("**Total Points:** 0")
             st.markdown("**Achievements:** None yet - start learning to unlock achievements!")
         else:
-            # Show actual user progress
+            # Show actual user progress without additional headers
             user_gamification.render_dashboard()
             
     except Exception as e:
@@ -3031,7 +2995,6 @@ elif app_mode == "My Progress":
         
         # Show basic progress as fallback
         user = get_authenticated_user()
-        st.markdown(f"### 🎯 Basic Progress for {user.get('email', 'User') if user else 'User'}")
         vocabulary_count = len(get_all_vocabulary_direct())
         st.markdown(f"**Words Learned:** {vocabulary_count}")
         st.markdown(f"**Level:** 1")
@@ -3385,52 +3348,50 @@ elif app_mode == "Pronunciation Practice":
         st.markdown("Install these packages for real-time AI pronunciation analysis:")
         st.code("pip install streamlit-webrtc speech-recognition librosa python-Levenshtein av")
 
+def debug_database_status():
+    """Debug function to check database status."""
+    if st.sidebar.button("🔍 Debug Database"):
+        user = get_authenticated_user()
+        db_path = get_database_path()
+        
+        st.sidebar.markdown("### Database Debug Info")
+        st.sidebar.markdown(f"**User:** {user.get('email', 'Unknown') if user else 'None'}")
+        st.sidebar.markdown(f"**DB Path:** {db_path}")
+        st.sidebar.markdown(f"**DB Exists:** {os.path.exists(db_path)}")
+        
+        if os.path.exists(db_path):
+            st.sidebar.markdown(f"**DB Size:** {os.path.getsize(db_path)} bytes")
+            
+            try:
+                conn = sqlite3.connect(db_path)
+                cursor = conn.cursor()
+                
+                cursor.execute("SELECT COUNT(*) FROM vocabulary")
+                total_vocab = cursor.fetchone()[0]
+                st.sidebar.markdown(f"**Total Vocab:** {total_vocab}")
+                
+                if user:
+                    user_email = user.get('email', 'unknown')
+                    cursor.execute("SELECT COUNT(*) FROM vocabulary WHERE source LIKE ?", (f"%{user_email}%",))
+                    user_vocab = cursor.fetchone()[0]
+                    st.sidebar.markdown(f"**User Vocab:** {user_vocab}")
+                
+                conn.close()
+            except Exception as e:
+                st.sidebar.error(f"DB Error: {e}")
+
+# Add this to your sidebar temporarily
+debug_database_status()
+
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Session Info")
 if st.session_state.session_id:
     st.sidebar.success(f"Session active")
     st.sidebar.info(f"Words studied: {st.session_state.words_studied}")
     st.sidebar.info(f"Words learned: {st.session_state.words_learned}")
+    st.sidebar.info(f"DEBUG: {st.debug_database_status()}")
 else:
     st.sidebar.warning("No active session")
     st.sidebar.markdown("*Start a session in Camera Mode to track progress*")
-
-# Add this to your sidebar area (after the language selection)
-# TEMPORARY: Add this section to clean up old data
-if st.sidebar.button("🧹 Clean Old Test Data (One Time)"):
-    try:
-        conn = sqlite3.connect("language_learning.db")
-        cursor = conn.cursor()
-        
-        # Delete old vocabulary entries that don't belong to any user
-        cursor.execute("""
-        DELETE FROM vocabulary 
-        WHERE source = 'manual' 
-           OR source IS NULL 
-           OR source NOT LIKE 'user_%'
-           OR date_added < '2024-06-01'
-        """)
-        deleted_vocab = cursor.rowcount
-        
-        # Clean up orphaned user_progress entries
-        cursor.execute("""
-        DELETE FROM user_progress 
-        WHERE vocabulary_id NOT IN (SELECT id FROM vocabulary)
-        """)
-        deleted_progress = cursor.rowcount
-        
-        # Clean up old test sessions
-        cursor.execute("DELETE FROM sessions WHERE start_time < '2024-06-01'")
-        deleted_sessions = cursor.rowcount
-        
-        conn.commit()
-        conn.close()
-        
-        st.sidebar.success(f"✅ Cleaned: {deleted_vocab} vocab, {deleted_progress} progress, {deleted_sessions} sessions")
-        time.sleep(2)
-        st.rerun()
-        
-    except Exception as e:
-        st.sidebar.error(f"Error cleaning: {e}")
 
 add_footer()
