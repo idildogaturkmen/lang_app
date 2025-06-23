@@ -91,7 +91,52 @@ def require_authentication():
     
     return user
 
+def clear_user_session_data():
+    """Clear all session state data for a clean user experience."""
+    user = get_authenticated_user()
+    if not user:
+        return
+    
+    # Get current user identifier
+    current_user_id = user.get('id', user.get('email', 'unknown'))
+    
+    # Check if this is a different user than last time
+    if 'last_user_id' not in st.session_state or st.session_state.last_user_id != current_user_id:
+        print(f"🔄 New user detected: {current_user_id}")
+        print(f"🧹 Clearing session data...")
+        
+        # List of all session state keys to clear
+        keys_to_clear = [
+            'level', 'points', 'streak_days', 'daily_challenges', 'word_of_the_day',
+            'achievements', 'badges', 'quiz_score', 'quiz_total', 'words_studied',
+            'words_learned', 'user_progress', 'gamification_data', 'learning_stats',
+            'vocabulary_tree', 'category_progress', 'total_words_learned'
+        ]
+        
+        # Clear specific gamification keys
+        for key in list(st.session_state.keys()):
+            if any(x in key.lower() for x in ['gamification', 'achievement', 'badge', 'progress', 'level', 'point']):
+                del st.session_state[key]
+                print(f"🗑️ Cleared: {key}")
+        
+        # Reset core learning variables
+        st.session_state.level = 1
+        st.session_state.points = 0
+        st.session_state.streak_days = 0
+        st.session_state.daily_challenges = []
+        st.session_state.word_of_the_day = None
+        st.session_state.words_studied = 0
+        st.session_state.words_learned = 0
+        st.session_state.quiz_score = 0
+        st.session_state.quiz_total = 0
+        
+        # Mark this user as the current one
+        st.session_state.last_user_id = current_user_id
+        
+        print(f"✅ Session data cleared for user: {current_user_id}")
+
 user = require_authentication()
+clear_user_session_data()
 
 def get_user_database():
     """Get database instance with comprehensive error handling."""
@@ -878,117 +923,47 @@ def get_all_vocabulary_direct():
         return result
 
 def create_session_direct():
-    """Create a session for the authenticated user with comprehensive debugging."""
-    print("=" * 50)
-    print("🚀 SESSION CREATION DEBUG START")
-    print("=" * 50)
-    
-    # Step 1: Check user authentication
+    """Create a session - simplified approach."""
     user = get_authenticated_user()
-    print(f"🔍 Step 1 - User check: {user is not None}")
     if not user:
-        print("❌ FAILURE: No authenticated user found")
         return None
     
-    print(f"✅ User found: {user.get('email', 'no_email')}")
-    print(f"🔍 User ID: {user.get('id', 'no_id')}")
-    print(f"🔍 User keys: {list(user.keys())}")
-    
-    # Step 2: Database connection
     try:
-        print("🔍 Step 2 - Getting database connection...")
-        db = get_user_database()
-        print(f"✅ Database object created: {type(db)}")
-        
-        # Step 3: Test basic database functionality
-        print("🔍 Step 3 - Testing database connection...")
-        
-        # Check if connection exists
-        if not hasattr(db, 'conn') or db.conn is None:
-            print("❌ FAILURE: Database connection is None")
-            return None
-        
-        # Test simple query
-        test_result = db.cursor.execute("SELECT 1 as test").fetchone()
-        print(f"✅ Basic query test: {test_result}")
-        
-        # Step 4: Check sessions table
-        print("🔍 Step 4 - Checking sessions table...")
-        tables_query = "SELECT name FROM sqlite_master WHERE type='table' AND name='sessions';"
-        db.cursor.execute(tables_query)
-        sessions_table = db.cursor.fetchone()
-        print(f"🔍 Sessions table exists: {sessions_table is not None}")
-        
-        if not sessions_table:
-            print("⚠️ Sessions table missing, creating...")
-            db.cursor.execute('''
-            CREATE TABLE IF NOT EXISTS sessions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id TEXT,
-                start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                end_time TIMESTAMP,
-                words_studied INTEGER DEFAULT 0,
-                words_learned INTEGER DEFAULT 0
-            );
-            ''')
-            db.conn.commit()
-            print("✅ Sessions table created")
-        
-        # Step 5: Get table schema
-        print("🔍 Step 5 - Checking table schema...")
-        schema_query = "PRAGMA table_info(sessions);"
-        db.cursor.execute(schema_query)
-        schema = db.cursor.fetchall()
-        print(f"🔍 Sessions table schema: {[dict(row) for row in schema]}")
-        
-        # Step 6: Prepare session data
-        user_id = user.get('id', f"user_{user.get('email', 'unknown')}")
-        print(f"🔍 Step 6 - Using user_id: '{user_id}'")
-        
-        # Step 7: Attempt session creation with manual SQL
-        print("🔍 Step 7 - Creating session with manual SQL...")
-        
+        # Use direct SQLite approach since the class method might be failing
+        import sqlite3
         import datetime
-        current_time = datetime.datetime.now()
-        print(f"🔍 Current time: {current_time}")
         
-        # Manual insert
-        insert_query = """
-        INSERT INTO sessions (user_id, start_time, words_studied, words_learned)
-        VALUES (?, ?, 0, 0)
-        """
+        conn = sqlite3.connect("language_learning.db")
+        cursor = conn.cursor()
         
-        db.cursor.execute(insert_query, (user_id, current_time))
-        session_id = db.cursor.lastrowid
-        db.conn.commit()
+        # Ensure sessions table exists
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            end_time TIMESTAMP,
+            words_studied INTEGER DEFAULT 0,
+            words_learned INTEGER DEFAULT 0
+        );
+        ''')
         
-        print(f"✅ Manual session creation successful! Session ID: {session_id}")
+        # Insert new session
+        user_id = user.get('id', user.get('email', 'unknown'))
+        cursor.execute(
+            "INSERT INTO sessions (user_id, start_time, words_studied, words_learned) VALUES (?, ?, 0, 0)",
+            (user_id, datetime.datetime.now())
+        )
         
-        # Step 8: Verify the session was created
-        verify_query = "SELECT * FROM sessions WHERE id = ?"
-        db.cursor.execute(verify_query, (session_id,))
-        created_session = db.cursor.fetchone()
-        print(f"🔍 Step 8 - Session verification: {dict(created_session) if created_session else 'NOT FOUND'}")
+        session_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
         
-        if created_session:
-            print("=" * 50)
-            print("🎉 SESSION CREATION SUCCESS!")
-            print(f"📋 Session ID: {session_id}")
-            print("=" * 50)
-            return session_id
-        else:
-            print("❌ FAILURE: Session not found after creation")
-            return None
-            
+        print(f"✅ Session created successfully: {session_id}")
+        return session_id
+        
     except Exception as e:
-        print(f"❌ CRITICAL ERROR in session creation:")
-        print(f"🔍 Error type: {type(e).__name__}")
-        print(f"🔍 Error message: {str(e)}")
-        import traceback
-        print(f"🔍 Full traceback:")
-        print(traceback.format_exc())
-        print("=" * 50)
-        return None
+        print(f"❌ Session creation error: {e}")
 
 # Function to get session statistics
 def get_session_stats_direct(days=30):
@@ -1195,30 +1170,35 @@ def get_gamification():
     return GamificationSystem()
 
 def get_user_scoped_gamification():
-    """Get user-scoped gamification instance."""
+    """Get a completely fresh gamification instance for each user."""
     user = get_authenticated_user()
     if not user:
         return get_gamification()
     
+    # Always create a fresh instance for this user session
     user_id = user.get('id', user.get('email', 'unknown'))
-    gamification_key = f"gamification_{user_id}"
     
-    if gamification_key not in st.session_state:
-        print(f"🔄 Creating new gamification instance for user: {user_id}")
-        st.session_state[gamification_key] = get_gamification()
-        st.session_state[gamification_key].initialize_state()
-        
-        # Reset user-specific data
-        st.session_state.level = 1
-        st.session_state.points = 0
-        st.session_state.streak_days = 0
-        st.session_state.daily_challenges = []
-        st.session_state.word_of_the_day = None
-        
-        print(f"✅ Fresh gamification state created for user: {user_id}")
+    # Force reset all gamification session state
+    gamification_keys = [k for k in st.session_state.keys() if 'gamification' in k.lower()]
+    for key in gamification_keys:
+        del st.session_state[key]
     
-    return st.session_state[gamification_key]
-
+    # Create fresh gamification instance
+    fresh_gamification = get_gamification()
+    
+    # Force initialize with clean state
+    st.session_state.level = 1
+    st.session_state.points = 0
+    st.session_state.streak_days = 0
+    st.session_state.daily_challenges = []
+    st.session_state.achievements = []
+    st.session_state.badges = []
+    
+    # Initialize the fresh instance
+    fresh_gamification.initialize_state()
+    
+    print(f"🆕 Created fresh gamification for user: {user_id}")
+    return fresh_gamification
 # Initialize user-scoped gamification
 gamification = get_user_scoped_gamification()
 
@@ -1709,7 +1689,7 @@ with st.sidebar.expander("ℹ️ Need Help?"):
 
 # Display appropriate content based on selected mode
 if app_mode == "Camera Mode":
-    style_title("📸 Camera Mode")
+    style_title("Camera Mode")
     # Use the enhanced info message
     info_message("Take a photo or upload an image to identify objects and learn new vocabulary.")
     
@@ -2198,7 +2178,7 @@ if app_mode == "Camera Mode":
                     info_message("No text detected. Try another image or adjust image clarity.")
 
 elif app_mode == "My Vocabulary":
-    style_title("📚 My Vocabulary")
+    style_title("My Vocabulary")
     st.markdown("Review all the words you've learned so far.")
     
     # Get vocabulary from database
@@ -2359,7 +2339,7 @@ elif app_mode == "My Vocabulary":
         info_message("No vocabulary words found with current filter. Go to Camera Mode to start learning new words!")
 
 elif app_mode == "Quiz Mode":
-    style_title("🎮 Quiz Mode")
+    style_title("Quiz Mode")
     st.markdown("Test your vocabulary knowledge with interactive quizzes.")
     
     # Import the quiz system if not already imported
@@ -2518,7 +2498,7 @@ elif app_mode == "Quiz Mode":
                 info_message(f"No words found in the {category_filter} category. Try selecting 'All Categories' or add words in this category.")
 
 elif app_mode == "Statistics":
-    style_title("📊 Learning Statistics")
+    style_title("Learning Statistics")
     st.markdown("Track your progress and learning habits.")
     
     # Get session stats for the last 30 days
@@ -2688,16 +2668,49 @@ elif app_mode == "Statistics":
             
 elif app_mode == "My Progress":
     try:
-        # Use user-scoped gamification
+        # Force fresh user data
+        user = get_authenticated_user()
+        user_id = user.get('id', user.get('email', 'unknown')) if user else 'unknown'
+        
+        # Get user's actual vocabulary count (not from session state)
+        actual_vocabulary = get_all_vocabulary_direct()
+        actual_word_count = len(actual_vocabulary)
+        
+        # Override session state with actual data
+        st.session_state.words_learned = actual_word_count
+        st.session_state.total_words_learned = actual_word_count
+        
+        # Use user-scoped gamification with fresh data
         user_gamification = get_user_scoped_gamification()
-        user_gamification.render_dashboard()
+        
+        # Display fresh progress
+        st.markdown(f"### 🎯 Learning Progress for {user.get('email', 'User')}")
+        st.markdown(f"**Actual Words in Vocabulary:** {actual_word_count}")
+        
+        if actual_word_count == 0:
+            st.info("🌱 Start learning words in Camera Mode to see your progress!")
+            st.markdown("**Current Level:** 1 (Beginner)")
+            st.markdown("**Total Points:** 0")
+            st.markdown("**Achievements:** None yet - start learning to unlock achievements!")
+        else:
+            # Show actual user progress
+            user_gamification.render_dashboard()
+            
     except Exception as e:
         error_message("There was an error displaying the Progress. The system might be initializing.")
         info_message("Please try again in a moment or add some vocabulary first to initialize the system.")
         print(f"Dashboard error: {e}")
+        
+        # Show basic progress as fallback
+        user = get_authenticated_user()
+        st.markdown(f"### 🎯 Basic Progress for {user.get('email', 'User') if user else 'User'}")
+        vocabulary_count = len(get_all_vocabulary_direct())
+        st.markdown(f"**Words Learned:** {vocabulary_count}")
+        st.markdown(f"**Level:** 1")
+        st.markdown(f"**Points:** 0")
 
 elif app_mode == "Pronunciation Practice":
-    style_title("🤖 AI-Powered Pronunciation Practice")
+    style_title("Pronunciation Practice")
     st.markdown("Practice your pronunciation with real-time AI feedback and comprehensive analysis.")
 
     # Session management
@@ -3053,15 +3066,5 @@ if st.session_state.session_id:
 else:
     st.sidebar.warning("No active session")
     st.sidebar.markdown("*Start a session in Camera Mode to track progress*")
-
-# Add logout functionality
-if st.sidebar.button("🚪 Logout"):
-    # Clear all session state
-    for key in list(st.session_state.keys()):
-        del st.session_state[key]
-    
-    st.markdown("**Logging out...**")
-    st.markdown("[← Return to Login](https://vocam.app/web)")
-    st.stop()
 
 add_footer()
