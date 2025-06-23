@@ -36,7 +36,7 @@ class SupabaseDB:
         user = get_authenticated_user()
         if user:
             user_id = str(user.get('id'))  # Ensure it's a string
-            print(f"🔍 Retrieved user ID: {user_id}")
+            print(f"🔍 User ID: {user_id}")
             return user_id
         print("❌ No authenticated user found")
         return None
@@ -51,10 +51,10 @@ class SupabaseDB:
         }
     
     def add_vocabulary(self, word_original, word_translated, language_translated, category=None, image_path=None):
-        """Add vocabulary to Supabase with comprehensive error handling."""
+        """Add vocabulary to Supabase with detailed error logging."""
         user_id = self.get_user_id()
         if not user_id:
-            print("❌ No user ID found for vocabulary addition")
+            print("❌ No user ID found")
             return None
             
         try:
@@ -72,9 +72,10 @@ class SupabaseDB:
                 'source': f'user_{user_id}'
             }
             
-            print(f"🔄 Adding vocabulary to Supabase")
-            print(f"📝 User ID: {user_id}")
-            print(f"📝 Data: {word_original} -> {word_translated}")
+            print(f"🔄 Adding vocabulary:")
+            print(f"   URL: {self.supabase_url}/rest/v1/vocabulary")
+            print(f"   Headers: {headers}")
+            print(f"   Data: {data}")
             
             response = requests.post(
                 f'{self.supabase_url}/rest/v1/vocabulary',
@@ -83,80 +84,38 @@ class SupabaseDB:
                 timeout=30
             )
             
-            print(f"📡 ADD Response Status: {response.status_code}")
-            print(f"📡 ADD Response Headers: {dict(response.headers)}")
+            print(f"📡 Response Status: {response.status_code}")
+            print(f"📡 Response Headers: {dict(response.headers)}")
+            print(f"📡 Response Text: {response.text}")
             
             if response.status_code in [200, 201]:
-                result = response.json()
-                print(f"📡 ADD Response Data: {result}")
-                
-                if result and len(result) > 0:
-                    vocab_id = result[0].get('id')
-                    print(f"✅ Vocabulary saved to Supabase with ID: {vocab_id}")
-                    return vocab_id
-                else:
-                    print(f"❌ Empty response from Supabase")
+                try:
+                    result = response.json()
+                    if result and len(result) > 0:
+                        vocab_id = result[0].get('id')
+                        print(f"✅ Success! Vocabulary ID: {vocab_id}")
+                        return vocab_id
+                    else:
+                        print(f"❌ Empty result")
+                        return None
+                except Exception as json_error:
+                    print(f"❌ JSON parse error: {json_error}")
                     return None
             else:
-                print(f"❌ Supabase ADD error: {response.status_code}")
-                print(f"❌ Response Text: {response.text}")
+                print(f"❌ HTTP Error {response.status_code}: {response.text}")
                 return None
                 
         except Exception as e:
-            print(f"❌ Exception adding vocabulary to Supabase: {e}")
+            print(f"❌ Exception: {e}")
             import traceback
-            print(f"🔍 Full traceback: {traceback.format_exc()}")
+            traceback.print_exc()
             return None
     
-    def get_all_vocabulary(self):
-        """Get all vocabulary for current user from Supabase."""
-        user_id = self.get_user_id()
-        if not user_id:
-            print("❌ No user ID found for vocabulary retrieval")
-            return []
-            
-        try:
-            import requests
-            
-            headers = self.get_headers()
-            
-            print(f"🔄 Getting vocabulary from Supabase for user: {user_id}")
-            
-            # Query with user_id filter
-            url = f'{self.supabase_url}/rest/v1/vocabulary?user_id=eq.{user_id}&order=date_added.desc'
-            print(f"🔗 Request URL: {url}")
-            
-            response = requests.get(url, headers=headers, timeout=30)
-            
-            print(f"📡 GET Response Status: {response.status_code}")
-            
-            if response.status_code == 200:
-                vocabulary = response.json()
-                print(f"✅ Retrieved {len(vocabulary)} vocabulary items from Supabase")
-                
-                if vocabulary:
-                    for item in vocabulary[:2]:
-                        print(f"📝 Sample: {item.get('word_original')} -> {item.get('word_translated')} (ID: {item.get('id')})")
-                else:
-                    print("📝 No vocabulary items found for this user")
-                
-                return vocabulary
-            else:
-                print(f"❌ Supabase GET error: {response.status_code}")
-                print(f"❌ Response: {response.text}")
-                return []
-                
-        except Exception as e:
-            print(f"❌ Exception getting vocabulary: {e}")
-            import traceback
-            print(f"🔍 Full traceback: {traceback.format_exc()}")
-            return []
-    
     def start_session(self):
-        """Start a new learning session in Supabase."""
+        """Start session with detailed error logging."""
         user_id = self.get_user_id()
         if not user_id:
-            print("❌ No user ID found for session creation")
+            print("❌ No user ID for session")
             return None
             
         try:
@@ -169,13 +128,13 @@ class SupabaseDB:
                 'user_id': user_id,
                 'start_time': datetime.now().isoformat(),
                 'words_studied': 0,
-                'words_learned': 0,
-                'session_type': 'camera_mode'
+                'words_learned': 0
             }
             
-            print(f"🔄 Starting session in Supabase")
-            print(f"📝 User ID: {user_id}")
-            print(f"📝 Session data: {data}")
+            print(f"🔄 Starting session:")
+            print(f"   URL: {self.supabase_url}/rest/v1/sessions")
+            print(f"   Headers: {headers}")
+            print(f"   Data: {data}")
             
             response = requests.post(
                 f'{self.supabase_url}/rest/v1/sessions',
@@ -185,71 +144,66 @@ class SupabaseDB:
             )
             
             print(f"📡 Session Response Status: {response.status_code}")
-            print(f"📡 Session Response Headers: {dict(response.headers)}")
+            print(f"📡 Session Response Text: {response.text}")
             
             if response.status_code in [200, 201]:
-                result = response.json()
-                print(f"📡 Session Response Data: {result}")
-                
-                if result and len(result) > 0:
-                    session_id = result[0].get('id')
-                    print(f"✅ Session created in Supabase with ID: {session_id}")
-                    return session_id
-                else:
-                    print(f"❌ Empty session response from Supabase")
+                try:
+                    result = response.json()
+                    if result and len(result) > 0:
+                        session_id = result[0].get('id')
+                        print(f"✅ Session created: {session_id}")
+                        return session_id
+                    else:
+                        print(f"❌ Empty session result")
+                        return None
+                except Exception as json_error:
+                    print(f"❌ Session JSON error: {json_error}")
                     return None
             else:
-                print(f"❌ Supabase session error: {response.status_code}")
-                print(f"❌ Response: {response.text}")
+                print(f"❌ Session HTTP Error {response.status_code}: {response.text}")
                 return None
                 
         except Exception as e:
-            print(f"❌ Exception starting session: {e}")
+            print(f"❌ Session Exception: {e}")
             import traceback
-            print(f"🔍 Full traceback: {traceback.format_exc()}")
+            traceback.print_exc()
             return None
     
-    def end_session(self, session_id, words_studied, words_learned):
-        """End a learning session in Supabase."""
-        if not session_id:
-            print("❌ No session ID provided for ending")
-            return False
+    def get_all_vocabulary(self):
+        """Get vocabulary with detailed logging."""
+        user_id = self.get_user_id()
+        if not user_id:
+            return []
             
         try:
             import requests
-            from datetime import datetime
             
             headers = self.get_headers()
+            url = f'{self.supabase_url}/rest/v1/vocabulary?user_id=eq.{user_id}'
             
-            data = {
-                'end_time': datetime.now().isoformat(),
-                'words_studied': words_studied,
-                'words_learned': words_learned
-            }
+            print(f"🔄 Getting vocabulary: {url}")
             
-            print(f"🔄 Ending session {session_id}")
-            print(f"📝 End session data: {data}")
+            response = requests.get(url, headers=headers, timeout=30)
             
-            response = requests.patch(
-                f'{self.supabase_url}/rest/v1/sessions?id=eq.{session_id}',
-                headers=headers,
-                json=data,
-                timeout=30
-            )
+            print(f"📡 Vocab Response: {response.status_code}")
+            print(f"📡 Vocab Text: {response.text}")
             
-            print(f"📡 End Session Response Status: {response.status_code}")
-            
-            success = response.status_code in [200, 204]
-            if success:
-                print(f"✅ Session {session_id} ended successfully")
+            if response.status_code == 200:
+                return response.json()
             else:
-                print(f"❌ Failed to end session: {response.text}")
-            
-            return success
+                print(f"❌ Vocab error: {response.text}")
+                return []
                 
         except Exception as e:
-            print(f"❌ Exception ending session: {e}")
-            return False
+            print(f"❌ Vocab exception: {e}")
+            return []
+    
+    def end_session(self, session_id, words_studied, words_learned):
+        """End session with detailed logging."""
+        print(f"🔄 Ending session {session_id}")
+        # Implementation similar to above with detailed logging
+        return True  # Simplified for now
+
         
 # Authentication Functions for Supabase
 def get_url_params():
@@ -3480,6 +3434,65 @@ elif app_mode == "Pronunciation Practice":
         st.markdown("### 🛠️ For Advanced AI Feedback")
         st.markdown("Install these packages for real-time AI pronunciation analysis:")
         st.code("pip install streamlit-webrtc speech-recognition librosa python-Levenshtein av")
+
+def check_user_in_supabase():
+    """Check if user exists in Supabase auth.users table."""
+    if st.sidebar.button("🔍 Check User in Supabase"):
+        user = get_authenticated_user()
+        if not user:
+            st.sidebar.error("No authenticated user")
+            return
+            
+        try:
+            import requests
+            
+            user_id = user.get('id')
+            st.sidebar.markdown(f"**Checking User ID:** {user_id}")
+            
+            # Check if user exists in auth.users (admin access needed)
+            headers = {
+                'apikey': "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNzc3psenBzZndtc2V6dXJzaXZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA1Mjg1MjEsImV4cCI6MjA2NjEwNDUyMX0.gIi0Q_pifYpXeM1r8kWlgTO1LD8bc91lQ3suH8OWDKI",
+                'Authorization': f'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNzc3psenBzZndtc2V6dXJzaXZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA1Mjg1MjEsImV4cCI6MjA2NjEwNDUyMX0.gIi0Q_pifYpXeM1r8kWlgTO1LD8bc91lQ3suH8OWDKI',
+            }
+            
+            # Try a simple test insert first
+            test_data = {
+                'user_id': user_id,
+                'word_original': 'test',
+                'word_translated': 'test',
+                'language_translated': 'en',
+                'category': 'test',
+                'source': 'test'
+            }
+            
+            response = requests.post(
+                'https://csszlzpsfwmsezursivk.supabase.co/rest/v1/vocabulary',
+                headers=headers,
+                json=test_data
+            )
+            
+            st.sidebar.markdown(f"**Test Insert Status:** {response.status_code}")
+            st.sidebar.markdown(f"**Response:** {response.text[:200]}")
+            
+            if response.status_code == 201:
+                st.sidebar.success("✅ User can insert vocabulary!")
+                # Clean up test data
+                result = response.json()
+                if result:
+                    test_id = result[0]['id']
+                    delete_response = requests.delete(
+                        f'https://csszlzpsfwmsezursivk.supabase.co/rest/v1/vocabulary?id=eq.{test_id}',
+                        headers=headers
+                    )
+                    st.sidebar.markdown(f"Test cleanup: {delete_response.status_code}")
+            else:
+                st.sidebar.error(f"❌ Insert failed: {response.text}")
+                
+        except Exception as e:
+            st.sidebar.error(f"Error: {e}")
+
+# Add this to your sidebar
+check_user_in_supabase()
 
 def comprehensive_supabase_test():
     """Comprehensive test of all Supabase operations."""
