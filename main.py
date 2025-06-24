@@ -498,18 +498,6 @@ try:
 except ImportError as e:
     has_pronunciation_practice = False
     print(f"❌ Pronunciation practice not available: {e}")
-    
-# Try importing OCR with fallback
-try:
-    import pytesseract
-    has_tesseract = True
-except ImportError as e:
-    has_tesseract = False
-    # Dummy implementation
-    class DummyTesseract:
-        def image_to_string(self, *args, **kwargs):
-            return "OCR requires pytesseract. Install with: pip install pytesseract"
-    pytesseract = DummyTesseract()
 
 # Try importing OpenCV with robust fallback mechanism
 try:
@@ -914,43 +902,6 @@ def enhance_image(image, enhance_type="auto"):
         error_message(f"Image enhancement error: {e}")
         return image  # Return original image on error
 
-# Function to detect text in image (OCR)
-def detect_text_in_image(image):
-    """Detect text in image using EasyOCR as primary method."""
-    try:
-        # Method 1: Try EasyOCR (works better on cloud deployments)
-        try:
-            import easyocr
-            
-            # Initialize EasyOCR reader
-            reader = easyocr.Reader(['en'], gpu=False)  # English only, no GPU
-            
-            # Convert PIL image to numpy array
-            img_array = np.array(image)
-            
-            # Use EasyOCR to detect text
-            results = reader.readtext(img_array)
-            
-            # Extract text from results
-            detected_texts = []
-            for (bbox, text, confidence) in results:
-                if confidence > 0.5:  # Only include confident detections
-                    detected_texts.append(text)
-            
-            if detected_texts:
-                return ' '.join(detected_texts)
-                
-        except ImportError:
-            print("EasyOCR not available")
-        except Exception as e:
-            print(f"EasyOCR failed: {e}")
-        
-        # Method 2: Fallback message
-        return "Text detection requires additional packages. This is a demo showing how the feature would work - words would be extracted from your image and made available for vocabulary learning."
-        
-    except Exception as e:
-        return f"Text detection error: {str(e)}"
-    
 
 # Function to get example sentence
 def get_example_sentence(word, target_language):
@@ -966,7 +917,97 @@ def get_example_sentence(word, target_language):
     return example_generator.get_example_sentence(word, target_language, category)
         
 
+def check_vocabulary_exists(self, word_original, language_translated):
+    """Check if vocabulary already exists for the user."""
+    try:
+        user_id = self.get_user_id()
+        if not user_id:
+            return False
+            
+        headers = self.get_headers()
+        
+        # Query vocabulary table with filters
+        url = f'{self.supabase_url}/rest/v1/vocabulary'
+        params = {
+            'user_id': f'eq.{user_id}',
+            'word_original': f'eq.{word_original}',
+            'language_translated': f'eq.{language_translated}',
+            'select': 'id'
+        }
+        
+        response = requests.get(url, headers=headers, params=params)
+        
+        if response.status_code == 200:
+            data = response.json()
+            return len(data) > 0  # Returns True if word exists
+        else:
+            print(f"Error checking vocabulary: {response.status_code}")
+            return False
+            
+    except Exception as e:
+        print(f"Error checking vocabulary exists: {e}")
+        return False
 
+def add_vocabulary(self, word_original, word_translated, language_translated, category=None, image_path=None):
+    """Add vocabulary to Supabase with duplicate checking."""
+    try:
+        # Check if vocabulary already exists
+        if self.check_vocabulary_exists(word_original, language_translated):
+            print(f"📝 Word '{word_original}' already exists in vocabulary")
+            return None  # Return None to indicate duplicate
+            
+        user_id = self.get_user_id()
+        if not user_id:
+            return None
+            
+        headers = self.get_headers()
+        
+        # Create vocabulary entry
+        vocab_data = {
+            'user_id': user_id,
+            'word_original': word_original,
+            'word_translated': word_translated,
+            'language_translated': language_translated,
+            'category': category,
+            'image_path': image_path,
+            'source': 'object_detection'
+        }
+        
+        response = requests.post(
+            f'{self.supabase_url}/rest/v1/vocabulary',
+            headers=headers,
+            json=vocab_data
+        )
+        
+        if response.status_code in [200, 201]:
+            vocab_record = response.json()[0]
+            vocab_id = vocab_record['id']
+            
+            # Initialize user progress
+            progress_data = {
+                'user_id': user_id,
+                'vocabulary_id': vocab_id,
+                'proficiency_level': 0,
+                'review_count': 0,
+                'correct_count': 0
+            }
+            
+            requests.post(
+                f'{self.supabase_url}/rest/v1/user_progress',
+                headers=headers,
+                json=progress_data
+            )
+            
+            print(f"✅ Added new vocabulary: {word_original} → {word_translated}")
+            return vocab_id
+        else:
+            print(f"❌ Failed to add vocabulary: {response.status_code}")
+            return None
+            
+    except Exception as e:
+        print(f"❌ Error adding vocabulary: {e}")
+        return None
+    
 # Function to get pronunciation guide
 def get_pronunciation_guide(word, language_code):
     """Generate a simple pronunciation guide for the word."""
@@ -2281,170 +2322,98 @@ if app_mode == "Camera Mode":
                 image = None
     
     # Detection options
-    detection_type = st.radio(
-        "What would you like to detect?",
-        ["Objects", "Text (OCR)"],
-        index=0
+    detection_type = "Objects"  # Fixed to Objects only
+
+    confidence_threshold = st.slider(
+        "Detection Confidence", 
+        min_value=0.3, 
+        max_value=0.9, 
+        value=0.5,
+        step=0.05
     )
-    
-    # Detection settings for objects
-    if detection_type == "Objects":
-        confidence_threshold = st.slider(
-            "Detection Confidence", 
-            min_value=0.3, 
-            max_value=0.9, 
-            value=0.5,
-            step=0.05
-        )
-        # Set iou_threshold for optimal detection (balance between precision and maximum detection)
-        iou_threshold = 0.45  # Using a lower threshold to detect more objects while maintaining precision
+    # Set iou_threshold for optimal detection (balance between precision and maximum detection)
+    iou_threshold = 0.45  # Using a lower threshold to detect more objects while maintaining precision
         
-        # Auto-enhancement is always applied
-        enhancement_type = "auto"
+    # Auto-enhancement is always applied
+    enhancement_type = "auto"
     
     # Process image if available
     if image is not None:
-        # Process based on detection type
-        if detection_type == "Objects":
-            # Use a placeholder for the spinner that we can clear later
-            spinner_placeholder = st.empty()
-            with spinner_placeholder.container():
-                show_loading_spinner("Detecting objects... This may take a few seconds.")
+        spinner_placeholder = st.empty()
+        with spinner_placeholder.container():
+            show_loading_spinner("Detecting objects... This may take a few seconds.")
             
-            # Add visual separator for mobile
-            separator_placeholder = st.empty()
-            separator_placeholder.markdown('<div class="result-separator"></div>', unsafe_allow_html=True)
+        # Add visual separator for mobile
+        separator_placeholder = st.empty()
+        separator_placeholder.markdown('<div class="result-separator"></div>', unsafe_allow_html=True)
             
-            try:
-                # Always apply enhancement for object detection
-                enhanced_image = enhance_image(image, "auto")
-                if enhanced_image is None:
-                    raise Exception("Image enhancement failed")
+        try:
+            # Always apply enhancement for object detection
+            enhanced_image = enhance_image(image, "auto")
+            if enhanced_image is None:
+                raise Exception("Image enhancement failed")
                 
-                # Run memory-optimized detection
-                detections, result_image = detect_objects(
-                    enhanced_image, confidence_threshold, iou_threshold
-                )
-                
-            except Exception as e:
-                if "memory" in str(e).lower() or "resource" in str(e).lower():
-                    error_message("Memory limit reached. Please try a smaller image or refresh the page.")
-                else:
-                    error_message(f"Detection error: {str(e)}")
-                # Fallback behavior
-                detections, result_image = [], np.array(image)
+            # Run memory-optimized detection
+            detections, result_image = detect_objects(
+                enhanced_image, confidence_threshold, iou_threshold
+            )
             
-            # FIX: Clear the spinner and separator completely
+            #Clear the spinner and separator completely
             spinner_placeholder.empty()
             separator_placeholder.empty()
         
             # Display results
             if detections:
-                style_section_title("✨ Detected Objects")
+                style_section_title(f"Found {len(detections)} Objects")
                 
-                # Display image with detection boxes
-                st.image(result_image, caption="Detected Objects")
+                # Display the annotated image
+                st.image(result_image, caption="Detected Objects", use_column_width=True)
+                
+                # Initialize detection checkboxes if not exists
+                if 'detection_checkboxes' not in st.session_state:
+                    st.session_state.detection_checkboxes = {}
                     
-                # Display selection prompt
-                st.write("Select objects to save to your vocabulary:")
-                    
-                # Group detections by category
-                # Group detections by label to avoid duplicates
-                unique_detections = {}
+                # Display detection results with translation
+                style_section_title("📝 Select Objects to Learn")
+                
                 for i, detection in enumerate(detections):
                     label = detection['label']
                     confidence = detection['confidence']
                     
-                    # If label already exists and new confidence is lower, skip
-                    if label in unique_detections and unique_detections[label][1]['confidence'] >= confidence:
-                        continue
+                    # Create a checkbox key for this detection
+                    checkbox_key = f"detect_{i}"
                     
-                    # Otherwise add/update this label with highest confidence detection
-                    unique_detections[label] = (i, detection)
-
-                # Now group the unique detections by category
-                categorized_detections = {}
-                for i, detection in unique_detections.values():
-                    label = detection['label']
-                    category = get_object_category(label)
+                    # Create columns for display
+                    col1, col2, col3 = st.columns([2, 2, 1])
                     
-                    if category not in categorized_detections:
-                        categorized_detections[category] = []
+                    with col1:
+                        st.write(f"**{label}** ({confidence:.1%})")
                     
-                    categorized_detections[category].append((i, detection))
-                
-                # Clear detection checkboxes for new image
-                if 'last_image_hash' not in st.session_state or st.session_state.last_image_hash != get_image_hash(image):
-                    st.session_state.detection_checkboxes = {}
-                    st.session_state.last_image_hash = get_image_hash(image)
-                
-                # Display objects by category in expandable sections
-                for category, category_detections in categorized_detections.items():
-                    with st.expander(f"{category.title()} ({len(category_detections)} items)", expanded=True):
-                        # Process each detection in this category
-                        for i, detection in category_detections:
-                            label = detection['label']
-                            confidence = detection['confidence']
-                            checkbox_key = f"detect_{i}"
-                            
-                            # Translate the label
+                    with col2:
+                        try:
                             translated_label = translate_text(label, st.session_state.target_language)
+                            st.write(f"→ {translated_label}")
                             
-                            # Create a container for this object
-                            with st.container():
-                                # Display the object info
-                                st.markdown(f"**{label}** ({confidence:.2f})")
-                                st.markdown(f"→ **{translated_label}**")
-                                
-                                # Create columns for audio, example, checkbox
-                                col1, col2, col3 = st.columns([2, 2, 1])
-                                
-                                with col1:
-                                    # Generate audio for the translated word
-                                    audio_bytes = text_to_speech(translated_label, st.session_state.target_language)
-                                    if audio_bytes:
-                                        st.markdown(get_audio_html(audio_bytes), unsafe_allow_html=True)
-                                    
-                                    # Add pronunciation helpers
-                                    pronunciation_tips = get_pronunciation_guide(translated_label, st.session_state.target_language)
-                                    if pronunciation_tips:
-                                        st.markdown("**Pronunciation Tips:**")
-                                        for tip in pronunciation_tips:
-                                            st.markdown(f"- {tip}")
-                                
-                                with col2:
-                                    # Add example sentence directly (no nested expander)
-                                    example = get_example_sentence(label, st.session_state.target_language)
-                                    st.markdown("**Example:**")
-                                    st.markdown(f"EN: {example['english']}")
-                                    
-                                    # Only display translated example if available
-                                    if example['translated']:
-                                        source = example.get('source', 'unknown')
-                                        source_name = source.replace('_', ' ').replace('api', 'API').title()
-                                        st.markdown(f"{selected_language}: {example['translated']}")
-                                        st.markdown(f"<small><i>Source: {source_name}</i></small>", unsafe_allow_html=True)
-                                        
-                                        # Only generate audio if there's text to speak
-                                        example_audio = text_to_speech(example['translated'], st.session_state.target_language)
-                                        if example_audio:
-                                            st.markdown(get_audio_html(example_audio), unsafe_allow_html=True)
-                                    else:
-                                        st.markdown("*Translation not available. Please install deep-translator package.*")
-                                
-                                with col3:
-                                    # Default to checked
-                                    if checkbox_key not in st.session_state.detection_checkboxes:
-                                        st.session_state.detection_checkboxes[checkbox_key] = True
-                                        
-                                    # Add checkbox for this object
-                                    st.session_state.detection_checkboxes[checkbox_key] = st.checkbox(
-                                        "Save", 
-                                        value=st.session_state.detection_checkboxes[checkbox_key],
-                                        key=checkbox_key
-                                    )
-                                
-                                st.markdown("---")  # Add separator
+                            # Add audio for the translated word
+                            audio_bytes = text_to_speech(translated_label, st.session_state.target_language)
+                            if audio_bytes:
+                                st.markdown(get_audio_html(audio_bytes), unsafe_allow_html=True)
+                        except Exception:
+                            st.write("*Translation unavailable*")
+                        
+                    with col3:
+                        # Default to checked
+                        if checkbox_key not in st.session_state.detection_checkboxes:
+                            st.session_state.detection_checkboxes[checkbox_key] = True
+                            
+                        # Add checkbox for this object
+                        st.session_state.detection_checkboxes[checkbox_key] = st.checkbox(
+                            "Save", 
+                            value=st.session_state.detection_checkboxes[checkbox_key],
+                            key=checkbox_key
+                        )
+                    
+                    st.markdown("---")  # Add separator
 
                 # Create a stable persistent key for our save button
                 save_button_id = "save_objects_button_fixed"
@@ -2472,13 +2441,22 @@ if app_mode == "Camera Mode":
                         else:
                             # Save the selected objects
                             saved_count = 0
+                            duplicate_count = 0
                             saved_items = []
-                            
+                            duplicate_items = []
+
                             for i in selected_objects:
                                 try:
                                     detection = detections[i]
                                     label = detection['label']
                                     translated_label = translate_text(label, st.session_state.target_language)
+                                    
+                                    # Check for duplicates first before saving image
+                                    db = get_user_database()
+                                    if db.check_vocabulary_exists(label, st.session_state.target_language):
+                                        duplicate_count += 1
+                                        duplicate_items.append(f"{label} → {translated_label}")
+                                        continue  # Skip saving this word
                                     
                                     # Save the image with bounding box info for cropping
                                     image_path = save_image(image, label, detection['bbox'])  # Pass bbox
@@ -2502,34 +2480,46 @@ if app_mode == "Camera Mode":
                                         st.session_state.words_studied += 1
                                         st.session_state.words_learned += 1
                                     else:
-                                        error_message(f"Failed to save {label} to vocabulary.")
+                                        error_message(f"Error saving {label}: Database error")
+                                        
                                 except Exception as e:
                                     error_message(f"Error saving {label}: {str(e)}")
-                            
-                            if saved_count > 0:
+
+                            if saved_count > 0 or duplicate_count > 0:
                                 # Store the saved state and items in session state
                                 st.session_state.words_just_saved = True
                                 st.session_state.saved_count = saved_count
+                                st.session_state.duplicate_count = duplicate_count
                                 st.session_state.saved_items = saved_items
+                                st.session_state.duplicate_items = duplicate_items
                                 st.rerun()  # Rerun once to update the UI
                             else:
                                 error_message("Failed to save any words. Please check database connection.")
 
-                # Show success message and navigation AFTER saving (persists across reruns)
-                if st.session_state.words_just_saved:
-                    # Create a container for the success message
-                    success_container = st.container()
-                    
-                    with success_container:
-                        success_message(f"Successfully added {st.session_state.saved_count} new words to your vocabulary!")
-                        
-                        # Show saved words in a visually appealing list
-                        st.markdown('<h4 style="color: #1679AB;">Words saved:</h4>', unsafe_allow_html=True)
-                        for item in st.session_state.saved_items:
-                            st.markdown(f"✅ {item}")
-                        
-                        # Show navigation options
-                        st.markdown("### What would you like to do next?")
+                            # Show success message and navigation AFTER saving (persists across reruns)
+                            if st.session_state.words_just_saved:
+                                # Create a container for the success message
+                                success_container = st.container()
+                                
+                                with success_container:
+                                    if st.session_state.saved_count > 0:
+                                        success_message(f"Successfully added {st.session_state.saved_count} new words to your vocabulary!")
+                                        
+                                        # Show saved words in a visually appealing list
+                                        st.markdown('<h4 style="color: #1679AB;">New words saved:</h4>', unsafe_allow_html=True)
+                                        for item in st.session_state.saved_items:
+                                            st.markdown(f"✅ {item}")
+                                    
+                                    if st.session_state.duplicate_count > 0:
+                                        info_message(f"{st.session_state.duplicate_count} words were already in your vocabulary and were skipped.")
+                                        
+                                        # Show duplicate words
+                                        st.markdown('<h4 style="color: #FF9800;">Words already in vocabulary:</h4>', unsafe_allow_html=True)
+                                        for item in st.session_state.duplicate_items:
+                                            st.markdown(f"🔄 {item}")
+                                    
+                                    # Show navigation options
+                                    st.markdown("### What would you like to do next?")
                         next_col1, next_col2, next_col3 = st.columns(3)
                         
                         # Define navigation callback functions
@@ -2627,83 +2617,20 @@ if app_mode == "Camera Mode":
                     st.session_state.manual_label = ""
                     st.rerun()
         
-        # Text OCR mode
-        # Text OCR mode
-        else:  # Text OCR mode
-            # Create container for loading spinner
-            spinner_container = st.container()
-            with spinner_container:
-                show_loading_spinner("Detecting text... This may take a few seconds.")
-                
-            # Add visual separator for mobile
-            add_result_separator()
-            
-            with st.spinner("Detecting text..."):
-                detected_text = detect_text_in_image(image)
-                
-                # Clear the spinner
-                spinner_container.empty()
-                
-                # Add scroll indicator for mobile
-                add_scroll_indicator()
-                
-                if detected_text:
-                    style_section_title("📝 Detected Text")
-                    st.write(detected_text)
-                    
-                    # Split into words for learning
-                    words = [word.strip() for word in re.split(r'[^\w]', detected_text) if word.strip()]
-                    
-                    if words:
-                        st.subheader("Words to Learn")
-                        
-                        # Create containers for each word
-                        for i, word in enumerate(words):
-                            if len(word) <= 2:  # Skip very short words
-                                continue
-                                
-                            # Translate the word
-                            translated_word = translate_text(word, st.session_state.target_language)
-                            
-                            # Display in a container
-                            with st.container():
-                                cols = st.columns([3, 1])
-                                
-                                with cols[0]:
-                                    st.write(f"**{word}** → {translated_word}")
-                                    # Add audio
-                                    audio_bytes = text_to_speech(translated_word, st.session_state.target_language)
-                                    if audio_bytes:
-                                        st.markdown(get_audio_html(audio_bytes), unsafe_allow_html=True)
-                                
-                                with cols[1]:
-                                    # Add save button for each word
-                                    if st.button(f"Save", key=f"save_text_{i}"):
-                                        # Auto-start session if needed
-                                        if st.session_state.session_id is None:
-                                            manage_session("start")
-                                        
-                                        # Save to vocabulary
-                                        vocab_id = add_vocabulary_direct(
-                                            word_original=word,
-                                            word_translated=translated_word,
-                                            language_translated=st.session_state.target_language,
-                                            category="text",
-                                            image_path=None
-                                        )
-                                        
-                                        if vocab_id:
-                                            success_message(f"Added '{word}' to vocabulary!")
-                                            st.session_state.words_studied += 1
-                                            st.session_state.words_learned += 1
-                                        else:
-                                            error_message(f"Failed to save '{word}'")
-                                
-                                st.markdown("---")
-                    else:
-                        info_message("No clear words detected in the image.")
                 else:
-                    info_message("No text detected. Try another image or adjust image clarity.")
+                    info_message("No objects detected. Try adjusting the confidence level or take another photo.")
+                    
+        except Exception as e:
+            # Clear spinners on error
+            spinner_placeholder.empty()
+            separator_placeholder.empty()
+                
+            if "memory" in str(e).lower() or "resource" in str(e).lower():
+                error_message("Memory limit reached. Please try a smaller image or refresh the page.")
+            else:
+                error_message(f"Detection error: {str(e)}")
+                print(f"Detection error: {e}")
+                info_message("No objects detected. Try adjusting the confidence level or take another photo.")
 
 elif app_mode == "My Vocabulary":
     style_title("My Vocabulary")

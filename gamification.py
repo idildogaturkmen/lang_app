@@ -1013,7 +1013,6 @@ class GamificationSystem:
     
     def render_dashboard(self):
         """Render the complete gamification dashboard."""
-        st.title("🎮 My Progress")
         
         # User level and points at the top
         col1, col2 = st.columns([1, 3])
