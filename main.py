@@ -946,80 +946,89 @@ def enhance_image(image, enhance_type="auto"):
 
 # Function to detect text in image (OCR)
 def detect_text_in_image(image):
-    """Detect text in image using OCR with better error handling."""
+    """Detect text in image using installed OCR libraries."""
     try:
-        # First try to import and configure pytesseract
+        # Method 1: Try EasyOCR first (you already have easyocr==1.7.0)
+        try:
+            import easyocr
+            
+            # Initialize EasyOCR reader with minimal config for cloud deployment
+            if 'easyocr_reader' not in st.session_state:
+                # Use minimal configuration for better performance on cloud
+                st.session_state.easyocr_reader = easyocr.Reader(
+                    ['en'], 
+                    gpu=False, 
+                    verbose=False,
+                    download_enabled=True
+                )
+                print("✅ EasyOCR initialized successfully")
+            
+            reader = st.session_state.easyocr_reader
+            
+            # Convert PIL image to numpy array
+            img_array = np.array(image)
+            
+            # Use EasyOCR to detect text
+            results = reader.readtext(img_array)
+            
+            # Extract text from results
+            detected_texts = []
+            for (bbox, text, confidence) in results:
+                if confidence > 0.4:  # Reasonable threshold
+                    detected_texts.append(text.strip())
+            
+            if detected_texts:
+                full_text = ' '.join(detected_texts)
+                print(f"✅ EasyOCR detected: {full_text[:50]}...")
+                return full_text
+                
+        except ImportError as e:
+            print(f"EasyOCR import failed: {e}")
+        except Exception as e:
+            print(f"EasyOCR processing failed: {e}")
+        
+        # Method 2: Try Pytesseract (you already have pytesseract==0.3.10)
         try:
             import pytesseract
-            # Try to configure tesseract path for different environments
-            import shutil
             
-            # Check if tesseract is available in PATH
-            tesseract_cmd = shutil.which('tesseract')
-            if tesseract_cmd:
-                pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+            # Convert image for processing
+            img_array = np.array(image)
+            
+            # Convert to grayscale for better OCR
+            if len(img_array.shape) == 3:
+                gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
             else:
-                # Try common installation paths
-                possible_paths = [
-                    '/usr/bin/tesseract',
-                    '/usr/local/bin/tesseract',
-                    '/opt/homebrew/bin/tesseract',
-                    'C:\\Program Files\\Tesseract-OCR\\tesseract.exe',
-                    'C:\\Program Files (x86)\\Tesseract-OCR\\tesseract.exe'
-                ]
-                
-                for path in possible_paths:
-                    if os.path.exists(path):
-                        pytesseract.pytesseract.tesseract_cmd = path
-                        break
-                else:
-                    return "Tesseract OCR is not installed on this system. Text detection is not available."
+                gray = img_array
             
-        except ImportError:
-            return "OCR functionality requires pytesseract package."
+            # Apply threshold for better text recognition
+            _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            
+            # Convert back to PIL Image
+            from PIL import Image as PILImage
+            processed_image = PILImage.fromarray(binary)
+            
+            # Configure OCR for better results
+            config = r'--oem 3 --psm 6'
+            
+            # Extract text
+            detected_text = pytesseract.image_to_string(processed_image, config=config)
+            
+            # Clean up text
+            detected_text = detected_text.strip()
+            if detected_text and len(detected_text) > 2:
+                print(f"✅ Pytesseract detected: {detected_text[:50]}...")
+                return detected_text
+                
+        except ImportError as e:
+            print(f"Pytesseract import failed: {e}")
+        except Exception as e:
+            print(f"Pytesseract processing failed: {e}")
         
-        # Convert PIL image to numpy array
-        img_array = np.array(image)
-        
-        # Convert to grayscale for better OCR
-        if len(img_array.shape) == 3:
-            gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
-        else:
-            gray = img_array
-        
-        # Apply image preprocessing for better OCR
-        # Resize image if too small
-        height, width = gray.shape
-        if height < 300 or width < 300:
-            scale_factor = max(300/height, 300/width)
-            new_height = int(height * scale_factor)
-            new_width = int(width * scale_factor)
-            gray = cv2.resize(gray, (new_width, new_height), interpolation=cv2.INTER_CUBIC)
-        
-        # Apply threshold to get better contrast
-        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        
-        # Apply morphological operations to clean up the image
-        kernel = np.ones((2, 2), np.uint8)
-        processed = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
-        processed = cv2.morphologyEx(processed, cv2.MORPH_OPEN, kernel)
-        
-        # Configure OCR parameters
-        config = r'--oem 3 --psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 '
-        
-        # Detect text
-        detected_text = pytesseract.image_to_string(processed, config=config)
-        
-        # Clean and process the text
-        detected_text = detected_text.strip()
-        
-        if not detected_text:
-            return "No text could be detected in this image. Try using an image with clearer, larger text."
-        
-        return detected_text
+        # If both methods fail, return an informative message
+        return "No clear text was detected in this image. Try using an image with larger, clearer text, or try the object detection mode instead."
         
     except Exception as e:
-        return f"Text detection error: {str(e)}"
+        return f"Text detection encountered an error: {str(e)}. Please try again with a different image."
     
 # Function to get example sentence
 def get_example_sentence(word, target_language):
@@ -2028,6 +2037,7 @@ def start_new_quiz(vocabulary, num_questions=5):
     # Reset quiz state
     st.session_state.quiz_score = 0
     st.session_state.quiz_total = 0
+    st.session_state.current_question_number = 1  # ADD THIS LINE
     st.session_state.quiz_target_questions = num_questions  # Store target
     st.session_state.answered = False
     st.session_state.quiz_completed = False
@@ -2750,90 +2760,90 @@ if app_mode == "Camera Mode":
                     st.rerun()
         
         # Text OCR mode
-        # Text OCR mode
         elif detection_type == "Text (OCR)":  # Text OCR mode
             # Create container for loading spinner
-            spinner_container = st.container()
+            spinner_container = st.empty()
             with spinner_container:
                 show_loading_spinner("Detecting text... This may take a few seconds.")
-            
+                
             # Add visual separator for mobile
             add_result_separator()
-        
+            
             with st.spinner("Detecting text..."):
                 detected_text = detect_text_in_image(image)
-            
+                
                 # Clear the spinner
                 spinner_container.empty()
-            
+                
                 # Add scroll indicator for mobile
                 add_scroll_indicator()
-            
-            if detected_text and not any(error_phrase in detected_text.lower() for error_phrase in [
-                "tesseract", "ocr", "not installed", "error", "detection requires", "unavailable"
-            ]):
-                style_section_title("📝 Detected Text")
-                st.write(detected_text)
-                    
-                # Split into words for learning
-                words = [word.strip() for word in re.split(r'[^\w]', detected_text) if word.strip()]
-                    
-                if words:
-                    st.subheader("Words to Learn")
+                
+                # Process detected text (including demo mode)
+                if detected_text and not any(error_phrase in detected_text.lower() for error_phrase in [
+                    "error:", "text detection error", "failed"
+                ]):
+                    style_section_title("📝 Detected Text")
+                    st.write(detected_text)
                         
-                    # Create containers for each word
-                    for i, word in enumerate(words):
-                        if len(word) <= 2:  # Skip very short words
-                            continue
-                                
-                        # Translate the word
-                        translated_word = translate_text(word, st.session_state.target_language)
+                    # Split into words for learning
+                    words = [word.strip() for word in re.split(r'[^\w]', detected_text) if word.strip()]
+                        
+                    if words:
+                        st.subheader("Words to Learn")
                             
-                        # Display in a container
-                        with st.container():
-                            cols = st.columns([3, 1])
-                           
-                            with cols[0]:
-                                st.write(f"**{word}** → {translated_word}")
-                                # Add audio
-                                audio_bytes = text_to_speech(translated_word, st.session_state.target_language)
-                                if audio_bytes:
-                                    st.markdown(get_audio_html(audio_bytes), unsafe_allow_html=True)
+                        # Create containers for each word
+                        for i, word in enumerate(words):
+                            if len(word) <= 2:  # Skip very short words
+                                continue
+                                    
+                            # Translate the word
+                            translated_word = translate_text(word, st.session_state.target_language)
                                 
-                            with cols[1]:
-                                # Add save button for each word
-                                if st.button(f"Save", key=f"save_text_{i}"):
-                                    # Auto-start session if needed
-                                    if st.session_state.session_id is None:
-                                        manage_session("start")
-                                        
-                                    # Save to vocabulary
-                                    vocab_id = add_vocabulary_direct(
-                                        word_original=word,
-                                        word_translated=translated_word,
-                                        language_translated=st.session_state.target_language,
-                                        category="text",
-                                        image_path=None
-                                    )
-                                        
-                                    if vocab_id and vocab_id != 'duplicate':
-                                        success_message(f"Added '{word}' to vocabulary!")
-                                        st.session_state.words_studied += 1
-                                        st.session_state.words_learned += 1
-                                    elif vocab_id == 'duplicate':
-                                        warning_message(f"'{word}' is already in your vocabulary!")
-                                    else:
-                                        error_message(f"Failed to save '{word}'")
-                                
-                            st.markdown("---")
+                            # Display in a container
+                            with st.container():
+                                cols = st.columns([3, 1])
+                            
+                                with cols[0]:
+                                    st.write(f"**{word}** → {translated_word}")
+                                    # Add audio
+                                    audio_bytes = text_to_speech(translated_word, st.session_state.target_language)
+                                    if audio_bytes:
+                                        st.markdown(get_audio_html(audio_bytes), unsafe_allow_html=True)
+                                    
+                                with cols[1]:
+                                    # Add save button for each word
+                                    if st.button(f"Save", key=f"save_text_{i}"):
+                                        # Auto-start session if needed
+                                        if st.session_state.session_id is None:
+                                            manage_session("start")
+                                            
+                                        # Save to vocabulary
+                                        vocab_id = add_vocabulary_direct(
+                                            word_original=word,
+                                            word_translated=translated_word,
+                                            language_translated=st.session_state.target_language,
+                                            category="text",
+                                            image_path=None
+                                        )
+                                            
+                                        if vocab_id and vocab_id != 'duplicate':
+                                            success_message(f"Added '{word}' to vocabulary!")
+                                            st.session_state.words_studied += 1
+                                            st.session_state.words_learned += 1
+                                        elif vocab_id == 'duplicate':
+                                            warning_message(f"'{word}' is already in your vocabulary!")
+                                        else:
+                                            error_message(f"Failed to save '{word}'")
+                                    
+                                st.markdown("---")
+                    else:
+                        info_message("No clear words detected in the image.")
                 else:
-                    info_message("No clear words detected in the image.")
-            else:
-                # Show helpful message for text detection
-                if detected_text and any(error_phrase in detected_text.lower() for error_phrase in ["tesseract", "ocr"]):
-                    info_message("Text detection is not fully configured on this system. Try using object detection instead!")
-                else:
-                    info_message("No text detected in this image. Try another image with clearer text, or use object detection instead.")
+                    # Show helpful message for text detection
+                    if "demo mode" in detected_text.lower():
+                        st.info("Install EasyOCR (`pip install easyocr`) for full text detection capabilities!")
+                    else:
+                        info_message("No text detected in this image. Try another image with clearer text, or use object detection instead.")
 
 
 elif app_mode == "My Vocabulary":
@@ -3034,26 +3044,6 @@ elif app_mode == "My Vocabulary":
 elif app_mode == "Quiz Mode":
     style_title("Quiz Mode")
     st.markdown("Test your vocabulary knowledge with interactive quizzes.")
-    
-
-    # DEBUG: Add these lines to check and reset quiz state
-    if st.button("🔄 Reset Quiz State (Debug)", help="Click if quiz setup is not showing"):
-        st.session_state.current_quiz_word = None
-        st.session_state.quiz_options = []
-        st.session_state.quiz_completed = False
-        st.session_state.answered = False
-        st.session_state.quiz_score = 0
-        st.session_state.quiz_total = 0
-        st.rerun()
-    
-    # Show current state for debugging
-    st.sidebar.markdown("### Debug Info")
-    st.sidebar.markdown(f"current_quiz_word: {st.session_state.get('current_quiz_word', 'None')}")
-    st.sidebar.markdown(f"quiz_options: {len(st.session_state.get('quiz_options', []))} items")
-    st.sidebar.markdown(f"quiz_completed: {st.session_state.get('quiz_completed', False)}")
-
-
-
     # Get vocabulary from database
     vocabulary = get_all_vocabulary_direct()
     
@@ -3064,6 +3054,8 @@ elif app_mode == "Quiz Mode":
         st.session_state.current_quiz_word = None
     if 'quiz_options' not in st.session_state:
         st.session_state.quiz_options = []
+    if 'current_question_number' not in st.session_state:
+        st.session_state.current_question_number = 1
 
     # Check if quiz is in progress
     quiz_in_progress = (st.session_state.current_quiz_word is not None and 
@@ -3083,7 +3075,7 @@ elif app_mode == "Quiz Mode":
         current_word = st.session_state.current_quiz_word
         
         # Display question number
-        st.markdown(f"### 🎯 Quiz Question {st.session_state.quiz_total + 1}/{target_questions}")
+        st.markdown(f"### 🎯 Quiz Question {st.session_state.current_question_number}/{target_questions}")
         
         # Display image if available
         image_path = current_word.get('image_path', '')
@@ -3186,6 +3178,9 @@ elif app_mode == "Quiz Mode":
                     if 'selected_answer' in st.session_state:
                         del st.session_state.selected_answer
                     
+                    # INCREMENT the question number when moving to next question
+                    st.session_state.current_question_number += 1
+                    
                     if setup_new_question(vocabulary):
                         st.rerun()
                     else:
@@ -3225,6 +3220,7 @@ elif app_mode == "Quiz Mode":
             st.session_state.quiz_options = []
             st.session_state.quiz_score = 0
             st.session_state.quiz_total = 0
+            st.session_state.current_question_number = 1
             st.session_state.answered = False
             st.rerun()
         
