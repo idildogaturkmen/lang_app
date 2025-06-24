@@ -25,86 +25,6 @@ import json
 from urllib.parse import parse_qs
 from database import LanguageLearningDB
 import jwt
-        
-# Authentication Functions for Supabase
-def get_url_params():
-    """Get URL parameters from Streamlit."""
-    try:
-        # Try the newer method first
-        query_params = st.query_params
-        return {key: [value] for key, value in query_params.items()}
-    except:
-        try:
-            # Fallback to experimental method
-            query_params = st.experimental_get_query_params()
-            return query_params
-        except:
-            # Last resort - parse manually
-            import urllib.parse
-            url = st.query_params
-            if hasattr(url, 'to_dict'):
-                return {key: [value] for key, value in url.to_dict().items()}
-            return {}
-
-def get_authenticated_user():
-    """Get the current authenticated user from Supabase."""
-    if 'authenticated_user' not in st.session_state:
-        # Get URL parameters
-        params = get_url_params()
-        
-        # Check for Supabase authentication parameters
-        auth_token = params.get('auth_token', [None])[0]
-        auth_provider = params.get('auth_provider', [None])[0]
-        user_email = params.get('user_email', [None])[0]
-        user_id = params.get('user_id', [None])[0]
-        
-        print(f"🔍 Auth params - Token: {auth_token is not None}, Provider: {auth_provider}, Email: {user_email}, ID: {user_id}")
-        
-        if auth_token and auth_provider == 'supabase' and user_email and user_id:
-            # Create user data from Supabase parameters
-            user_data = {
-                'id': user_id,
-                'email': user_email,
-                'username': user_email.split('@')[0] if user_email else 'user',
-                'displayName': user_email.split('@')[0] if user_email else 'User',
-                'auth_token': auth_token,
-                'timestamp': datetime.now().timestamp() * 1000
-            }
-            st.session_state.authenticated_user = user_data
-            print(f"✅ User authenticated: {user_email} with ID: {user_id}")
-        else:
-            print(f"❌ Authentication failed - missing params")
-            st.session_state.authenticated_user = None
-    
-    return st.session_state.authenticated_user
-
-def require_authentication():
-    """Require user authentication to access the app."""
-    user = get_authenticated_user()
-    
-    if not user:
-        st.error("🔒 Authentication Required")
-        st.info("Please log in through the main website to access Vocam.")
-        st.markdown("**[← Login Here](https://vocam.app/web)**")
-        
-        # Show a simple demo mode option
-        st.markdown("---")
-        st.markdown("### Demo Mode")
-        if st.button("Continue as Demo User"):
-            # Set demo user data
-            demo_user = {
-                'id': 'demo_user_999',
-                'username': 'demo',
-                'displayName': 'Demo User',
-                'email': 'demo@vocam.app',
-                'timestamp': datetime.now().timestamp() * 1000
-            }
-            st.session_state.authenticated_user = demo_user
-            st.rerun()
-        
-        st.stop()
-    
-    return user
 
 class SupabaseDB:
     def __init__(self):
@@ -135,96 +55,73 @@ class SupabaseDB:
             headers['Authorization'] = f'Bearer {self.supabase_key}'
         
         return headers
-
-    def check_vocabulary_exists(self, word_original, language_translated):
-        """Check if vocabulary already exists for the user."""
+    
+    def check_word_exists(self, word_original, word_translated, language_translated):
+        """Check if a word already exists in the user's vocabulary."""
+        user_id = self.get_user_id()
+        if not user_id:
+            return False
+            
         try:
-            user_id = self.get_user_id()
-            if not user_id:
-                return False
-                
+            import requests
+            
             headers = self.get_headers()
             
-            # Query vocabulary table with filters
-            url = f'{self.supabase_url}/rest/v1/vocabulary'
-            params = {
-                'user_id': f'eq.{user_id}',
-                'word_original': f'eq.{word_original}',
-                'language_translated': f'eq.{language_translated}',
-                'select': 'id'
-            }
+            # Query to check if word already exists for this user
+            url = f'{self.supabase_url}/rest/v1/vocabulary?user_id=eq.{user_id}&word_original=eq.{word_original}&word_translated=eq.{word_translated}&language_translated=eq.{language_translated}'
             
-            response = requests.get(url, headers=headers, params=params)
+            response = requests.get(url, headers=headers, timeout=30)
             
             if response.status_code == 200:
-                data = response.json()
-                return len(data) > 0  # Returns True if word exists
-            else:
-                print(f"Error checking vocabulary: {response.status_code}")
-                return False
+                result = response.json()
+                return len(result) > 0  # Returns True if word exists
+            return False
                 
         except Exception as e:
-            print(f"Error checking vocabulary exists: {e}")
+            print(f"Error checking for existing word: {e}")
             return False
     
     def add_vocabulary(self, word_original, word_translated, language_translated, category=None, image_path=None):
-        """Add vocabulary to Supabase with duplicate checking."""
+        """Add vocabulary to Supabase - with duplicate prevention."""
+        user_id = self.get_user_id()
+        if not user_id:
+            return None
+        
+        # Check if word already exists
+        if self.check_word_exists(word_original, word_translated, language_translated):
+            print(f"⚠️ Word '{word_original}' -> '{word_translated}' already exists in vocabulary")
+            return 'duplicate'  # Return special value to indicate duplicate
+            
         try:
-            # Check if vocabulary already exists
-            if self.check_vocabulary_exists(word_original, language_translated):
-                print(f"📝 Word '{word_original}' already exists in vocabulary")
-                return "duplicate"  # Return special value to indicate duplicate
-                
-            user_id = self.get_user_id()
-            if not user_id:
-                return None
-                
+            import requests
+            
             headers = self.get_headers()
             
-            # Create vocabulary entry
-            vocab_data = {
+            data = {
                 'user_id': user_id,
                 'word_original': word_original,
                 'word_translated': word_translated,
                 'language_translated': language_translated,
-                'category': category,
+                'category': category or 'other',
                 'image_path': image_path,
-                'source': 'object_detection'
+                'source': f'user_{user_id}'
             }
             
             response = requests.post(
                 f'{self.supabase_url}/rest/v1/vocabulary',
                 headers=headers,
-                json=vocab_data
+                json=data,
+                timeout=30
             )
             
             if response.status_code in [200, 201]:
-                vocab_record = response.json()[0]
-                vocab_id = vocab_record['id']
-                
-                # Initialize user progress
-                progress_data = {
-                    'user_id': user_id,
-                    'vocabulary_id': vocab_id,
-                    'proficiency_level': 0,
-                    'review_count': 0,
-                    'correct_count': 0
-                }
-                
-                requests.post(
-                    f'{self.supabase_url}/rest/v1/user_progress',
-                    headers=headers,
-                    json=progress_data
-                )
-                
-                print(f"✅ Added new vocabulary: {word_original} → {word_translated}")
-                return vocab_id
-            else:
-                print(f"❌ Failed to add vocabulary: {response.status_code}")
-                return None
+                result = response.json()
+                if result and len(result) > 0:
+                    return result[0].get('id')
+            return None
                 
         except Exception as e:
-            print(f"❌ Error adding vocabulary: {e}")
+            print(f"Error adding vocabulary: {e}")
             return None
     
     def get_all_vocabulary(self):
@@ -315,7 +212,123 @@ class SupabaseDB:
             print(f"Error ending session: {e}")
             return False
 
+        
+# Authentication Functions for Supabase
+def get_url_params():
+    """Get URL parameters from Streamlit."""
+    try:
+        # Try the newer method first
+        query_params = st.query_params
+        return {key: [value] for key, value in query_params.items()}
+    except:
+        try:
+            # Fallback to experimental method
+            query_params = st.experimental_get_query_params()
+            return query_params
+        except:
+            # Last resort - parse manually
+            import urllib.parse
+            url = st.query_params
+            if hasattr(url, 'to_dict'):
+                return {key: [value] for key, value in url.to_dict().items()}
+            return {}
 
+def get_authenticated_user():
+    """Get the current authenticated user from Supabase."""
+    if 'authenticated_user' not in st.session_state:
+        # Get URL parameters
+        params = get_url_params()
+        
+        # Check for Supabase authentication parameters
+        auth_token = params.get('auth_token', [None])[0]
+        auth_provider = params.get('auth_provider', [None])[0]
+        user_email = params.get('user_email', [None])[0]
+        user_id = params.get('user_id', [None])[0]
+        
+        print(f"🔍 Auth params - Token: {auth_token is not None}, Provider: {auth_provider}, Email: {user_email}, ID: {user_id}")
+        
+        if auth_token and auth_provider == 'supabase' and user_email and user_id:
+            # Create user data from Supabase parameters
+            user_data = {
+                'id': user_id,
+                'email': user_email,
+                'username': user_email.split('@')[0] if user_email else 'user',
+                'displayName': user_email.split('@')[0] if user_email else 'User',
+                'auth_token': auth_token,
+                'timestamp': datetime.now().timestamp() * 1000
+            }
+            st.session_state.authenticated_user = user_data
+            print(f"✅ User authenticated: {user_email} with ID: {user_id}")
+        else:
+            print(f"❌ Authentication failed - missing params")
+            st.session_state.authenticated_user = None
+    
+    return st.session_state.authenticated_user
+
+def require_authentication():
+    """Require user authentication to access the app."""
+    user = get_authenticated_user()
+    
+    if not user:
+        st.error("🔒 Authentication Required")
+        st.info("Please log in through the main website to access Vocam.")
+        st.markdown("**[← Login Here](https://vocam.app/web)**")
+        
+        # Show a simple demo mode option
+        st.markdown("---")
+        st.markdown("### Demo Mode")
+        if st.button("Continue as Demo User"):
+            # Set demo user data
+            demo_user = {
+                'id': 'demo_user_999',
+                'username': 'demo',
+                'displayName': 'Demo User',
+                'email': 'demo@vocam.app',
+                'timestamp': datetime.now().timestamp() * 1000
+            }
+            st.session_state.authenticated_user = demo_user
+            st.rerun()
+        
+        st.stop()
+    
+    return user
+
+def display_quiz_image(word, caption=""):
+    """Display an image for quiz questions, prioritizing cropped versions."""
+    image_path = word.get('image_path', '')
+    if not image_path:
+        return False
+    
+    try:
+        # Use cropped version if available
+        display_image_path = get_cropped_image_path(image_path)
+        
+        if display_image_path.startswith('vocabulary-images/'):
+            # Private Supabase Storage
+            signed_url = get_signed_image_url(display_image_path)
+            if signed_url:
+                st.image(signed_url, caption=caption, width=400)
+                st.markdown("*🎯 Focused view of detected object*")
+                return True
+        elif display_image_path.startswith('http'):
+            # Legacy public URL
+            st.image(display_image_path, caption=caption, width=400)
+            if "_cropped" in display_image_path:
+                st.markdown("*🎯 Focused view of detected object*")
+            return True
+        elif os.path.exists(display_image_path):
+            # Local file
+            image = Image.open(display_image_path)
+            st.image(image, caption=caption, width=400)
+            if "_cropped.jpg" in display_image_path:
+                st.markdown("*🎯 Focused view of detected object*")
+            return True
+        
+        return False
+    except Exception as e:
+        print(f"Error displaying quiz image: {e}")
+        return False
+    
 def clear_user_session_data():
     """Clear all session state data for a clean user experience."""
     user = get_authenticated_user()
@@ -359,7 +372,6 @@ def clear_user_session_data():
         st.session_state.last_user_id = current_user_id
         
         print(f"✅ Session data cleared for user: {current_user_id}")
-
 
 user = require_authentication()
 clear_user_session_data()
@@ -482,6 +494,18 @@ from vocam_ui import (
 
 apply_custom_css()
 
+# Try importing OCR with fallback
+try:
+    import pytesseract
+    has_tesseract = True
+except ImportError as e:
+    has_tesseract = False
+    # Dummy implementation
+    class DummyTesseract:
+        def image_to_string(self, *args, **kwargs):
+            return "OCR requires pytesseract. Install with: pip install pytesseract"
+    pytesseract = DummyTesseract()
+
 try:
     from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM
     has_transformers = True
@@ -516,18 +540,6 @@ try:
 except ImportError as e:
     has_pronunciation_practice = False
     print(f"❌ Pronunciation practice not available: {e}")
-    
-# Try importing OCR with fallback
-try:
-    import pytesseract
-    has_tesseract = True
-except ImportError as e:
-    has_tesseract = False
-    # Dummy implementation
-    class DummyTesseract:
-        def image_to_string(self, *args, **kwargs):
-            return "OCR requires pytesseract. Install with: pip install pytesseract"
-    pytesseract = DummyTesseract()
 
 # Try importing OpenCV with robust fallback mechanism
 try:
@@ -1009,7 +1021,6 @@ def detect_text_in_image(image):
     except Exception as e:
         return f"Text detection error: {str(e)}"
     
-
 # Function to get example sentence
 def get_example_sentence(word, target_language):
     """Generate an example sentence using the word via the example generator."""
@@ -1059,9 +1070,8 @@ def get_pronunciation_guide(word, language_code):
     except Exception as e:
         return [f"Pronunciation guide unavailable: {str(e)}"]
 
-def display_quiz_image(word, caption=""):
-    """Display an image for quiz questions, prioritizing cropped versions."""
-    image_path = word.get('image_path', '')
+def display_vocabulary_image(image_path, word_original):
+    """Display image with proper handling for all storage types."""
     if not image_path:
         return False
     
@@ -1069,34 +1079,71 @@ def display_quiz_image(word, caption=""):
         # Use cropped version if available
         display_image_path = get_cropped_image_path(image_path)
         
+        print(f"🔍 Attempting to display image: {display_image_path}")
+        
+        # Check if it's a new private Supabase storage path
         if display_image_path.startswith('vocabulary-images/'):
-            # Private Supabase Storage
+            print(f"🔍 Supabase storage path detected")
             signed_url = get_signed_image_url(display_image_path)
             if signed_url:
-                st.image(signed_url, caption=caption, width=400)
-                st.markdown("*Focused view of detected object*")
+                st.image(signed_url, caption=f"📷 {word_original} - Cropped from detection")
+                st.markdown("*🎯 Showing focused crop of detected object*")
+                st.markdown("*🔒 Private image - only visible to you*")
                 return True
+            else:
+                print(f"❌ Failed to get signed URL for: {display_image_path}")
+                
+        # Check if it's a legacy public URL (starts with http)
         elif display_image_path.startswith('http'):
-            # Legacy public URL
-            st.image(display_image_path, caption=caption, width=400)
+            print(f"🔍 Public URL detected: {display_image_path}")
+            st.image(display_image_path, caption=f"📷 {word_original}")
             if "_cropped" in display_image_path:
-                st.markdown("*Focused view of detected object*")
+                st.markdown("*🎯 Showing focused crop of detected object*")
+            else:
+                st.markdown("*📸 Showing full original image*")
             return True
+            
+        # Check if it's a local file path
         elif os.path.exists(display_image_path):
-            # Local file
+            print(f"🔍 Local file detected: {display_image_path}")
             image = Image.open(display_image_path)
-            st.image(image, caption=caption, width=400)
+            st.image(image, caption=f"📷 {word_original}")
+            
             if "_cropped.jpg" in display_image_path:
-                st.markdown("*Focused view of detected object*")
+                st.markdown("*🎯 Showing focused crop of detected object*")
+            else:
+                st.markdown("*📸 Showing full original image*")
             return True
+            
+        # If none of the above work, it might be a legacy path format
+        else:
+            print(f"🔍 Trying to find legacy image: {display_image_path}")
+            
+            # Try different legacy path formats
+            possible_paths = [
+                display_image_path,
+                f"object_images/{display_image_path}",
+                display_image_path.replace("vocabulary-images/", "object_images/"),
+                display_image_path.replace("vocabulary-images/", "")
+            ]
+            
+            for path in possible_paths:
+                if os.path.exists(path):
+                    print(f"✅ Found legacy image at: {path}")
+                    image = Image.open(path)
+                    st.image(image, caption=f"📷 {word_original}")
+                    st.markdown("*📸 Legacy image*")
+                    return True
         
+        print(f"❌ Could not display image: {display_image_path}")
         return False
+        
     except Exception as e:
-        print(f"Error displaying quiz image: {e}")
+        print(f"❌ Error displaying image: {e}")
         return False
     
 def add_vocabulary_direct(word_original, word_translated, language_translated, category=None, image_path=None):
-    """Add vocabulary using Supabase - Production version with duplicate checking."""
+    """Add vocabulary using Supabase - Production version with duplicate prevention."""
     user = get_authenticated_user()
     if not user:
         error_message("Please log in to save vocabulary.")
@@ -1106,12 +1153,10 @@ def add_vocabulary_direct(word_original, word_translated, language_translated, c
         db = get_user_database()
         vocab_id = db.add_vocabulary(word_original, word_translated, language_translated, category, image_path)
         
-        # Handle the different return values
-        if vocab_id == "duplicate":
-            # Word already exists, return special value
-            return "duplicate"
+        if vocab_id == 'duplicate':
+            warning_message(f"'{word_original}' → '{word_translated}' is already in your vocabulary!")
+            return 'duplicate'
         elif vocab_id:
-            # Successfully added new word
             try:
                 gamification.check_achievements(
                     "word_learned",
@@ -1123,13 +1168,10 @@ def add_vocabulary_direct(word_original, word_translated, language_translated, c
                 pass  # Don't let gamification errors affect vocabulary saving
             return vocab_id
         else:
-            # Database error
             error_message("Unable to save vocabulary. Please try again.")
             return None
-        
     except Exception as e:
         error_message("There was a problem saving your vocabulary. Please check your connection and try again.")
-        print(f"Error in add_vocabulary_direct: {e}")
         return None
 
 
@@ -1937,33 +1979,31 @@ def display_vocabulary_image(image_path, word_original):
         return False
 
 def get_cropped_image_path(image_path):
-    """Get the cropped version of an image path if it exists - supports all storage types."""
+    """Get the cropped version of an image path - improved legacy support."""
     if not image_path:
         return image_path
     
-    # For Supabase storage paths, images are already cropped during upload
+    print(f"🔍 Processing image path: {image_path}")
+    
+    # For new Supabase storage paths
     if image_path.startswith('vocabulary-images/'):
-        return image_path  # Already cropped during upload process
+        return image_path  # Already processed during upload
     
     # For legacy public URLs
     if image_path.startswith('http'):
-        # Check if this is already a cropped image
         if "_cropped" in image_path:
             return image_path
-        # Try to construct cropped URL (for legacy images)
-        cropped_url = image_path.replace(".jpg", "_cropped.jpg")
-        return cropped_url  # Return the attempted cropped URL
+        return image_path.replace(".jpg", "_cropped.jpg")
     
-    # For local files
+    # For local file paths
     if "_cropped.jpg" in image_path:
         return image_path
     
-    # Try to find cropped version
+    # Try to find cropped version of local file
     cropped_path = image_path.replace(".jpg", "_cropped.jpg")
     if os.path.exists(cropped_path):
         return cropped_path
     
-    # Fall back to original
     return image_path
 
 # Function to start a new quiz
@@ -2068,7 +2108,7 @@ def update_word_progress_direct(vocab_id, is_correct):
 # Function to check quiz answer
 def check_answer(selected_index):
     """Check if selected quiz answer is correct and update progress."""
-    if st.session_state.get('answered', False):
+    if st.session_state.answered:
         return
     
     selected_word = st.session_state.quiz_options[selected_index]
@@ -2081,16 +2121,22 @@ def check_answer(selected_index):
     st.session_state.words_studied += 1
     if is_correct:
         st.session_state.words_learned += 1
-        st.session_state.quiz_score = st.session_state.get('quiz_score', 0) + 1
+        st.session_state.quiz_score += 1
     
-    st.session_state.quiz_total = st.session_state.get('quiz_total', 0) + 1
+    st.session_state.quiz_total += 1
     st.session_state.answered = True
+    
+    # FIX: Check if quiz should be completed WITHOUT immediate rerun
+    target_questions = st.session_state.get('quiz_target_questions', 5)
+    if st.session_state.quiz_total >= target_questions:
+        # Don't set quiz_completed here - let the main logic handle it
+        pass
     
     # Gamification check
     try:
         gamification.check_challenge_progress(
-            quiz_score=st.session_state.get('quiz_score', 0),
-            quiz_total=st.session_state.get('quiz_total', 0)
+            quiz_score=st.session_state.quiz_score,
+            quiz_total=st.session_state.quiz_total
         )
     except Exception as e:
         print(f"Gamification error: {e}")
@@ -2245,149 +2291,239 @@ with st.sidebar.expander("ℹ️ Need Help?"):
 # Display appropriate content based on selected mode
 if app_mode == "Camera Mode":
     style_title("Camera Mode")
-    st.markdown("Capture objects to learn new vocabulary words in your target language.")
+    # Use the enhanced info message
+    info_message("Take a photo or upload an image to identify objects and learn new vocabulary.")
+    
+    # Session management
+    session_container = st.container()
+    with session_container:
+        col1, col2 = st.columns(2)
+        # FIXED: Properly close the with statement
+        with col1:
+            # Always create a placeholder for the start button
+            start_button_placeholder = st.empty()
+            
+            # Conditionally show the button or message
+            if st.session_state.session_id is None:
+                if start_button_placeholder.button("Start Learning Session", key="start_session_btn"):
+                    if manage_session("start"):
+                        st.rerun()
+            else:
+                # Show session info in the same place
+                start_button_placeholder.markdown(
+                    f'<div class="info-box" style="margin: 0.5rem 0; height: 38px; display: flex; align-items: center;">'
+                    f'Session in progress - Words: {st.session_state.words_learned}'
+                    f'</div>', 
+                    unsafe_allow_html=True
+                )
+        
+        with col2:
+            # Always create a placeholder for the end button
+            end_button_placeholder = st.empty()
+            
+            # Only show the end button when a session is active
+            if st.session_state.session_id is not None:
+                if end_button_placeholder.button("End Session", key="end_session_btn"):
+                    if manage_session("end"):
+                        st.rerun()
+            else:
+                # Empty space with same height to maintain layout
+                end_button_placeholder.markdown(
+                    '<div style="height: 38px;"></div>', 
+                    unsafe_allow_html=True
+                )
     
     # Image input options
-    image_option = st.radio(
-        "Choose image source:",
-        ["Take Photo", "Upload Image"],
-        horizontal=True
-    )
-    
+    image_tab1, image_tab2 = st.tabs(["📷 Take a Photo", "📁 Upload Image"])
+
     image = None
-    if image_option == "Take Photo":
-        image = st.camera_input("Take a picture")
-    else:
-        image = st.file_uploader(
-            "Upload an image", 
-            type=['png', 'jpg', 'jpeg'],
-            help="Upload a clear image with objects you want to learn"
-        )
+    # First tab: Camera
+    with image_tab1:
+        picture = st.camera_input("Take a picture", key="camera_input")
+        if picture is not None:
+            image = Image.open(picture)
+
+    # Second tab: Upload
+    with image_tab2:
+        uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"], key="file_uploader")
+        if uploaded_file is not None:
+            try:
+                image = Image.open(uploaded_file)
+            except Exception as e:
+                st.error(f"Error loading image: {e}")
+                image = None
     
-    # Detection settings - REMOVED the radio button choice, always use Objects
-    st.subheader("🎛️ Detection Settings")
-    
-    # Fixed to object detection only
-    detection_type = "Objects"  # Always use object detection
-    
-    # Object detection settings
-    confidence_threshold = st.slider(
-        "Detection Confidence", 
-        min_value=0.3, 
-        max_value=0.9, 
-        value=0.5,
-        step=0.05,
-        help="Higher values detect fewer but more certain objects"
+    # Detection options
+    detection_type = st.radio(
+        "What would you like to detect?",
+        ["Objects", "Text (OCR)"],
+        index=0
     )
-    # Set iou_threshold for optimal detection
-    iou_threshold = 0.45
-    
-    # Auto-enhancement is always applied
-    enhancement_type = "auto"
+
+    # Detection settings for objects
+    if detection_type == "Objects":
+        confidence_threshold = st.slider(
+            "Detection Confidence", 
+            min_value=0.3, 
+            max_value=0.9, 
+            value=0.5,
+            step=0.05
+        )
+        # Set iou_threshold for optimal detection (balance between precision and maximum detection)
+        iou_threshold = 0.45  # Using a lower threshold to detect more objects while maintaining precision
+        
+        # Auto-enhancement is always applied
+        enhancement_type = "auto"
     
     # Process image if available
     if image is not None:
-        # Object detection processing
-        spinner_placeholder = st.empty()
-        with spinner_placeholder.container():
-            show_loading_spinner("Detecting objects... This may take a few seconds.")
-        
-        # Add visual separator for mobile
-        separator_placeholder = st.empty()
-        separator_placeholder.markdown('<div class="result-separator"></div>', unsafe_allow_html=True)
-        
-        try:
-            # Always apply enhancement for object detection
-            enhanced_image = enhance_image(image, "auto")
-            if enhanced_image is None:
-                raise Exception("Image enhancement failed")
+        # Process based on detection type
+        if detection_type == "Objects":
+            # Use a placeholder for the spinner that we can clear later
+            spinner_placeholder = st.empty()
+            with spinner_placeholder.container():
+                show_loading_spinner("Detecting objects... This may take a few seconds.")
             
-            # Run memory-optimized detection
-            detections, result_image = detect_objects(
-                enhanced_image, confidence_threshold, iou_threshold
-            )
+            # Add visual separator for mobile
+            separator_placeholder = st.empty()
+            separator_placeholder.markdown('<div class="result-separator"></div>', unsafe_allow_html=True)
             
-            # Clear spinners and separators
+            try:
+                # Always apply enhancement for object detection
+                enhanced_image = enhance_image(image, "auto")
+                if enhanced_image is None:
+                    raise Exception("Image enhancement failed")
+                
+                # Run memory-optimized detection
+                detections, result_image = detect_objects(
+                    enhanced_image, confidence_threshold, iou_threshold
+                )
+                
+            except Exception as e:
+                if "memory" in str(e).lower() or "resource" in str(e).lower():
+                    error_message("Memory limit reached. Please try a smaller image or refresh the page.")
+                else:
+                    error_message(f"Detection error: {str(e)}")
+                # Fallback behavior
+                detections, result_image = [], np.array(image)
+            
+            # FIX: Clear the spinner and separator completely
             spinner_placeholder.empty()
             separator_placeholder.empty()
-            
+        
+            # Display results
             if detections:
-                style_section_title(f"🔍 Found {len(detections)} Objects")
+                style_section_title("✨ Detected Objects")
                 
-                # Display the annotated image
-                st.image(result_image, caption="Detected Objects", use_column_width=True)
-                
-                # Initialize detection checkboxes if not exists
-                if 'detection_checkboxes' not in st.session_state:
-                    st.session_state.detection_checkboxes = {}
+                # Display image with detection boxes
+                st.image(result_image, caption="Detected Objects")
                     
-                # Display detection results with translation
-                style_section_title("📝 Select Objects to Learn")
-                
+                # Display selection prompt
+                st.write("Select objects to save to your vocabulary:")
+                    
+                # Group detections by category
+                # Group detections by label to avoid duplicates
+                unique_detections = {}
                 for i, detection in enumerate(detections):
                     label = detection['label']
                     confidence = detection['confidence']
                     
-                    # Create a checkbox key for this detection
-                    checkbox_key = f"detect_{i}"
+                    # If label already exists and new confidence is lower, skip
+                    if label in unique_detections and unique_detections[label][1]['confidence'] >= confidence:
+                        continue
                     
-                    # Create columns for display
-                    col1, col2, col3 = st.columns([2, 2, 1])
+                    # Otherwise add/update this label with highest confidence detection
+                    unique_detections[label] = (i, detection)
+
+                # Now group the unique detections by category
+                categorized_detections = {}
+                for i, detection in unique_detections.values():
+                    label = detection['label']
+                    category = get_object_category(label)
                     
-                    with col1:
-                        st.write(f"**{label}** ({confidence:.1%})")
+                    if category not in categorized_detections:
+                        categorized_detections[category] = []
                     
-                    with col2:
-                        try:
-                            translated_label = translate_text(label, st.session_state.target_language)
-                            st.write(f"→ {translated_label}")
+                    categorized_detections[category].append((i, detection))
+                
+                # Clear detection checkboxes for new image
+                if 'last_image_hash' not in st.session_state or st.session_state.last_image_hash != get_image_hash(image):
+                    st.session_state.detection_checkboxes = {}
+                    st.session_state.last_image_hash = get_image_hash(image)
+                
+                # Display objects by category in expandable sections
+                for category, category_detections in categorized_detections.items():
+                    with st.expander(f"{category.title()} ({len(category_detections)} items)", expanded=True):
+                        # Process each detection in this category
+                        for i, detection in category_detections:
+                            label = detection['label']
+                            confidence = detection['confidence']
+                            checkbox_key = f"detect_{i}"
                             
-                            # Add audio for the translated word
-                            audio_bytes = text_to_speech(translated_label, st.session_state.target_language)
-                            if audio_bytes:
-                                st.markdown(get_audio_html(audio_bytes), unsafe_allow_html=True)
+                            # Translate the label
+                            translated_label = translate_text(label, st.session_state.target_language)
+                            
+                            # Create a container for this object
+                            with st.container():
+                                # Display the object info
+                                st.markdown(f"**{label}** ({confidence:.2f})")
+                                st.markdown(f"→ **{translated_label}**")
                                 
-                            # PRESERVED FEATURE: Example sentence
-                            example_sentence = get_example_sentence(translated_label, st.session_state.target_language)
-                            if example_sentence and example_sentence.strip():
-                                with st.expander(f"💬 Example with '{translated_label}'", expanded=False):
-                                    st.write(example_sentence)
-                                    # Audio for example sentence
-                                    try:
-                                        example_audio = text_to_speech(example_sentence, st.session_state.target_language)
+                                # Create columns for audio, example, checkbox
+                                col1, col2, col3 = st.columns([2, 2, 1])
+                                
+                                with col1:
+                                    # Generate audio for the translated word
+                                    audio_bytes = text_to_speech(translated_label, st.session_state.target_language)
+                                    if audio_bytes:
+                                        st.markdown(get_audio_html(audio_bytes), unsafe_allow_html=True)
+                                    
+                                    # Add pronunciation helpers
+                                    pronunciation_tips = get_pronunciation_guide(translated_label, st.session_state.target_language)
+                                    if pronunciation_tips:
+                                        st.markdown("**Pronunciation Tips:**")
+                                        for tip in pronunciation_tips:
+                                            st.markdown(f"- {tip}")
+                                
+                                with col2:
+                                    # Add example sentence directly (no nested expander)
+                                    example = get_example_sentence(label, st.session_state.target_language)
+                                    st.markdown("**Example:**")
+                                    st.markdown(f"EN: {example['english']}")
+                                    
+                                    # Only display translated example if available
+                                    if example['translated']:
+                                        source = example.get('source', 'unknown')
+                                        source_name = source.replace('_', ' ').replace('api', 'API').title()
+                                        st.markdown(f"{selected_language}: {example['translated']}")
+                                        st.markdown(f"<small><i>Source: {source_name}</i></small>", unsafe_allow_html=True)
+                                        
+                                        # Only generate audio if there's text to speak
+                                        example_audio = text_to_speech(example['translated'], st.session_state.target_language)
                                         if example_audio:
                                             st.markdown(get_audio_html(example_audio), unsafe_allow_html=True)
-                                    except:
-                                        pass
-                            
-                            # PRESERVED FEATURE: Pronunciation guide
-                            pronunciation = get_pronunciation_guide(translated_label, st.session_state.target_language)
-                            if pronunciation and pronunciation.strip():
-                                st.caption(f"🗣️ Pronunciation: {pronunciation}")
+                                    else:
+                                        st.markdown("*Translation not available. Please install deep-translator package.*")
                                 
-                        except Exception as e:
-                            st.write("*Translation unavailable*")
-                            print(f"Translation error for {label}: {e}")
-                        
-                    with col3:
-                        # Default to checked
-                        if checkbox_key not in st.session_state.detection_checkboxes:
-                            st.session_state.detection_checkboxes[checkbox_key] = True
-                            
-                        # Add checkbox for this object
-                        st.session_state.detection_checkboxes[checkbox_key] = st.checkbox(
-                            "Save", 
-                            value=st.session_state.detection_checkboxes[checkbox_key],
-                            key=checkbox_key
-                        )
-                    
-                    st.markdown("---")  # Add separator
+                                with col3:
+                                    # Default to checked
+                                    if checkbox_key not in st.session_state.detection_checkboxes:
+                                        st.session_state.detection_checkboxes[checkbox_key] = True
+                                        
+                                    # Add checkbox for this object
+                                    st.session_state.detection_checkboxes[checkbox_key] = st.checkbox(
+                                        "Save", 
+                                        value=st.session_state.detection_checkboxes[checkbox_key],
+                                        key=checkbox_key
+                                    )
+                                
+                                st.markdown("---")  # Add separator
 
                 # Create a stable persistent key for our save button
                 save_button_id = "save_objects_button_fixed"
                 
                 # Display save button if objects haven't been saved yet
-                if not st.session_state.get('words_just_saved', False):
+                if not st.session_state.words_just_saved:
                     # Create a button with a fixed, consistent key
                     if st.button("💾 Save Selected Objects to Vocabulary", key=save_button_id):
                         # Auto-start session if needed
@@ -2407,10 +2543,10 @@ if app_mode == "Camera Mode":
                         if not selected_objects:
                             warning_message("No objects were selected to save. Please check at least one 'Save' box.")
                         else:
-                            # Save the selected objects with duplicate checking
+                            # Save the selected objects
                             saved_count = 0
-                            duplicate_count = 0
                             saved_items = []
+                            duplicate_count = 0
                             duplicate_items = []
                             
                             for i in selected_objects:
@@ -2419,13 +2555,13 @@ if app_mode == "Camera Mode":
                                     label = detection['label']
                                     translated_label = translate_text(label, st.session_state.target_language)
                                     
-                                    # Add to database using direct method with duplicate checking
                                     # Save the image with bounding box info for cropping
                                     image_path = save_image(image, label, detection['bbox'])  # Pass bbox
                                     
                                     # Get object category
                                     category = get_object_category(label)
                                     
+                                    # Add to database using direct method
                                     vocab_id = add_vocabulary_direct(
                                         word_original=label,
                                         word_translated=translated_label,
@@ -2434,7 +2570,7 @@ if app_mode == "Camera Mode":
                                         image_path=image_path
                                     )
                                     
-                                    if vocab_id == "duplicate":
+                                    if vocab_id == 'duplicate':
                                         duplicate_count += 1
                                         duplicate_items.append(f"{label} → {translated_label}")
                                     elif vocab_id:
@@ -2444,29 +2580,29 @@ if app_mode == "Camera Mode":
                                         st.session_state.words_studied += 1
                                         st.session_state.words_learned += 1
                                     else:
-                                        error_message(f"Error saving {label}: Database error")
-                                        
+                                        error_message(f"Failed to save {label} to vocabulary.")
                                 except Exception as e:
                                     error_message(f"Error saving {label}: {str(e)}")
                             
+                            # Update success message to handle duplicates
                             if saved_count > 0 or duplicate_count > 0:
                                 # Store the saved state and items in session state
                                 st.session_state.words_just_saved = True
                                 st.session_state.saved_count = saved_count
-                                st.session_state.duplicate_count = duplicate_count
                                 st.session_state.saved_items = saved_items
+                                st.session_state.duplicate_count = duplicate_count
                                 st.session_state.duplicate_items = duplicate_items
                                 st.rerun()  # Rerun once to update the UI
                             else:
                                 error_message("Failed to save any words. Please check database connection.")
 
                 # Show success message and navigation AFTER saving (persists across reruns)
-                if st.session_state.get('words_just_saved', False):
+                if st.session_state.words_just_saved:
                     # Create a container for the success message
                     success_container = st.container()
                     
                     with success_container:
-                        if st.session_state.get('saved_count', 0) > 0:
+                        if st.session_state.saved_count > 0:
                             success_message(f"Successfully added {st.session_state.saved_count} new words to your vocabulary!")
                             
                             # Show saved words in a visually appealing list
@@ -2475,127 +2611,205 @@ if app_mode == "Camera Mode":
                                 st.markdown(f"✅ {item}")
                         
                         if st.session_state.get('duplicate_count', 0) > 0:
-                            info_message(f"{st.session_state.duplicate_count} words were already in your vocabulary and were skipped.")
+                            warning_message(f"{st.session_state.duplicate_count} words were already in your vocabulary.")
                             
                             # Show duplicate words
-                            st.markdown('<h4 style="color: #FF9800;">Words already in vocabulary:</h4>', unsafe_allow_html=True)
-                            for item in st.session_state.duplicate_items:
-                                st.markdown(f"🔄 {item}")
+                            st.markdown('<h4 style="color: #FF9800;">Already in vocabulary:</h4>', unsafe_allow_html=True)
+                            for item in st.session_state.get('duplicate_items', []):
+                                st.markdown(f"⚠️ {item}")
                         
-                        # Show navigation options
-                        st.markdown("### What would you like to do next?")
-                        next_col1, next_col2, next_col3 = st.columns(3)
-                        
-                        # Define navigation callback functions
-                        def go_to_quiz_mode():
-                            st.session_state.words_just_saved = False  # Reset the saved state
-                            st.session_state.app_mode = "Quiz Mode"
-                            st.session_state.detection_checkboxes = {}  # Clear checkboxes
-                            st.rerun()
-
-                        def go_to_vocabulary():
-                            st.session_state.words_just_saved = False  # Reset the saved state
-                            st.session_state.app_mode = "My Vocabulary"
-                            st.session_state.detection_checkboxes = {}  # Clear checkboxes
-                            st.rerun()
-
-                        def continue_capturing():
-                            st.session_state.words_just_saved = False
-                            st.session_state.detection_checkboxes = {}  # Clear checkboxes
-                            st.rerun()
-                        
-                        # Each button with fixed keys
-                        with next_col1:
-                            if st.button("🎮 Go to Quiz Mode", key="quiz_nav_button"):
-                                go_to_quiz_mode()
-                                
-                        with next_col2:
-                            if st.button("📚 View My Vocabulary", key="vocab_nav_button"):
-                                go_to_vocabulary()
-                                
-                        with next_col3:
-                            if st.button("📸 Continue Capturing", key="continue_button"):
-                                continue_capturing()
-                
-                # PRESERVED FEATURE: Add manual selection UI if enabled
-                if st.session_state.get('manual_mode', False):
-                    st.subheader("Manual Object Selection")
-                    st.write("Enter a label for the object you want to learn.")
-                    
-                    manual_label = st.text_input(
-                        "Object name:", 
-                        value=st.session_state.get('manual_label', ''),
-                        key="manual_label_input"
-                    )
-                    st.session_state.manual_label = manual_label
-                    
-                    if manual_label.strip():
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            if st.button("💾 Save Manual Selection"):
-                                # Auto-start session if needed
-                                if st.session_state.session_id is None:
-                                    manage_session("start")
-                                
-                                translated_label = translate_text(manual_label, st.session_state.target_language)
-                                image_path = save_image(image, manual_label)  # No bbox for manual
-                                
-                                vocab_id = add_vocabulary_direct(
-                                    word_original=manual_label,
-                                    word_translated=translated_label,
-                                    language_translated=st.session_state.target_language,
-                                    category="manual",
-                                    image_path=image_path
-                                )
-                                
-                                if vocab_id and vocab_id != "duplicate":
-                                    success_message(f"Added '{manual_label}' to vocabulary!")
-                                    st.session_state.words_studied += 1
-                                    st.session_state.words_learned += 1
-                                    
-                                    # Reset manual mode
-                                    st.session_state.manual_mode = False
-                                    st.session_state.manual_label = ""
-                                    time.sleep(1.5)
-                                    st.rerun()
-                                elif vocab_id == "duplicate":
-                                    warning_message(f"'{manual_label}' is already in your vocabulary!")
-                                else:
-                                    error_message("Failed to save word to vocabulary.")
-                        
-                        with col2:
-                            # Button to exit manual mode
-                            if st.button("Cancel Manual Selection"):
-                                st.session_state.manual_mode = False
-                                st.session_state.manual_label = ""
+                        # Show navigation options only if something was processed
+                        if st.session_state.saved_count > 0 or st.session_state.get('duplicate_count', 0) > 0:
+                            st.markdown("### What would you like to do next?")
+                            next_col1, next_col2, next_col3 = st.columns(3)
+                            
+                            # Define navigation callback functions
+                            def go_to_quiz_mode():
+                                st.session_state.words_just_saved = False  # Reset the saved state
+                                st.session_state.app_mode = "Quiz Mode"
+                                st.session_state.detection_checkboxes = {}  # Clear checkboxes
+                                # Clear duplicate tracking
+                                if 'duplicate_count' in st.session_state:
+                                    del st.session_state.duplicate_count
+                                if 'duplicate_items' in st.session_state:
+                                    del st.session_state.duplicate_items
                                 st.rerun()
+
+                            def go_to_vocabulary():
+                                st.session_state.words_just_saved = False  # Reset the saved state
+                                st.session_state.app_mode = "My Vocabulary"
+                                st.session_state.detection_checkboxes = {}  # Clear checkboxes
+                                # Clear duplicate tracking
+                                if 'duplicate_count' in st.session_state:
+                                    del st.session_state.duplicate_count
+                                if 'duplicate_items' in st.session_state:
+                                    del st.session_state.duplicate_items
+                                st.rerun()
+
+                            def continue_capturing():
+                                st.session_state.words_just_saved = False
+                                st.session_state.detection_checkboxes = {}  # Clear checkboxes
+                                # Clear duplicate tracking
+                                if 'duplicate_count' in st.session_state:
+                                    del st.session_state.duplicate_count
+                                if 'duplicate_items' in st.session_state:
+                                    del st.session_state.duplicate_items
+                                st.rerun()
+                            
+                            # Each button with fixed keys
+                            with next_col1:
+                                if st.button("🎮 Go to Quiz Mode", key="quiz_nav_button"):
+                                    go_to_quiz_mode()
+                                    
+                            with next_col2:
+                                if st.button("📚 View My Vocabulary", key="vocab_nav_button"):
+                                    go_to_vocabulary()
+                                    
+                            with next_col3:
+                                if st.button("📸 Continue Capturing", key="continue_button"):
+                                    continue_capturing()
+                
+            # Add manual selection UI if enabled
+            if st.session_state.manual_mode:
+                st.subheader("Manual Object Selection")
+                st.write("Enter a label for the object you want to learn.")
+                
+                # Object label input
+                st.session_state.manual_label = st.text_input("Object Label:", 
+                                                            value=st.session_state.manual_label,
+                                                            placeholder="e.g., cup, book, chair")
+                
+                # Translate the label
+                if st.session_state.manual_label:
+                    translated_label = translate_text(st.session_state.manual_label, 
+                                                    st.session_state.target_language)
+                    
+                    st.write(f"Original: **{st.session_state.manual_label}**")
+                    st.write(f"Translation: **{translated_label}**")
+                    
+                    # Generate audio for the translated word
+                    audio_bytes = text_to_speech(translated_label, st.session_state.target_language)
+                    if audio_bytes:
+                        st.markdown(get_audio_html(audio_bytes), unsafe_allow_html=True)
+                    
+                    # Save button for manual selection
+                    if st.button("Save to Vocabulary"):
+                        # Auto-start session if needed
+                        if st.session_state.session_id is None:
+                            if manage_session("start"):
+                                success_message("Created a new learning session!")
+                            else:
+                                error_message("Failed to create a session.")
+                                st.stop()
                         
-            else:
-                info_message("No objects detected. Try adjusting the confidence level or take another photo.")
+                        # Save the image
+                        image_path = save_image(image, st.session_state.manual_label)
+                        
+                        # Add to database
+                        vocab_id = add_vocabulary_direct(
+                            word_original=st.session_state.manual_label,
+                            word_translated=translated_label,
+                            language_translated=st.session_state.target_language,
+                            category="manual",
+                            image_path=image_path
+                        )
+                        
+                        if vocab_id:
+                            success_message(f"Successfully added '{st.session_state.manual_label}' to your vocabulary!")
+                            st.session_state.words_studied += 1
+                            st.session_state.words_learned += 1
+                            
+                            # Reset manual mode
+                            st.session_state.manual_mode = False
+                            st.session_state.manual_label = ""
+                            time.sleep(1.5)
+                            st.rerun()
+                        else:
+                            error_message("Failed to save word to vocabulary.")
                 
-                # Manual selection option
-                if not st.session_state.get('manual_mode', False):
-                    if st.button("✏️ Add Object Manually"):
-                        st.session_state.manual_mode = True
-                        st.rerun()
-                
-        except Exception as e:
-            # Clear spinners on error
-            spinner_placeholder.empty()
-            separator_placeholder.empty()
+                # Button to exit manual mode
+                if st.button("Cancel Manual Selection"):
+                    st.session_state.manual_mode = False
+                    st.session_state.manual_label = ""
+                    st.rerun()
+        
+        # Text OCR mode
+        # Text OCR mode
+    else:  # Text OCR mode
+        # Create container for loading spinner
+        spinner_container = st.container()
+        with spinner_container:
+            show_loading_spinner("Detecting text... This may take a few seconds.")
             
-            if "memory" in str(e).lower() or "resource" in str(e).lower():
-                error_message("Memory limit reached. Please try a smaller image or refresh the page.")
+        # Add visual separator for mobile
+        add_result_separator()
+        
+        with st.spinner("Detecting text..."):
+            detected_text = detect_text_in_image(image)
+            
+            # Clear the spinner
+            spinner_container.empty()
+            
+            # Add scroll indicator for mobile
+            add_scroll_indicator()
+            
+            if detected_text:
+                style_section_title("📝 Detected Text")
+                st.write(detected_text)
+                    
+                # Split into words for learning
+                words = [word.strip() for word in re.split(r'[^\w]', detected_text) if word.strip()]
+                    
+                if words:
+                    st.subheader("Words to Learn")
+                        
+                    # Create containers for each word
+                    for i, word in enumerate(words):
+                        if len(word) <= 2:  # Skip very short words
+                            continue
+                                
+                        # Translate the word
+                        translated_word = translate_text(word, st.session_state.target_language)
+                            
+                        # Display in a container
+                        with st.container():
+                            cols = st.columns([3, 1])
+                           
+                            with cols[0]:
+                                st.write(f"**{word}** → {translated_word}")
+                                # Add audio
+                                audio_bytes = text_to_speech(translated_word, st.session_state.target_language)
+                                if audio_bytes:
+                                    st.markdown(get_audio_html(audio_bytes), unsafe_allow_html=True)
+                                
+                            with cols[1]:
+                                # Add save button for each word
+                                if st.button(f"Save", key=f"save_text_{i}"):
+                                    # Auto-start session if needed
+                                    if st.session_state.session_id is None:
+                                        manage_session("start")
+                                        
+                                    # Save to vocabulary
+                                    vocab_id = add_vocabulary_direct(
+                                        word_original=word,
+                                        word_translated=translated_word,
+                                        language_translated=st.session_state.target_language,
+                                        category="text",
+                                        image_path=None
+                                    )
+                                        
+                                    if vocab_id:
+                                        success_message(f"Added '{word}' to vocabulary!")
+                                        st.session_state.words_studied += 1
+                                        st.session_state.words_learned += 1
+                                    else:
+                                        error_message(f"Failed to save '{word}'")
+                                
+                            st.markdown("---")
+                else:
+                    info_message("No clear words detected in the image.")
             else:
-                error_message(f"Detection error: {str(e)}")
-                print(f"Detection error: {e}")
-                
-                # Manual selection option on error too
-                if not st.session_state.get('manual_mode', False):
-                    if st.button("✏️ Add Object Manually"):
-                        st.session_state.manual_mode = True
-                        st.rerun()
+                info_message("No text detected. Try another image or adjust image clarity.")
 
 elif app_mode == "My Vocabulary":
     style_title("My Vocabulary")
@@ -2808,7 +3022,7 @@ elif app_mode == "Quiz Mode":
                 'update_word_progress_direct': update_word_progress_direct
             }
             
-            # Initialize the quiz system
+            # Initialize the quiz system (remove the display_quiz_image parameter)
             quiz_system = QuizSystem(
                 db_functions=db_functions,
                 text_to_speech=text_to_speech,
@@ -2834,228 +3048,276 @@ elif app_mode == "Quiz Mode":
     # Get vocabulary from database
     vocabulary = get_all_vocabulary_direct()
     
-    # Initialize quiz completion flags
+    # Quiz settings tab and quiz display tab
     if 'quiz_completed' not in st.session_state:
         st.session_state.quiz_completed = False
-    if 'quiz_completion_processed' not in st.session_state:
-        st.session_state.quiz_completion_processed = False
 
-    # Check for quiz completion BEFORE displaying anything
-    if (st.session_state.get('current_quiz_word') and 
-        st.session_state.get('quiz_options') and 
-        not st.session_state.quiz_completion_processed):
-        
+    if st.session_state.current_quiz_word and st.session_state.quiz_options:
+        # Check if quiz should be completed BEFORE displaying question
         target_questions = st.session_state.get('quiz_target_questions', 5)
-        current_total = st.session_state.get('quiz_total', 0)
         
-        if current_total >= target_questions:
-            # Mark as completed but don't rerun immediately
+        if st.session_state.quiz_total >= target_questions and not st.session_state.get('quiz_completion_handled', False):
+            # Quiz is complete - set flag and complete
             st.session_state.quiz_completed = True
-            st.session_state.quiz_completion_processed = True
-
-    # Display content based on quiz state
-    if st.session_state.quiz_completed:
-        # Show completion screen
-        style_section_title("🎉 Quiz Complete!")
+            st.session_state.quiz_completion_handled = True
+            st.rerun()
+            
+        # If quiz is already marked complete, don't process questions
+        if st.session_state.quiz_completed:
+            # Skip to results section
+            pass
+        else:
+            # Quiz is in progress - continue with your existing logic
+            current_word = st.session_state.current_quiz_word
         
-        score = st.session_state.get('quiz_score', 0)
-        total = st.session_state.get('quiz_total', 1)
-        percentage = (score / total * 100) if total > 0 else 0
-        
-        # Display results
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Score", f"{score}/{total}")
-        with col2:
-            st.metric("Percentage", f"{percentage:.1f}%")
-        with col3:
-            if percentage >= 80:
-                st.metric("Grade", "🌟 Excellent!")
-            elif percentage >= 60:
-                st.metric("Grade", "👍 Good!")
+            # Display question number
+            st.markdown(f"### 🎯 Quiz Question {st.session_state.quiz_total + 1}/{target_questions}")
+            
+            # Display image if available
+            image_path = current_word.get('image_path', '')
+            has_image = False
+            if image_path:
+                if display_quiz_image(current_word, "What is this object?"):
+                    has_image = True
+            
+            # Display the question
+            if has_image:
+                st.markdown(f"### What is this object in {selected_language}?")
             else:
-                st.metric("Grade", "📚 Keep practicing!")
-        
-        # Performance message
-        if percentage >= 90:
-            st.success("🎉 Outstanding performance! You've mastered these words!")
-        elif percentage >= 70:
-            st.success("🎯 Great job! You're making excellent progress!")
-        elif percentage >= 50:
-            st.info("👍 Good effort! Review the missed words and try again.")
-        else:
-            st.warning("📚 Keep practicing! Don't give up - language learning takes time.")
-        
-        # Action buttons
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            if st.button("🔄 Take Another Quiz", key="restart_quiz_btn"):
-                # Reset all quiz state cleanly
-                quiz_keys = [
-                    'quiz_completed', 'quiz_completion_processed', 'current_quiz_word', 
-                    'quiz_options', 'answered', 'quiz_score', 'quiz_total', 
-                    'quiz_target_questions'
-                ]
-                for key in quiz_keys:
-                    if key in st.session_state:
-                        del st.session_state[key]
-                st.rerun()
-        
-        with col2:
-            if st.button("📚 Review Vocabulary", key="review_vocab_btn"):
-                st.session_state.app_mode = "My Vocabulary"
-                st.rerun()
-        
-        with col3:
-            if st.button("📸 Add More Words", key="add_words_btn"):
-                st.session_state.app_mode = "Camera Mode"
-                st.rerun()
-
-    elif st.session_state.get('current_quiz_word') and st.session_state.get('quiz_options'):
-        # Quiz is in progress - display current question
-        current_word = st.session_state.current_quiz_word
-        target_questions = st.session_state.get('quiz_target_questions', 5)
-        current_question = st.session_state.get('quiz_total', 0) + 1
-        
-        # Display question number
-        st.markdown(f"### 🎯 Quiz Question {current_question}/{target_questions}")
-        
-        # Display image if available
-        image_path = current_word.get('image_path', '')
-        has_image = False
-        if image_path:
-            if display_quiz_image(current_word, "What is this object?"):
-                has_image = True
-        
-        # Question text
-        if has_image:
-            st.markdown("### What is this object?")
-        else:
-            st.markdown(f"### Translate: {current_word['word_original']} to {st.session_state.target_language.title()}")
-        
-        # Answer options
-        options = st.session_state.quiz_options
-        
-        # Create answer buttons
-        cols = st.columns(min(len(options), 2))  # Max 2 columns for better mobile display
-        
-        for i, option in enumerate(options):
-            col_index = i % len(cols)
-            with cols[col_index]:
-                # Show different text based on question type
-                if has_image:
-                    button_text = option['word_translated']
-                else:
-                    button_text = option['word_translated']
+                st.markdown(f"### Translate: **{current_word['word_original']}** to {selected_language}")
+            
+            # Display answer options - ONLY if not answered yet
+            if not st.session_state.answered:
+                st.markdown("**Choose the correct answer:**")
                 
-                if st.button(button_text, key=f"answer_{i}", use_container_width=True):
-                    if not st.session_state.get('answered', False):
+                for i, option in enumerate(st.session_state.quiz_options):
+                    button_key = f"quiz_option_{i}_{st.session_state.quiz_total}_{target_questions}"
+                    
+                    if st.button(f"{chr(65+i)}. {option['word_translated']}", 
+                                key=button_key, 
+                                use_container_width=True):
+                        # Store the selected answer
+                        st.session_state.selected_answer_index = i
+                        st.session_state.selected_answer = option
+                        
                         is_correct = check_answer(i)
+                        st.rerun()
+            else:
+                # Show comprehensive results after answering
+                correct_answer = current_word['word_translated']
+                selected_answer = st.session_state.get('selected_answer', {}).get('word_translated', 'Unknown')
+                
+                # Show what user selected vs correct answer
+                if st.session_state.get('selected_answer_index') is not None:
+                    if selected_answer == correct_answer:
+                        st.success(f"✅ Correct! You selected: **{selected_answer}**")
+                    else:
+                        st.error(f"❌ Incorrect. You selected: **{selected_answer}**")
+                        st.info(f"💡 The correct answer was: **{correct_answer}**")
+                
+                # Show comprehensive learning information
+                st.markdown("---")
+                st.markdown("### 📚 Learn More About This Word")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown(f"**English:** {current_word['word_original']}")
+                    st.markdown(f"**{selected_language}:** {correct_answer}")
+                    st.markdown(f"**Category:** {current_word.get('category', 'Unknown')}")
+                    
+                    # Pronunciation audio
+                    st.markdown("**🔊 Pronunciation:**")
+                    audio_bytes = text_to_speech(correct_answer, current_word['language_translated'])
+                    if audio_bytes:
+                        st.markdown(get_audio_html(audio_bytes), unsafe_allow_html=True)
+                    
+                    # Pronunciation tips
+                    pronunciation_tips = get_pronunciation_guide(correct_answer, current_word['language_translated'])
+                    if pronunciation_tips:
+                        st.markdown("**💡 Pronunciation Tips:**")
+                        for tip in pronunciation_tips:
+                            st.markdown(f"- {tip}")
+                
+                with col2:
+                    # Example sentences
+                    example = get_example_sentence(current_word['word_original'], current_word['language_translated'])
+                    st.markdown("**📝 Example Sentences:**")
+                    
+                    st.markdown(f"**English:** {example['english']}")
+                    
+                    if example['translated']:
+                        st.markdown(f"**{selected_language}:** {example['translated']}")
                         
-                        # Show immediate feedback
-                        if is_correct:
-                            st.success("✅ Correct!")
-                        else:
-                            st.error(f"❌ Incorrect. The correct answer is: {current_word['word_translated']}")
+                        # Audio for example sentence
+                        example_audio = text_to_speech(example['translated'], current_word['language_translated'])
+                        if example_audio:
+                            st.markdown("**🔊 Example Audio:**")
+                            st.markdown(get_audio_html(example_audio), unsafe_allow_html=True)
+                    else:
+                        st.markdown("*Example translation not available*")
+                
+                # Next question or finish quiz
+                target_questions = st.session_state.get('quiz_target_questions', 5)
+                
+                if st.session_state.quiz_total >= target_questions:
+                    # Quiz complete - show finish button
+                    if st.button("🏁 Finish Quiz", key=f"finish_quiz_{st.session_state.quiz_total}"):
+                        st.session_state.quiz_completed = True
+                        st.session_state.quiz_completion_handled = False
+                else:
+                    # More questions available
+                    if st.button("➡️ Next Question", key=f"next_q_{st.session_state.quiz_total}"):
+                        # Clear selected answer for next question
+                        if 'selected_answer_index' in st.session_state:
+                            del st.session_state.selected_answer_index
+                        if 'selected_answer' in st.session_state:
+                            del st.session_state.selected_answer
                         
-                        # Show word details with your existing features
-                        with st.expander("📚 Word Details", expanded=True):
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                st.write(f"**English:** {current_word['word_original']}")
-                                st.write(f"**{st.session_state.target_language.title()}:** {current_word['word_translated']}")
-                            
-                            with col2:
-                                # Audio (preserved feature)
-                                try:
-                                    audio_bytes = text_to_speech(current_word['word_translated'], current_word['language_translated'])
-                                    if audio_bytes:
-                                        st.markdown(get_audio_html(audio_bytes), unsafe_allow_html=True)
-                                except:
-                                    pass
-                            
-                            # Example sentence (preserved feature)
-                            try:
-                                example_sentence = get_example_sentence(current_word['word_translated'], current_word['language_translated'])
-                                if example_sentence and example_sentence.strip():
-                                    st.markdown("**💬 Example:**")
-                                    st.write(example_sentence)
-                                    # Audio for example
-                                    try:
-                                        example_audio = text_to_speech(example_sentence, current_word['language_translated'])
-                                        if example_audio:
-                                            st.markdown(get_audio_html(example_audio), unsafe_allow_html=True)
-                                    except:
-                                        pass
-                            except:
-                                pass
-                            
-                            # Pronunciation guide (preserved feature)
-                            try:
-                                pronunciation = get_pronunciation_guide(current_word['word_translated'], current_word['language_translated'])
-                                if pronunciation and pronunciation.strip():
-                                    st.caption(f"🗣️ Pronunciation: {pronunciation}")
-                            except:
-                                pass
-                        
-                        # Brief pause to show feedback
-                        time.sleep(2)
-                        
-                        # Check if quiz should end
-                        if st.session_state.get('quiz_total', 0) >= target_questions:
-                            st.session_state.quiz_completed = True
-                            st.session_state.quiz_completion_processed = True
+                        if setup_new_question(vocabulary):
                             st.rerun()
                         else:
-                            # Set up next question using your actual function
-                            if setup_new_question(vocabulary):
-                                st.rerun()
-                            else:
-                                st.error("Unable to generate more questions.")
-        
-        # Progress bar
-        progress = st.session_state.get('quiz_total', 0) / target_questions
-        st.progress(progress)
-        
+                            st.session_state.quiz_completed = True
+                            st.rerun()
+            
+            # Display current score in sidebar
+            st.sidebar.markdown(f"### Current Score: {st.session_state.quiz_score}/{st.session_state.quiz_total}")
+            if st.session_state.quiz_total > 0:
+                accuracy = (st.session_state.quiz_score / st.session_state.quiz_total) * 100
+                st.sidebar.markdown(f"**Accuracy:** {accuracy:.1f}%")
+                
+    # Display quiz results if quiz is completed
+    elif st.session_state.quiz_completed and st.session_state.quiz_total > 0:
+        st.markdown("### 🎉 Quiz Results")
+            
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Final Score", f"{st.session_state.quiz_score}/{st.session_state.quiz_total}")
+        with col2:
+            accuracy = (st.session_state.quiz_score / st.session_state.quiz_total) * 100
+            st.metric("Accuracy", f"{accuracy:.1f}%")
+        with col3:
+            if accuracy >= 80:
+                grade = "🏆 Excellent"
+            elif accuracy >= 60:
+                grade = "👍 Good"
+            else:
+                grade = "📚 Keep practicing"
+            st.metric("Grade", grade)
+            
+        # Reset quiz button
+        if st.button("🔄 Start New Quiz"):
+            # Reset quiz state
+            st.session_state.quiz_completed = False
+            st.session_state.quiz_completion_handled = False  # FIX: Reset the flag
+            st.session_state.current_quiz_word = None
+            st.session_state.quiz_options = []
+            st.session_state.quiz_score = 0
+            st.session_state.quiz_total = 0
+            st.session_state.answered = False
+            st.rerun()
+            
+    # Display quiz setup
     else:
-        # No active quiz - show quiz setup
-        style_section_title("🎮 Start a Quiz")
-        
-        if not vocabulary or len(vocabulary) < 4:
-            st.info("You need at least 4 vocabulary words to start a quiz. Go to Camera Mode to add more words!")
+        # Introduction
+        st.markdown("""
+        Choose your quiz settings below to test your vocabulary knowledge.
+        The quiz will randomly include different types of questions:
+       
+        - 🔄 Translation (both directions)
+        - 🖼️ Image recognition (with focused object views)
+        - 📝 Sentence completion
+        - 🎯 Category matching
+        - 📊 Related words identification
+        - 🔊 Audio recognition
             
-            if st.button("📸 Go to Camera Mode"):
-                st.session_state.app_mode = "Camera Mode"
-                st.rerun()
-        else:
-            # Quiz setup options
-            col1, col2 = st.columns(2)
+        Start with a small number of questions and work your way up!
+        """)
             
-            with col1:
-                target_questions = st.slider(
-                    "Number of Questions",
-                    min_value=3,
-                    max_value=min(20, len(vocabulary)),
-                    value=5,
-                    step=1
+        # Quiz settings in columns
+        col1, col2, col3 = st.columns(3)
+            
+        with col1:
+            quiz_language = st.selectbox(
+                "Quiz language:",
+                list(languages.keys()),
+                index=list(languages.values()).index(st.session_state.target_language) if st.session_state.target_language in languages.values() else 0
+            )
+            quiz_lang_code = languages[quiz_language]
+            
+        with col2:
+            num_questions = st.number_input("Number of questions:", min_value=1, max_value=20, value=5)
+            
+        with col3:
+            # Get all categories from vocabulary
+            categories = set()
+            for word in vocabulary:
+                if word and 'category' in word and word['category'] and word['category'] not in ['other', 'manual']:
+                    categories.add(word['category'])
+                
+            if categories:
+                category_filter = st.selectbox(
+                    "Category filter (optional):",
+                    ["All Categories"] + sorted(list(categories))
                 )
-                st.session_state.quiz_target_questions = target_questions
+            else:
+                category_filter = "All Categories"
             
-            with col2:
-                st.write(f"Available words: {len(vocabulary)}")
-                st.write(f"Target language: {st.session_state.target_language.title()}")
+        # Filter vocabulary by selected language
+        filtered_vocab = [word for word in vocabulary if word['language_translated'] == quiz_lang_code]
             
-            if st.button("🚀 Start Quiz", key="start_quiz_btn", use_container_width=True):
-                # Initialize quiz state using your actual function
-                if start_new_quiz(vocabulary, target_questions):  # This is your actual function
-                    st.session_state.quiz_completed = False
-                    st.session_state.quiz_completion_processed = False
-                    st.session_state.quiz_score = 0
-                    st.session_state.quiz_total = 0
-                    st.rerun()
+        # Further filter by category if selected
+        if category_filter != "All Categories":
+            filtered_vocab = [word for word in filtered_vocab if word.get('category') == category_filter]
+            
+            filtered_vocab = prepare_vocabulary_for_diverse_questions(filtered_vocab, languages)
+            
+            # Display information about available words
+            if filtered_vocab:
+                st.markdown(f"**{len(filtered_vocab)} words available** for your quiz in {quiz_language}" + 
+                            (f" ({category_filter} category)" if category_filter != "All Categories" else ""))
+                
+                # Count words with images
+                words_with_images = sum(1 for word in filtered_vocab 
+                                    if word.get('image_path') and os.path.exists(word.get('image_path', '')))
+                
+                # Show details on available question types
+                st.markdown(f"*{words_with_images} words have images for visual recognition questions*")
+                
+                # Start quiz button with dynamic label
+                start_label = "🚀 Start Quiz" if len(filtered_vocab) >= 4 else f"Need {4-len(filtered_vocab)} More Word(s)"
+                if st.button(start_label, disabled=len(filtered_vocab) < 4):
+                    if start_new_quiz(filtered_vocab, num_questions):
+                        st.rerun()
+                
+                # Show word preview 
+                if st.checkbox("Preview Available Words"):
+                    # Create a simple table of words
+                    preview_data = []
+                    for word in filtered_vocab[:20]:  # Limit preview to 20 words
+                        has_image = "✅" if (word.get('image_path') and os.path.exists(word.get('image_path', ''))) else "❌"
+                        preview_data.append({
+                            "Original": word.get('word_original', ''),
+                            "Translation": word.get('word_translated', ''),
+                            "Category": word.get('category', ''),
+                            "Has Image": has_image
+                        })
+                    
+                    st.dataframe(pd.DataFrame(preview_data))
+                    
+                    if len(filtered_vocab) > 20:
+                        st.markdown(f"*...and {len(filtered_vocab) - 20} more words*")
+            else:
+                warning_message(f"No vocabulary words found with current filter. Go to Camera Mode to add words in {quiz_language}" +
+                        (f" for the {category_filter} category" if category_filter != "All Categories" else "") + ".")
+                
+                # Show a specific message for empty vocabulary
+                if not vocabulary:
+                    info_message("Start by learning some words in Camera Mode to build your vocabulary!")
+                elif not any(word['language_translated'] == quiz_lang_code for word in vocabulary):
+                    info_message(f"You don't have any words in {quiz_language} yet. Try selecting a different language or add some new words.")
                 else:
-                    error_message("Failed to set up quiz. Please try again.")
+                    info_message(f"No words found in the {category_filter} category. Try selecting 'All Categories' or add words in this category.")
 
 elif app_mode == "Statistics":
     style_title("Learning Statistics")
