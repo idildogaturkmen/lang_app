@@ -946,89 +946,157 @@ def enhance_image(image, enhance_type="auto"):
 
 # Function to detect text in image (OCR)
 def detect_text_in_image(image):
-    """Detect text in image using installed OCR libraries."""
+    """Detect text in image with improved preprocessing and multiple methods."""
     try:
-        # Method 1: Try EasyOCR first (you already have easyocr==1.7.0)
+        # Convert PIL image to numpy array for processing
+        img_array = np.array(image)
+        
+        # Method 1: Try EasyOCR with better preprocessing
         try:
             import easyocr
             
-            # Initialize EasyOCR reader with minimal config for cloud deployment
+            # Initialize EasyOCR reader
             if 'easyocr_reader' not in st.session_state:
-                # Use minimal configuration for better performance on cloud
                 st.session_state.easyocr_reader = easyocr.Reader(
                     ['en'], 
                     gpu=False, 
-                    verbose=False,
-                    download_enabled=True
+                    verbose=False
                 )
-                print("✅ EasyOCR initialized successfully")
+                print("✅ EasyOCR initialized")
             
             reader = st.session_state.easyocr_reader
             
-            # Convert PIL image to numpy array
-            img_array = np.array(image)
+            # Preprocess image for better text detection
+            processed_images = []
             
-            # Use EasyOCR to detect text
-            results = reader.readtext(img_array)
+            # Original image
+            processed_images.append(img_array)
             
-            # Extract text from results
-            detected_texts = []
-            for (bbox, text, confidence) in results:
-                if confidence > 0.4:  # Reasonable threshold
-                    detected_texts.append(text.strip())
+            # Convert to grayscale and enhance contrast
+            gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
             
-            if detected_texts:
-                full_text = ' '.join(detected_texts)
-                print(f"✅ EasyOCR detected: {full_text[:50]}...")
-                return full_text
+            # Apply different preprocessing techniques
+            # 1. Adaptive threshold
+            adaptive_thresh = cv2.adaptiveThreshold(
+                gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
+            )
+            processed_images.append(cv2.cvtColor(adaptive_thresh, cv2.COLOR_GRAY2RGB))
+            
+            # 2. OTSU threshold
+            _, otsu_thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            processed_images.append(cv2.cvtColor(otsu_thresh, cv2.COLOR_GRAY2RGB))
+            
+            # 3. Enhance contrast
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+            enhanced = clahe.apply(gray)
+            processed_images.append(cv2.cvtColor(enhanced, cv2.COLOR_GRAY2RGB))
+            
+            # Try OCR on each processed image
+            all_results = []
+            for i, processed_img in enumerate(processed_images):
+                try:
+                    results = reader.readtext(processed_img)
+                    for (bbox, text, confidence) in results:
+                        if confidence > 0.3 and len(text.strip()) > 0:
+                            all_results.append((text.strip(), confidence))
+                            print(f"EasyOCR found: '{text.strip()}' (confidence: {confidence:.2f})")
+                except Exception as e:
+                    print(f"EasyOCR processing {i} failed: {e}")
+                    continue
+            
+            # Return best results
+            if all_results:
+                # Sort by confidence and return best text
+                all_results.sort(key=lambda x: x[1], reverse=True)
+                detected_texts = [text for text, conf in all_results if conf > 0.4]
+                if detected_texts:
+                    return ' '.join(detected_texts)
                 
-        except ImportError as e:
-            print(f"EasyOCR import failed: {e}")
         except Exception as e:
-            print(f"EasyOCR processing failed: {e}")
+            print(f"EasyOCR failed: {e}")
         
-        # Method 2: Try Pytesseract (you already have pytesseract==0.3.10)
+        # Method 2: Try Pytesseract with multiple configurations
         try:
             import pytesseract
-            
-            # Convert image for processing
-            img_array = np.array(image)
-            
-            # Convert to grayscale for better OCR
-            if len(img_array.shape) == 3:
-                gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
-            else:
-                gray = img_array
-            
-            # Apply threshold for better text recognition
-            _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            
-            # Convert back to PIL Image
             from PIL import Image as PILImage
-            processed_image = PILImage.fromarray(binary)
             
-            # Configure OCR for better results
-            config = r'--oem 3 --psm 6'
+            # Different OCR configurations to try
+            configs = [
+                r'--oem 3 --psm 6',  # Default
+                r'--oem 3 --psm 8',  # Single word
+                r'--oem 3 --psm 7',  # Single text line
+                r'--oem 3 --psm 13', # Raw line. Treat image as single text line
+                r'--oem 3 --psm 10', # Single character
+            ]
             
-            # Extract text
-            detected_text = pytesseract.image_to_string(processed_image, config=config)
+            # Try different preprocessing
+            gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
             
-            # Clean up text
-            detected_text = detected_text.strip()
-            if detected_text and len(detected_text) > 2:
-                print(f"✅ Pytesseract detected: {detected_text[:50]}...")
-                return detected_text
-                
-        except ImportError as e:
-            print(f"Pytesseract import failed: {e}")
+            # List of processed images to try
+            test_images = []
+            
+            # 1. Original grayscale
+            test_images.append(gray)
+            
+            # 2. Inverted (white text on black background)
+            inverted = cv2.bitwise_not(gray)
+            test_images.append(inverted)
+            
+            # 3. Gaussian blur + threshold
+            blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+            _, thresh1 = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            test_images.append(thresh1)
+            
+            # 4. Morphological operations
+            kernel = np.ones((2, 2), np.uint8)
+            morph = cv2.morphologyEx(gray, cv2.MORPH_CLOSE, kernel)
+            test_images.append(morph)
+            
+            # 5. Edge enhancement
+            enhanced = cv2.addWeighted(gray, 1.5, cv2.GaussianBlur(gray, (0, 0), 10), -0.5, 0)
+            test_images.append(enhanced)
+            
+            best_results = []
+            
+            for img in test_images:
+                for config in configs:
+                    try:
+                        # Convert to PIL Image
+                        pil_img = PILImage.fromarray(img)
+                        
+                        # Extract text
+                        text = pytesseract.image_to_string(pil_img, config=config)
+                        text = text.strip()
+                        
+                        if text and len(text) > 0 and not text.isspace():
+                            # Clean the text
+                            import re
+                            # Remove extra whitespace and clean up
+                            text = re.sub(r'\s+', ' ', text)
+                            text = re.sub(r'[^\w\s]', '', text)  # Remove special chars
+                            
+                            if len(text) > 0:
+                                best_results.append(text)
+                                print(f"Pytesseract found: '{text}'")
+                                
+                    except Exception as e:
+                        continue
+            
+            if best_results:
+                # Return the longest/most complete result
+                best_result = max(best_results, key=len)
+                if len(best_result.strip()) > 0:
+                    return best_result.strip()
+                    
         except Exception as e:
-            print(f"Pytesseract processing failed: {e}")
+            print(f"Pytesseract failed: {e}")
         
-        # If both methods fail, return an informative message
-        return "No clear text was detected in this image. Try using an image with larger, clearer text, or try the object detection mode instead."
+        # If everything fails, return None (not an error message)
+        return None
         
     except Exception as e:
-        return f"Text detection encountered an error: {str(e)}. Please try again with a different image."
+        print(f"Text detection error: {e}")
+        return None
     
 # Function to get example sentence
 def get_example_sentence(word, target_language):
@@ -1793,7 +1861,7 @@ def manage_session(action):
         return False
     
 def save_image_to_supabase(image, label, detection_bbox=None):
-    """Save image to private Supabase Storage with proper authentication."""
+    """Save image to private Supabase Storage with improved error handling."""
     try:
         import requests
         import io
@@ -1802,21 +1870,21 @@ def save_image_to_supabase(image, label, detection_bbox=None):
         
         user = get_authenticated_user()
         if not user:
+            print("❌ No authenticated user for image upload")
             return None
         
         user_id = user.get('id')
         auth_token = user.get('auth_token')
-        
-        if not auth_token:
-            print("❌ No auth token available for image upload")
-            return None
         
         # Create a unique filename with user folder structure
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         unique_id = str(uuid.uuid4())[:8]
         filename = f"{user_id}/{label}_{timestamp}_{unique_id}.jpg"
         
+        print(f"🔄 Uploading image: {filename}")
+        
         # Process image (crop if bbox provided)
+        processed_image = image
         if detection_bbox:
             left, top, right, bottom = [int(x) for x in detection_bbox]
             img_array = np.array(image)
@@ -1835,41 +1903,97 @@ def save_image_to_supabase(image, label, detection_bbox=None):
             crop_bottom = min(height, bottom + padding_y)
             
             cropped_img = img_array[crop_top:crop_bottom, crop_left:crop_right]
-            image = Image.fromarray(cropped_img)
+            processed_image = Image.fromarray(cropped_img)
         
-        # Convert image to bytes
+        # Convert image to bytes with optimization
         img_bytes = io.BytesIO()
-        image.save(img_bytes, format='JPEG', quality=85)
+        # Optimize image size for storage
+        if processed_image.width > 800 or processed_image.height > 800:
+            processed_image.thumbnail((800, 800), Image.Resampling.LANCZOS)
+        processed_image.save(img_bytes, format='JPEG', quality=85, optimize=True)
         img_bytes.seek(0)
         
-        # Upload to private Supabase Storage
+        # Supabase configuration
         supabase_url = "https://csszlzpsfwmsezursivk.supabase.co"
+        supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNzc3psenBzZndtc2V6dXJzaXZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA1Mjg1MjEsImV4cCI6MjA2NjEwNDUyMX0.gIi0Q_pifYpXeM1r8kWlgTO1LD8bc91lQ3suH8OWDKI"
         
+        # Headers with both API key and auth token
         headers = {
-            'Authorization': f'Bearer {auth_token}',  # Use user's auth token
+            'apikey': supabase_key,
+            'Content-Type': 'image/jpeg',
+            'Cache-Control': 'max-age=3600',
+        }
+        
+        # Add authorization header if available
+        if auth_token:
+            headers['Authorization'] = f'Bearer {auth_token}'
+        else:
+            # Use service role key as fallback
+            headers['Authorization'] = f'Bearer {supabase_key}'
+        
+        # Correct Supabase Storage upload endpoint
+        upload_url = f"{supabase_url}/storage/v1/object/vocabulary-images/{filename}"
+        
+        print(f"🔄 Uploading to: {upload_url}")
+        print(f"🔄 Headers: {list(headers.keys())}")
+        
+        # Upload to Supabase Storage
+        response = requests.post(
+            upload_url,
+            headers=headers,
+            data=img_bytes.getvalue(),
+            timeout=30
+        )
+        
+        print(f"📤 Upload response: {response.status_code}")
+        
+        if response.status_code in [200, 201]:
+            # Return the storage path
+            storage_path = f"vocabulary-images/{filename}"
+            print(f"✅ Image uploaded successfully: {storage_path}")
+            return storage_path
+        else:
+            print(f"❌ Upload failed: {response.status_code}")
+            print(f"❌ Response: {response.text}")
+            
+            # Try alternative upload method
+            return try_alternative_upload(supabase_url, supabase_key, filename, img_bytes.getvalue())
+            
+    except Exception as e:
+        print(f"❌ Error uploading image to Supabase: {e}")
+        return None
+
+def try_alternative_upload(supabase_url, supabase_key, filename, image_data):
+    """Try alternative upload method with service role."""
+    try:
+        import requests
+        
+        # Use service role for upload
+        headers = {
+            'apikey': supabase_key,
+            'Authorization': f'Bearer {supabase_key}',
             'Content-Type': 'image/jpeg',
         }
         
-        # Upload to private storage bucket
         upload_url = f"{supabase_url}/storage/v1/object/vocabulary-images/{filename}"
         
         response = requests.post(
             upload_url,
             headers=headers,
-            data=img_bytes.getvalue()
+            data=image_data,
+            timeout=30
         )
         
         if response.status_code in [200, 201]:
-            # Return the storage path (not public URL)
             storage_path = f"vocabulary-images/{filename}"
-            print(f"✅ Image uploaded to private Supabase Storage: {storage_path}")
+            print(f"✅ Alternative upload successful: {storage_path}")
             return storage_path
         else:
-            print(f"❌ Failed to upload image: {response.status_code} - {response.text}")
+            print(f"❌ Alternative upload failed: {response.status_code} - {response.text}")
             return None
             
     except Exception as e:
-        print(f"❌ Error uploading image to Supabase: {e}")
+        print(f"❌ Alternative upload error: {e}")
         return None
 
 # Update the save_image function call in your vocabulary saving:
@@ -1927,51 +2051,104 @@ def save_image(image, label, detection_bbox=None):
         return None
 
 def get_signed_image_url(storage_path, expires_in=3600):
-    """Get a signed URL for private image access."""
+    """Get a signed URL for private image access with better error handling."""
     try:
         import requests
         
-        user = get_authenticated_user()
-        if not user:
-            return None
-        
-        auth_token = user.get('auth_token')
-        if not auth_token:
-            return None
-        
         supabase_url = "https://csszlzpsfwmsezursivk.supabase.co"
+        supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNzc3psenBzZndtc2V6dXJzaXZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA1Mjg1MjEsImV4cCI6MjA2NjEwNDUyMX0.gIi0Q_pifYpXeM1r8kWlgTO1LD8bc91lQ3suH8OWDKI"
         
+        user = get_authenticated_user()
+        auth_token = user.get('auth_token') if user else None
+        
+        # Headers with API key
         headers = {
-            'Authorization': f'Bearer {auth_token}',
+            'apikey': supabase_key,
             'Content-Type': 'application/json',
         }
         
-        # Create signed URL for private access
+        # Add auth token if available
+        if auth_token:
+            headers['Authorization'] = f'Bearer {auth_token}'
+        else:
+            headers['Authorization'] = f'Bearer {supabase_key}'
+        
+        # Create signed URL
         signed_url_endpoint = f"{supabase_url}/storage/v1/object/sign/{storage_path}"
         
         data = {
-            'expiresIn': expires_in  # URL valid for 1 hour
+            'expiresIn': expires_in
         }
+        
+        print(f"🔄 Getting signed URL for: {storage_path}")
         
         response = requests.post(
             signed_url_endpoint,
             headers=headers,
-            json=data
+            json=data,
+            timeout=10
         )
         
         if response.status_code == 200:
             result = response.json()
             signed_token = result.get('signedURL')
             if signed_token:
-                # Return full signed URL
-                return f"{supabase_url}/storage/v1/object/sign/{storage_path}?token={signed_token}"
+                # Return the full URL
+                full_url = f"{supabase_url}/storage/v1{signed_token}"
+                print(f"✅ Signed URL created successfully")
+                return full_url
+            else:
+                print(f"❌ No signedURL in response: {result}")
+        else:
+            print(f"❌ Failed to get signed URL: {response.status_code}")
+            print(f"❌ Response: {response.text}")
+            
+            # Try direct public access as fallback
+            public_url = f"{supabase_url}/storage/v1/object/public/vocabulary-images/{storage_path.replace('vocabulary-images/', '')}"
+            print(f"🔄 Trying public URL: {public_url}")
+            return public_url
         
-        print(f"❌ Failed to get signed URL: {response.status_code} - {response.text}")
         return None
         
     except Exception as e:
         print(f"❌ Error getting signed URL: {e}")
         return None
+
+def debug_storage_status():
+    """Debug function to check Supabase Storage status."""
+    try:
+        import requests
+        
+        user = get_authenticated_user()
+        if not user:
+            return "No authenticated user"
+        
+        supabase_url = "https://csszlzpsfwmsezursivk.supabase.co"
+        supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNzc3psenBzZndtc2V6dXJzaXZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA1Mjg1MjEsImV4cCI6MjA2NjEwNDUyMX0.gIi0Q_pifYpXeM1r8kWlgTO1LD8bc91lQ3suH8OWDKI"
+        
+        headers = {
+            'apikey': supabase_key,
+            'Authorization': f'Bearer {supabase_key}',
+        }
+        
+        # List files in bucket
+        list_url = f"{supabase_url}/storage/v1/object/list/vocabulary-images"
+        
+        response = requests.post(
+            list_url,
+            headers=headers,
+            json={},
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            files = response.json()
+            return f"Storage Status: {len(files)} files found"
+        else:
+            return f"Storage Error: {response.status_code} - {response.text}"
+            
+    except Exception as e:
+        return f"Debug Error: {e}"
     
 def display_vocabulary_image(image_path, word_original):
     """Display image with proper private access."""
@@ -2317,6 +2494,15 @@ with st.sidebar.expander("ℹ️ Need Help?"):
 # Display appropriate content based on selected mode
 if app_mode == "Camera Mode":
     style_title("Camera Mode")
+
+
+    # Add this right after the Camera Mode title for debugging
+    if st.sidebar.button("🔍 Debug Storage"):
+        storage_status = debug_storage_status()
+        st.sidebar.write(storage_status)
+
+
+
     # Use the enhanced info message
     info_message("Take a photo or upload an image to identify objects and learn new vocabulary.")
     
@@ -2582,7 +2768,16 @@ if app_mode == "Camera Mode":
                                     translated_label = translate_text(label, st.session_state.target_language)
                                     
                                     # Save the image with bounding box info for cropping
-                                    image_path = save_image(image, label, detection['bbox'])  # Pass bbox
+                                    print(f"🔄 Saving image for label: {label}")
+                                    image_path = save_image(image, label, detection['bbox'])
+                                    print(f"📁 Image saved to: {image_path}")
+
+                                    if image_path and image_path.startswith('vocabulary-images/'):
+                                        print(f"✅ Image successfully saved to Supabase: {image_path}")
+                                    elif image_path:
+                                        print(f"⚠️ Image saved locally (Supabase failed): {image_path}")
+                                    else:
+                                        print(f"❌ Image save failed completely")
                                     
                                     # Get object category
                                     category = get_object_category(label)
@@ -2778,73 +2973,99 @@ if app_mode == "Camera Mode":
                 # Add scroll indicator for mobile
                 add_scroll_indicator()
                 
-                # Process detected text (including demo mode)
-                if detected_text and not any(error_phrase in detected_text.lower() for error_phrase in [
-                    "error:", "text detection error", "failed"
-                ]):
-                    style_section_title("📝 Detected Text")
-                    st.write(detected_text)
-                        
-                    # Split into words for learning
-                    words = [word.strip() for word in re.split(r'[^\w]', detected_text) if word.strip()]
-                        
-                    if words:
-                        st.subheader("Words to Learn")
+                # FIX: Only process actual detected text, not error messages
+                if detected_text and isinstance(detected_text, str) and len(detected_text.strip()) > 0:
+                    # Additional validation - make sure it's not an error message
+                    error_indicators = [
+                        "no clear text", "text detection", "error", "failed", "try using",
+                        "not detected", "please try", "install", "requires", "unavailable"
+                    ]
+                    
+                    is_error_message = any(indicator in detected_text.lower() for indicator in error_indicators)
+                    
+                    if not is_error_message:
+                        style_section_title("📝 Detected Text")
+                        st.success(f"Found text: **{detected_text}**")
                             
-                        # Create containers for each word
-                        for i, word in enumerate(words):
-                            if len(word) <= 2:  # Skip very short words
-                                continue
-                                    
-                            # Translate the word
-                            translated_word = translate_text(word, st.session_state.target_language)
+                        # Split into meaningful words for learning (filter out very short words)
+                        import re
+                        words = [word.strip() for word in re.split(r'[^\w]', detected_text) 
+                                if word.strip() and len(word.strip()) > 2]
+                            
+                        if words:
+                            st.subheader("Words to Learn")
                                 
-                            # Display in a container
-                            with st.container():
-                                cols = st.columns([3, 1])
-                            
-                                with cols[0]:
-                                    st.write(f"**{word}** → {translated_word}")
-                                    # Add audio
-                                    audio_bytes = text_to_speech(translated_word, st.session_state.target_language)
-                                    if audio_bytes:
-                                        st.markdown(get_audio_html(audio_bytes), unsafe_allow_html=True)
+                            # Create containers for each word
+                            for i, word in enumerate(words):
+                                # Skip very common words that aren't useful for learning
+                                skip_words = {'the', 'and', 'this', 'that', 'with', 'for', 'are', 'was', 'were', 'been'}
+                                if word.lower() in skip_words:
+                                    continue
+                                        
+                                # Translate the word
+                                translated_word = translate_text(word, st.session_state.target_language)
                                     
-                                with cols[1]:
-                                    # Add save button for each word
-                                    if st.button(f"Save", key=f"save_text_{i}"):
-                                        # Auto-start session if needed
-                                        if st.session_state.session_id is None:
-                                            manage_session("start")
-                                            
-                                        # Save to vocabulary
-                                        vocab_id = add_vocabulary_direct(
-                                            word_original=word,
-                                            word_translated=translated_word,
-                                            language_translated=st.session_state.target_language,
-                                            category="text",
-                                            image_path=None
-                                        )
-                                            
-                                        if vocab_id and vocab_id != 'duplicate':
-                                            success_message(f"Added '{word}' to vocabulary!")
-                                            st.session_state.words_studied += 1
-                                            st.session_state.words_learned += 1
-                                        elif vocab_id == 'duplicate':
-                                            warning_message(f"'{word}' is already in your vocabulary!")
-                                        else:
-                                            error_message(f"Failed to save '{word}'")
-                                    
-                                st.markdown("---")
+                                # Display in a container
+                                with st.container():
+                                    cols = st.columns([3, 1])
+                                
+                                    with cols[0]:
+                                        st.write(f"**{word}** → {translated_word}")
+                                        # Add audio
+                                        audio_bytes = text_to_speech(translated_word, st.session_state.target_language)
+                                        if audio_bytes:
+                                            st.markdown(get_audio_html(audio_bytes), unsafe_allow_html=True)
+                                        
+                                    with cols[1]:
+                                        # Add save button for each word
+                                        if st.button(f"Save", key=f"save_text_{i}"):
+                                            # Auto-start session if needed
+                                            if st.session_state.session_id is None:
+                                                manage_session("start")
+                                                
+                                            # Save to vocabulary
+                                            vocab_id = add_vocabulary_direct(
+                                                word_original=word,
+                                                word_translated=translated_word,
+                                                language_translated=st.session_state.target_language,
+                                                category="text",
+                                                image_path=None
+                                            )
+                                                
+                                            if vocab_id and vocab_id != 'duplicate':
+                                                success_message(f"Added '{word}' to vocabulary!")
+                                                st.session_state.words_studied += 1
+                                                st.session_state.words_learned += 1
+                                            elif vocab_id == 'duplicate':
+                                                warning_message(f"'{word}' is already in your vocabulary!")
+                                            else:
+                                                error_message(f"Failed to save '{word}'")
+                                        
+                                    st.markdown("---")
+                        else:
+                            info_message("The detected text doesn't contain meaningful words to learn.")
                     else:
-                        info_message("No clear words detected in the image.")
+                        # It's an error message, so show failure
+                        warning_message("No clear text was detected in this image.")
+                        st.info("💡 **Tips for better text detection:**")
+                        st.markdown("""
+                        - Use images with **large, clear text**
+                        - Ensure **good lighting** and contrast
+                        - Try **zooming in** on the text
+                        - Use **simple fonts** (avoid decorative text)
+                        - Make sure text is **horizontal** (not rotated)
+                        """)
                 else:
-                    # Show helpful message for text detection
-                    if "demo mode" in detected_text.lower():
-                        st.info("Install EasyOCR (`pip install easyocr`) for full text detection capabilities!")
-                    else:
-                        info_message("No text detected in this image. Try another image with clearer text, or use object detection instead.")
-
+                    # No text detected at all
+                    warning_message("No text was detected in this image.")
+                    st.info("💡 **Try these tips:**")
+                    st.markdown("""
+                    - Take a photo with **clear, readable text**
+                    - Ensure the text is **well-lit** and **in focus**
+                    - Try **getting closer** to the text
+                    - Use **high contrast** text (dark text on light background or vice versa)
+                    - Or switch to **Object Detection** mode to learn vocabulary from objects
+                    """)
 
 elif app_mode == "My Vocabulary":
     style_title("My Vocabulary")
