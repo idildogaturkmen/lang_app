@@ -1008,22 +1008,35 @@ def get_pronunciation_guide(word, language_code):
 def display_quiz_image(word, caption=""):
     """Display an image for quiz questions, prioritizing cropped versions."""
     image_path = word.get('image_path', '')
-    if not image_path or not os.path.exists(image_path):
+    if not image_path:
         return False
     
     try:
         # Use cropped version if available
         display_image_path = get_cropped_image_path(image_path)
-        image = Image.open(display_image_path)
         
-        # Display with appropriate sizing for quiz
-        st.image(image, caption=caption, width=300)
+        if display_image_path.startswith('vocabulary-images/'):
+            # Private Supabase Storage
+            signed_url = get_signed_image_url(display_image_path)
+            if signed_url:
+                st.image(signed_url, caption=caption, width=400)
+                st.markdown("*Focused view of detected object*")
+                return True
+        elif display_image_path.startswith('http'):
+            # Legacy public URL
+            st.image(display_image_path, caption=caption, width=400)
+            if "_cropped" in display_image_path:
+                st.markdown("*Focused view of detected object*")
+            return True
+        elif os.path.exists(display_image_path):
+            # Local file
+            image = Image.open(display_image_path)
+            st.image(image, caption=caption, width=400)
+            if "_cropped.jpg" in display_image_path:
+                st.markdown("*Focused view of detected object*")
+            return True
         
-        # Add context if it's a cropped image
-        if "_cropped.jpg" in display_image_path:
-            st.markdown("*🎯 Focused view of detected object*")
-        
-        return True
+        return False
     except Exception as e:
         print(f"Error displaying quiz image: {e}")
         return False
@@ -1650,29 +1663,36 @@ def manage_session(action):
         error_message(f"Session management error: {str(e)}")
         return False
     
-# Function to save image
-def save_image(image, label, detection_bbox=None):
-    """Save both original and cropped versions of the image."""
+def save_image_to_supabase(image, label, detection_bbox=None):
+    """Save image to private Supabase Storage with proper authentication."""
     try:
-        # Convert PIL Image to numpy array
-        img_array = np.array(image)
+        import requests
+        import io
+        import uuid
+        from datetime import datetime
         
-        # Create directory if it doesn't exist
-        os.makedirs("object_images", exist_ok=True)
+        user = get_authenticated_user()
+        if not user:
+            return None
         
-        timestamp = int(time.time())
-        base_filename = f"object_images/{label}_{timestamp}"
+        user_id = user.get('id')
+        auth_token = user.get('auth_token')
         
-        # Save original image
-        original_filename = f"{base_filename}_original.jpg"
-        img_cv_original = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
-        cv2.imwrite(original_filename, img_cv_original)
+        if not auth_token:
+            print("❌ No auth token available for image upload")
+            return None
         
-        # If we have bounding box coordinates, save cropped version
+        # Create a unique filename with user folder structure
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        unique_id = str(uuid.uuid4())[:8]
+        filename = f"{user_id}/{label}_{timestamp}_{unique_id}.jpg"
+        
+        # Process image (crop if bbox provided)
         if detection_bbox:
             left, top, right, bottom = [int(x) for x in detection_bbox]
+            img_array = np.array(image)
             
-            # Add some padding around the object (10% of object size)
+            # Add padding
             height, width = img_array.shape[:2]
             obj_width = right - left
             obj_height = bottom - top
@@ -1680,7 +1700,80 @@ def save_image(image, label, detection_bbox=None):
             padding_x = max(10, int(obj_width * 0.1))
             padding_y = max(10, int(obj_height * 0.1))
             
-            # Calculate crop boundaries with padding
+            crop_left = max(0, left - padding_x)
+            crop_top = max(0, top - padding_y)
+            crop_right = min(width, right + padding_x)
+            crop_bottom = min(height, bottom + padding_y)
+            
+            cropped_img = img_array[crop_top:crop_bottom, crop_left:crop_right]
+            image = Image.fromarray(cropped_img)
+        
+        # Convert image to bytes
+        img_bytes = io.BytesIO()
+        image.save(img_bytes, format='JPEG', quality=85)
+        img_bytes.seek(0)
+        
+        # Upload to private Supabase Storage
+        supabase_url = "https://csszlzpsfwmsezursivk.supabase.co"
+        
+        headers = {
+            'Authorization': f'Bearer {auth_token}',  # Use user's auth token
+            'Content-Type': 'image/jpeg',
+        }
+        
+        # Upload to private storage bucket
+        upload_url = f"{supabase_url}/storage/v1/object/vocabulary-images/{filename}"
+        
+        response = requests.post(
+            upload_url,
+            headers=headers,
+            data=img_bytes.getvalue()
+        )
+        
+        if response.status_code in [200, 201]:
+            # Return the storage path (not public URL)
+            storage_path = f"vocabulary-images/{filename}"
+            print(f"✅ Image uploaded to private Supabase Storage: {storage_path}")
+            return storage_path
+        else:
+            print(f"❌ Failed to upload image: {response.status_code} - {response.text}")
+            return None
+            
+    except Exception as e:
+        print(f"❌ Error uploading image to Supabase: {e}")
+        return None
+
+# Update the save_image function call in your vocabulary saving:
+def save_image(image, label, detection_bbox=None):
+    """Save image with cropping support - tries Supabase first, falls back to local."""
+    # Try Supabase Storage first (private)
+    supabase_path = save_image_to_supabase(image, label, detection_bbox)
+    if supabase_path:
+        return supabase_path
+    
+    # Fallback to local storage with cropping
+    try:
+        img_array = np.array(image)
+        os.makedirs("object_images", exist_ok=True)
+        
+        timestamp = int(time.time())
+        
+        # Save original image
+        original_filename = f"object_images/{label}_{timestamp}_original.jpg"
+        img_cv_original = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+        cv2.imwrite(original_filename, img_cv_original)
+        
+        # Save cropped image if bbox provided
+        if detection_bbox:
+            left, top, right, bottom = [int(x) for x in detection_bbox]
+            height, width = img_array.shape[:2]
+            
+            # Add padding
+            obj_width = right - left
+            obj_height = bottom - top
+            padding_x = max(10, int(obj_width * 0.1))
+            padding_y = max(10, int(obj_height * 0.1))
+            
             crop_left = max(0, left - padding_x)
             crop_top = max(0, top - padding_y)
             crop_right = min(width, right + padding_x)
@@ -1690,7 +1783,7 @@ def save_image(image, label, detection_bbox=None):
             cropped_img = img_array[crop_top:crop_bottom, crop_left:crop_right]
             
             # Save cropped image
-            cropped_filename = f"{base_filename}_cropped.jpg"
+            cropped_filename = f"object_images/{label}_{timestamp}_cropped.jpg"
             img_cv_cropped = cv2.cvtColor(cropped_img, cv2.COLOR_RGB2BGR)
             cv2.imwrite(cropped_filename, img_cv_cropped)
             
@@ -1704,12 +1797,102 @@ def save_image(image, label, detection_bbox=None):
         error_message(f"Error saving image: {e}")
         return None
 
+def get_signed_image_url(storage_path, expires_in=3600):
+    """Get a signed URL for private image access."""
+    try:
+        import requests
+        
+        user = get_authenticated_user()
+        if not user:
+            return None
+        
+        auth_token = user.get('auth_token')
+        if not auth_token:
+            return None
+        
+        supabase_url = "https://csszlzpsfwmsezursivk.supabase.co"
+        
+        headers = {
+            'Authorization': f'Bearer {auth_token}',
+            'Content-Type': 'application/json',
+        }
+        
+        # Create signed URL for private access
+        signed_url_endpoint = f"{supabase_url}/storage/v1/object/sign/{storage_path}"
+        
+        data = {
+            'expiresIn': expires_in  # URL valid for 1 hour
+        }
+        
+        response = requests.post(
+            signed_url_endpoint,
+            headers=headers,
+            json=data
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            signed_token = result.get('signedURL')
+            if signed_token:
+                # Return full signed URL
+                return f"{supabase_url}/storage/v1/object/sign/{storage_path}?token={signed_token}"
+        
+        print(f"❌ Failed to get signed URL: {response.status_code} - {response.text}")
+        return None
+        
+    except Exception as e:
+        print(f"❌ Error getting signed URL: {e}")
+        return None
+    
+def display_vocabulary_image(image_path, word_original):
+    """Display image with proper private access."""
+    if not image_path:
+        return False
+    
+    try:
+        if image_path.startswith('vocabulary-images/'):
+            # Supabase Storage path - get signed URL
+            signed_url = get_signed_image_url(image_path)
+            if signed_url:
+                st.image(signed_url, caption=f"📷 {word_original}", width=300)
+                return True
+            else:
+                st.markdown("*Image temporarily unavailable*")
+                return False
+        elif image_path.startswith('http'):
+            # Legacy public URL (for old images)
+            st.image(image_path, caption=f"📷 {word_original}", width=300)
+            return True
+        elif os.path.exists(image_path):
+            # Local file (fallback)
+            image = Image.open(image_path)
+            st.image(image, caption=f"📷 {word_original}", width=300)
+            return True
+        else:
+            return False
+    except Exception as e:
+        print(f"Error displaying image: {e}")
+        return False
+
 def get_cropped_image_path(image_path):
-    """Get the cropped version of an image path if it exists."""
+    """Get the cropped version of an image path if it exists - supports all storage types."""
     if not image_path:
         return image_path
     
-    # Check if this is already a cropped image
+    # For Supabase storage paths, images are already cropped during upload
+    if image_path.startswith('vocabulary-images/'):
+        return image_path  # Already cropped during upload process
+    
+    # For legacy public URLs
+    if image_path.startswith('http'):
+        # Check if this is already a cropped image
+        if "_cropped" in image_path:
+            return image_path
+        # Try to construct cropped URL (for legacy images)
+        cropped_url = image_path.replace(".jpg", "_cropped.jpg")
+        return cropped_url  # Return the attempted cropped URL
+    
+    # For local files
     if "_cropped.jpg" in image_path:
         return image_path
     
@@ -1723,10 +1906,13 @@ def get_cropped_image_path(image_path):
 
 # Function to start a new quiz
 def start_new_quiz(vocabulary, num_questions=5):
+    """Start a new quiz with proper question limiting."""
     # Reset quiz state
     st.session_state.quiz_score = 0
     st.session_state.quiz_total = 0
+    st.session_state.quiz_target_questions = num_questions  # Store target
     st.session_state.answered = False
+    st.session_state.quiz_completed = False
     
     if not vocabulary or len(vocabulary) < 4:
         warning_message("Not enough vocabulary words for a quiz (need at least 4).")
@@ -1742,23 +1928,62 @@ def start_new_quiz(vocabulary, num_questions=5):
     setup_new_question(vocabulary)
     return True
 
+
 # Function to set up a new quiz question
 def setup_new_question(vocabulary):
-    if not vocabulary:
+    """Set up a new quiz question with unique options."""
+    if not vocabulary or len(vocabulary) < 4:
         return False
     
     # Select a random word as the question
-    st.session_state.current_quiz_word = np.random.choice(vocabulary)
+    st.session_state.current_quiz_word = random.choice(vocabulary)
     
-    # Create options (3 wrong + 1 correct)
-    options = [st.session_state.current_quiz_word]
-    while len(options) < 4:
-        wrong_option = np.random.choice(vocabulary)
-        if wrong_option['id'] != st.session_state.current_quiz_word['id'] and not any(o['id'] == wrong_option['id'] for o in options):
-            options.append(wrong_option)
+    # Get the correct answer
+    correct_word = st.session_state.current_quiz_word
     
-    # Shuffle options
-    np.random.shuffle(options)
+    # Create options starting with correct answer
+    options = [correct_word]
+    
+    # Get wrong options (different words with different translations)
+    available_wrong_options = [
+        word for word in vocabulary 
+        if (word['id'] != correct_word['id'] and 
+            word['word_translated'].lower() != correct_word['word_translated'].lower() and
+            word['word_original'].lower() != correct_word['word_original'].lower())
+    ]
+    
+    # If we don't have enough unique wrong options, duplicate the vocabulary
+    while len(available_wrong_options) < 3 and len(vocabulary) >= 2:
+        available_wrong_options.extend([
+            word for word in vocabulary 
+            if word['id'] != correct_word['id']
+        ])
+    
+    # Select 3 unique wrong options
+    wrong_options = []
+    for word in available_wrong_options:
+        if len(wrong_options) >= 3:
+            break
+        
+        # Check if this translation is already in our options
+        word_translation = word['word_translated'].lower()
+        existing_translations = [opt['word_translated'].lower() for opt in options + wrong_options]
+        
+        if word_translation not in existing_translations:
+            wrong_options.append(word)
+    
+    # If still not enough unique options, create some variations
+    while len(wrong_options) < 3:
+        for word in vocabulary:
+            if word['id'] != correct_word['id'] and len(wrong_options) < 3:
+                wrong_options.append(word)
+    
+    # Add wrong options to the list
+    options.extend(wrong_options[:3])
+    
+    # Shuffle the options
+    random.shuffle(options)
+    
     st.session_state.quiz_options = options
     st.session_state.answered = False
     
@@ -1787,7 +2012,7 @@ def check_answer(selected_index):
     selected_word = st.session_state.quiz_options[selected_index]
     is_correct = selected_word['id'] == st.session_state.current_quiz_word['id']
     
-    # Update database using direct method instead of db class
+    # Update database
     update_word_progress_direct(st.session_state.current_quiz_word['id'], is_correct)
     
     # Update session stats
@@ -1799,22 +2024,19 @@ def check_answer(selected_index):
     st.session_state.quiz_total += 1
     st.session_state.answered = True
     
-    # Check if any challenges are completed - with error handling
+    # Check if quiz should be completed
+    target_questions = st.session_state.get('quiz_target_questions', 5)
+    if st.session_state.quiz_total >= target_questions:
+        st.session_state.quiz_completed = True
+    
+    # Gamification check
     try:
         gamification.check_challenge_progress(
             quiz_score=st.session_state.quiz_score,
             quiz_total=st.session_state.quiz_total
         )
-        
-        # Check for quiz-related achievements
-        if st.session_state.quiz_total >= 5:  # Only check if quiz is substantial
-            gamification.check_achievements(
-                "quiz_completed",
-                score=st.session_state.quiz_score,
-                total=st.session_state.quiz_total
-            )
     except Exception as e:
-        print(f"Gamification error in check_answer: {e}")
+        print(f"Gamification error: {e}")
     
     return is_correct
 
@@ -2584,23 +2806,46 @@ elif app_mode == "My Vocabulary":
             with col2:
                 # Display image if available
                 image_path = word.get('image_path', '')
-                if image_path and os.path.exists(image_path):
+                if image_path:
                     try:
-                        # Use cropped version if available
+                        # Use cropped version if available (maintaining existing functionality)
                         display_image_path = get_cropped_image_path(image_path)
-                        image = Image.open(display_image_path)
                         
-                        # Show cropped image with clear caption
-                        st.image(image, caption=f"📷 {word.get('word_original', '')} - Cropped from detection")
+                        # Handle different image storage types
+                        image_displayed = False
                         
-                        # Optionally show if this is a cropped vs original image
-                        if "_cropped.jpg" in display_image_path:
-                            st.markdown("*🎯 Showing focused crop of detected object*")
-                        else:
-                            st.markdown("*📸 Showing full original image*")
+                        if display_image_path.startswith('vocabulary-images/'):
+                            # Private Supabase Storage - get signed URL
+                            signed_url = get_signed_image_url(display_image_path)
+                            if signed_url:
+                                st.image(signed_url, caption=f"📷 {word.get('word_original', '')} - Cropped from detection")
+                                st.markdown("*Showing focused crop of detected object*")
+                                image_displayed = True
+                        elif display_image_path.startswith('http'):
+                            # Legacy public URL (for old images)
+                            st.image(display_image_path, caption=f"📷 {word.get('word_original', '')} - Cropped from detection")
+                            if "_cropped" in display_image_path:
+                                st.markdown("*Showing focused crop of detected object*")
+                            else:
+                                st.markdown("*Showing full original image*")
+                            image_displayed = True
+                        elif os.path.exists(display_image_path):
+                            # Local file (fallback)
+                            image = Image.open(display_image_path)
+                            st.image(image, caption=f"📷 {word.get('word_original', '')} - Cropped from detection")
+                            
+                            if "_cropped.jpg" in display_image_path:
+                                st.markdown("*Showing focused crop of detected object*")
+                            else:
+                                st.markdown("*Showing full original image*")
+                            image_displayed = True
+                        
+                        if not image_displayed:
+                            st.markdown("*Image temporarily unavailable*")
                             
                     except Exception as e:
                         error_message(f"Error loading image: {e}")
+                        st.markdown("*Error loading image*")
                 else:
                     st.markdown("*No image available for this word*")
                 
@@ -2677,24 +2922,15 @@ elif app_mode == "Quiz Mode":
         current_word = st.session_state.current_quiz_word
         
         # Custom image display before the regular quiz
-        st.markdown("### 🎯 Quiz Question")
+        st.markdown("###Question")
         
         # Display cropped image if available
         image_path = current_word.get('image_path', '')
         has_image = False
-        if image_path and os.path.exists(image_path):
-            display_image_path = get_cropped_image_path(image_path)
-            if os.path.exists(display_image_path):
-                try:
-                    image = Image.open(display_image_path)
-                    st.image(image, caption="What is this object?", width=400)
-                    
-                    if "_cropped.jpg" in display_image_path:
-                        st.markdown("*🎯 Focused view of detected object*")
-                    
-                    has_image = True
-                except Exception as e:
-                    print(f"Error loading quiz image: {e}")
+        if image_path:
+            # Use the updated display function that handles all storage types
+            if display_quiz_image(current_word, "What is this object?"):
+                has_image = True
         
         # Display the question based on whether we have an image
         if has_image:
@@ -2775,14 +3011,21 @@ elif app_mode == "Quiz Mode":
                     del st.session_state.selected_answer_index
                 if 'selected_answer' in st.session_state:
                     del st.session_state.selected_answer
-                    
-                if setup_new_question(vocabulary):
-                    st.rerun()
-                else:
-                    st.success("🎉 Quiz completed!")
+                
+                # Check if we've reached the target number of questions
+                target_questions = st.session_state.get('quiz_target_questions', 5)
+                if st.session_state.quiz_total >= target_questions:
                     st.session_state.quiz_completed = True
                     st.rerun()
-        
+                else:
+                    # Continue with next question
+                    if setup_new_question(vocabulary):
+                        st.rerun()
+                    else:
+                        st.success("🎉 Quiz completed!")
+                        st.session_state.quiz_completed = True
+                        st.rerun()
+
         # Display current score in sidebar
         st.sidebar.markdown(f"### Current Score: {st.session_state.quiz_score}/{st.session_state.quiz_total}")
         if st.session_state.quiz_total > 0:
@@ -3091,12 +3334,11 @@ elif app_mode == "Statistics":
             st.markdown("*This is sample data. Start learning with Camera Mode to begin tracking your real progress!*")
             
 elif app_mode == "My Progress":
-    style_title("My Progress")  # Clean title without emoji
+    style_title("My Progress")
     
     try:
         # Force fresh user data
         user = get_authenticated_user()
-        user_id = user.get('id', user.get('email', 'unknown')) if user else 'unknown'
         
         # Get user's actual vocabulary count from Supabase
         actual_vocabulary = get_all_vocabulary_direct()
@@ -3106,10 +3348,22 @@ elif app_mode == "My Progress":
         st.session_state.words_learned = actual_word_count
         st.session_state.total_words_learned = actual_word_count
         
+        # Calculate proper level and points
+        st.session_state.level = max(1, actual_word_count // 10 + 1)
+        st.session_state.points = actual_word_count * 10
+        
+        # Initialize/update streak (you can calculate this from session data)
+        if 'streak_days' not in st.session_state:
+            st.session_state.streak_days = 1 if actual_word_count > 0 else 0
+        
+        # Get or create gamification instance
+        user_gamification = get_user_scoped_gamification()
+        
+        # Use the full dashboard
         if actual_word_count == 0:
             st.info("🌱 Start learning words in Camera Mode to see your progress!")
             
-            # Show basic progress without gamification
+            # Show minimal progress for new users
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.metric("Level", "1")
@@ -3117,43 +3371,59 @@ elif app_mode == "My Progress":
                 st.metric("Words Learned", "0")
             with col3:
                 st.metric("Points", "0")
-                
-            st.markdown("**Achievements:** None yet - start learning to unlock achievements!")
         else:
-            # Show actual user progress with updated gamification
-            user_gamification = get_user_scoped_gamification()
-            
-            # Don't call render_dashboard, create our own display
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Level", st.session_state.level)
-            with col2:
-                st.metric("Words Learned", actual_word_count)
-            with col3:
-                st.metric("Points", st.session_state.points)
-            
-            # Progress bar to next level
-            current_level_min = (st.session_state.level - 1) * 10
-            next_level_min = st.session_state.level * 10
-            progress = (actual_word_count - current_level_min) / 10
-            
-            st.markdown("### 📈 Progress to Next Level")
-            st.progress(min(progress, 1.0))
-            st.markdown(f"**{actual_word_count}/{next_level_min} words** to reach Level {st.session_state.level + 1}")
-            
-            # Show vocabulary by language
-            if actual_vocabulary:
-                st.markdown("### 🌍 Learning Progress by Language")
+            # Show the full gamification dashboard
+            try:
+                user_gamification.render_dashboard()
+            except Exception as e:
+                print(f"Dashboard error: {e}")
+                # Fallback to custom dashboard
+                st.markdown("### 🏆 Your Learning Progress")
                 
-                language_stats = {}
-                for word in actual_vocabulary:
-                    lang = word.get('language_translated', 'unknown')
-                    lang_name = next((k for k, v in languages.items() if v == lang), lang)
-                    language_stats[lang_name] = language_stats.get(lang_name, 0) + 1
+                # Main metrics
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Level", st.session_state.level)
+                with col2:
+                    st.metric("Words Learned", actual_word_count)
+                with col3:
+                    st.metric("Points", st.session_state.points)
                 
-                for lang, count in language_stats.items():
-                    st.markdown(f"**{lang}:** {count} words")
-            
+                # Progress to next level
+                current_level_min = (st.session_state.level - 1) * 10
+                next_level_min = st.session_state.level * 10
+                progress = min((actual_word_count - current_level_min) / 10, 1.0)
+                
+                st.markdown("### 📈 Progress to Next Level")
+                st.progress(progress)
+                st.markdown(f"**{actual_word_count}/{next_level_min} words** to reach Level {st.session_state.level + 1}")
+                
+                # Streak information
+                st.markdown("### 🔥 Learning Streak")
+                st.markdown(f"**{st.session_state.streak_days} day streak!**")
+                
+                # Achievements section
+                st.markdown("### 🏅 Recent Achievements")
+                if actual_word_count >= 1:
+                    st.markdown("🥇 First Word Learned!")
+                if actual_word_count >= 5:
+                    st.markdown("📚 Vocabulary Builder!")
+                if actual_word_count >= 10:
+                    st.markdown("🎯 Dedicated Learner!")
+                
+                # Language breakdown
+                if actual_vocabulary:
+                    st.markdown("### 🌍 Learning Progress by Language")
+                    
+                    language_stats = {}
+                    for word in actual_vocabulary:
+                        lang = word.get('language_translated', 'unknown')
+                        lang_name = next((k for k, v in languages.items() if v == lang), lang)
+                        language_stats[lang_name] = language_stats.get(lang_name, 0) + 1
+                    
+                    for lang, count in language_stats.items():
+                        st.markdown(f"**{lang}:** {count} words")
+                
     except Exception as e:
         error_message("There was an error displaying progress.")
         print(f"Progress error: {e}")
