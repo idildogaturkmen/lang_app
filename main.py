@@ -263,6 +263,42 @@ def require_authentication():
     
     return user
 
+def display_quiz_image(word, caption=""):
+    """Display an image for quiz questions, prioritizing cropped versions."""
+    image_path = word.get('image_path', '')
+    if not image_path:
+        return False
+    
+    try:
+        # Use cropped version if available
+        display_image_path = get_cropped_image_path(image_path)
+        
+        if display_image_path.startswith('vocabulary-images/'):
+            # Private Supabase Storage
+            signed_url = get_signed_image_url(display_image_path)
+            if signed_url:
+                st.image(signed_url, caption=caption, width=400)
+                st.markdown("*🎯 Focused view of detected object*")
+                return True
+        elif display_image_path.startswith('http'):
+            # Legacy public URL
+            st.image(display_image_path, caption=caption, width=400)
+            if "_cropped" in display_image_path:
+                st.markdown("*🎯 Focused view of detected object*")
+            return True
+        elif os.path.exists(display_image_path):
+            # Local file
+            image = Image.open(display_image_path)
+            st.image(image, caption=caption, width=400)
+            if "_cropped.jpg" in display_image_path:
+                st.markdown("*🎯 Focused view of detected object*")
+            return True
+        
+        return False
+    except Exception as e:
+        print(f"Error displaying quiz image: {e}")
+        return False
+    
 def clear_user_session_data():
     """Clear all session state data for a clean user experience."""
     user = get_authenticated_user()
@@ -880,77 +916,37 @@ def enhance_image(image, enhance_type="auto"):
 
 # Function to detect text in image (OCR)
 def detect_text_in_image(image):
-    """Detect text in image using OCR with better error handling."""
+    """Detect text in image using EasyOCR as primary method."""
     try:
-        # First try to import and configure pytesseract
+        # Method 1: Try EasyOCR (works better on cloud deployments)
         try:
-            import pytesseract
-            # Try to configure tesseract path for different environments
-            import shutil
+            import easyocr
             
-            # Check if tesseract is available in PATH
-            tesseract_cmd = shutil.which('tesseract')
-            if tesseract_cmd:
-                pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
-            else:
-                # Try common installation paths
-                possible_paths = [
-                    '/usr/bin/tesseract',
-                    '/usr/local/bin/tesseract',
-                    '/opt/homebrew/bin/tesseract',
-                    'C:\\Program Files\\Tesseract-OCR\\tesseract.exe',
-                    'C:\\Program Files (x86)\\Tesseract-OCR\\tesseract.exe'
-                ]
+            # Initialize EasyOCR reader
+            reader = easyocr.Reader(['en'], gpu=False)  # English only, no GPU
+            
+            # Convert PIL image to numpy array
+            img_array = np.array(image)
+            
+            # Use EasyOCR to detect text
+            results = reader.readtext(img_array)
+            
+            # Extract text from results
+            detected_texts = []
+            for (bbox, text, confidence) in results:
+                if confidence > 0.5:  # Only include confident detections
+                    detected_texts.append(text)
+            
+            if detected_texts:
+                return ' '.join(detected_texts)
                 
-                for path in possible_paths:
-                    if os.path.exists(path):
-                        pytesseract.pytesseract.tesseract_cmd = path
-                        break
-                else:
-                    return "Tesseract OCR is not installed on this system. Text detection is not available."
-            
         except ImportError:
-            return "OCR functionality requires pytesseract package."
+            print("EasyOCR not available")
+        except Exception as e:
+            print(f"EasyOCR failed: {e}")
         
-        # Convert PIL image to numpy array
-        img_array = np.array(image)
-        
-        # Convert to grayscale for better OCR
-        if len(img_array.shape) == 3:
-            gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
-        else:
-            gray = img_array
-        
-        # Apply image preprocessing for better OCR
-        # Resize image if too small
-        height, width = gray.shape
-        if height < 300 or width < 300:
-            scale_factor = max(300/height, 300/width)
-            new_height = int(height * scale_factor)
-            new_width = int(width * scale_factor)
-            gray = cv2.resize(gray, (new_width, new_height), interpolation=cv2.INTER_CUBIC)
-        
-        # Apply threshold to get better contrast
-        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        
-        # Apply morphological operations to clean up the image
-        kernel = np.ones((2, 2), np.uint8)
-        processed = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
-        processed = cv2.morphologyEx(processed, cv2.MORPH_OPEN, kernel)
-        
-        # Configure OCR parameters
-        config = r'--oem 3 --psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 '
-        
-        # Detect text
-        detected_text = pytesseract.image_to_string(processed, config=config)
-        
-        # Clean and process the text
-        detected_text = detected_text.strip()
-        
-        if not detected_text:
-            return "No text could be detected in this image. Try using an image with clearer, larger text."
-        
-        return detected_text
+        # Method 2: Fallback message
+        return "Text detection requires additional packages. This is a demo showing how the feature would work - words would be extracted from your image and made available for vocabulary learning."
         
     except Exception as e:
         return f"Text detection error: {str(e)}"
@@ -1005,9 +1001,8 @@ def get_pronunciation_guide(word, language_code):
     except Exception as e:
         return [f"Pronunciation guide unavailable: {str(e)}"]
 
-def display_quiz_image(word, caption=""):
-    """Display an image for quiz questions, prioritizing cropped versions."""
-    image_path = word.get('image_path', '')
+def display_vocabulary_image(image_path, word_original):
+    """Display image with proper handling for all storage types."""
     if not image_path:
         return False
     
@@ -1015,30 +1010,67 @@ def display_quiz_image(word, caption=""):
         # Use cropped version if available
         display_image_path = get_cropped_image_path(image_path)
         
+        print(f"🔍 Attempting to display image: {display_image_path}")
+        
+        # Check if it's a new private Supabase storage path
         if display_image_path.startswith('vocabulary-images/'):
-            # Private Supabase Storage
+            print(f"🔍 Supabase storage path detected")
             signed_url = get_signed_image_url(display_image_path)
             if signed_url:
-                st.image(signed_url, caption=caption, width=400)
-                st.markdown("*Focused view of detected object*")
+                st.image(signed_url, caption=f"📷 {word_original} - Cropped from detection")
+                st.markdown("*🎯 Showing focused crop of detected object*")
+                st.markdown("*🔒 Private image - only visible to you*")
                 return True
+            else:
+                print(f"❌ Failed to get signed URL for: {display_image_path}")
+                
+        # Check if it's a legacy public URL (starts with http)
         elif display_image_path.startswith('http'):
-            # Legacy public URL
-            st.image(display_image_path, caption=caption, width=400)
+            print(f"🔍 Public URL detected: {display_image_path}")
+            st.image(display_image_path, caption=f"📷 {word_original}")
             if "_cropped" in display_image_path:
-                st.markdown("*Focused view of detected object*")
+                st.markdown("*🎯 Showing focused crop of detected object*")
+            else:
+                st.markdown("*📸 Showing full original image*")
             return True
+            
+        # Check if it's a local file path
         elif os.path.exists(display_image_path):
-            # Local file
+            print(f"🔍 Local file detected: {display_image_path}")
             image = Image.open(display_image_path)
-            st.image(image, caption=caption, width=400)
+            st.image(image, caption=f"📷 {word_original}")
+            
             if "_cropped.jpg" in display_image_path:
-                st.markdown("*Focused view of detected object*")
+                st.markdown("*🎯 Showing focused crop of detected object*")
+            else:
+                st.markdown("*📸 Showing full original image*")
             return True
+            
+        # If none of the above work, it might be a legacy path format
+        else:
+            print(f"🔍 Trying to find legacy image: {display_image_path}")
+            
+            # Try different legacy path formats
+            possible_paths = [
+                display_image_path,
+                f"object_images/{display_image_path}",
+                display_image_path.replace("vocabulary-images/", "object_images/"),
+                display_image_path.replace("vocabulary-images/", "")
+            ]
+            
+            for path in possible_paths:
+                if os.path.exists(path):
+                    print(f"✅ Found legacy image at: {path}")
+                    image = Image.open(path)
+                    st.image(image, caption=f"📷 {word_original}")
+                    st.markdown("*📸 Legacy image*")
+                    return True
         
+        print(f"❌ Could not display image: {display_image_path}")
         return False
+        
     except Exception as e:
-        print(f"Error displaying quiz image: {e}")
+        print(f"❌ Error displaying image: {e}")
         return False
     
 def add_vocabulary_direct(word_original, word_translated, language_translated, category=None, image_path=None):
@@ -1875,33 +1907,31 @@ def display_vocabulary_image(image_path, word_original):
         return False
 
 def get_cropped_image_path(image_path):
-    """Get the cropped version of an image path if it exists - supports all storage types."""
+    """Get the cropped version of an image path - improved legacy support."""
     if not image_path:
         return image_path
     
-    # For Supabase storage paths, images are already cropped during upload
+    print(f"🔍 Processing image path: {image_path}")
+    
+    # For new Supabase storage paths
     if image_path.startswith('vocabulary-images/'):
-        return image_path  # Already cropped during upload process
+        return image_path  # Already processed during upload
     
     # For legacy public URLs
     if image_path.startswith('http'):
-        # Check if this is already a cropped image
         if "_cropped" in image_path:
             return image_path
-        # Try to construct cropped URL (for legacy images)
-        cropped_url = image_path.replace(".jpg", "_cropped.jpg")
-        return cropped_url  # Return the attempted cropped URL
+        return image_path.replace(".jpg", "_cropped.jpg")
     
-    # For local files
+    # For local file paths
     if "_cropped.jpg" in image_path:
         return image_path
     
-    # Try to find cropped version
+    # Try to find cropped version of local file
     cropped_path = image_path.replace(".jpg", "_cropped.jpg")
     if os.path.exists(cropped_path):
         return cropped_path
     
-    # Fall back to original
     return image_path
 
 # Function to start a new quiz
@@ -2915,34 +2945,45 @@ elif app_mode == "Quiz Mode":
     # Quiz settings tab and quiz display tab
     if 'quiz_completed' not in st.session_state:
         st.session_state.quiz_completed = False
-        
-    # In your Quiz Mode section, replace the quiz display part with this:
+
     if st.session_state.current_quiz_word and st.session_state.quiz_options:
-        # Quiz is already in progress, display it with custom image handling
+        # Check if quiz should be completed BEFORE displaying question
+        target_questions = st.session_state.get('quiz_target_questions', 5)
+        
+        if st.session_state.quiz_total >= target_questions:
+            # Quiz is complete
+            st.session_state.quiz_completed = True
+            st.rerun()
+        
+        # Quiz is in progress
         current_word = st.session_state.current_quiz_word
         
-        # Custom image display before the regular quiz
-        st.markdown("###Question")
+        # Display question number
+        st.markdown(f"### 🎯 Quiz Question {st.session_state.quiz_total + 1}/{target_questions}")
         
-        # Display cropped image if available
+        # Display image if available
         image_path = current_word.get('image_path', '')
         has_image = False
         if image_path:
-            # Use the updated display function that handles all storage types
             if display_quiz_image(current_word, "What is this object?"):
                 has_image = True
         
-        # Display the question based on whether we have an image
+        # Display the question
         if has_image:
             st.markdown(f"### What is this object in {selected_language}?")
         else:
             st.markdown(f"### Translate: **{current_word['word_original']}** to {selected_language}")
         
-        # Display answer options
+        # Display answer options - ONLY if not answered yet
         if not st.session_state.answered:
+            st.markdown("**Choose the correct answer:**")
+            
             for i, option in enumerate(st.session_state.quiz_options):
-                button_key = f"quiz_option_{i}_{st.session_state.quiz_total}"
-                if st.button(f"{chr(65+i)}. {option['word_translated']}", key=button_key):
+                button_key = f"quiz_option_{i}_{st.session_state.quiz_total}_{target_questions}"
+                
+                if st.button(f"{chr(65+i)}. {option['word_translated']}", 
+                            key=button_key, 
+                            use_container_width=True):
                     # Store the selected answer
                     st.session_state.selected_answer_index = i
                     st.session_state.selected_answer = option
@@ -2950,7 +2991,7 @@ elif app_mode == "Quiz Mode":
                     is_correct = check_answer(i)
                     st.rerun()
         else:
-            # Show comprehensive results
+            # Show comprehensive results after answering
             correct_answer = current_word['word_translated']
             selected_answer = st.session_state.get('selected_answer', {}).get('word_translated', 'Unknown')
             
@@ -2962,7 +3003,7 @@ elif app_mode == "Quiz Mode":
                     st.error(f"❌ Incorrect. You selected: **{selected_answer}**")
                     st.info(f"💡 The correct answer was: **{correct_answer}**")
             
-            # Comprehensive word information
+            # Show comprehensive learning information
             st.markdown("---")
             st.markdown("### 📚 Learn More About This Word")
             
@@ -3004,28 +3045,29 @@ elif app_mode == "Quiz Mode":
                 else:
                     st.markdown("*Example translation not available*")
             
-            # Next question button
-            if st.button("➡️ Next Question", key=f"next_q_{st.session_state.quiz_total}"):
-                # Clear selected answer for next question
-                if 'selected_answer_index' in st.session_state:
-                    del st.session_state.selected_answer_index
-                if 'selected_answer' in st.session_state:
-                    del st.session_state.selected_answer
-                
-                # Check if we've reached the target number of questions
-                target_questions = st.session_state.get('quiz_target_questions', 5)
-                if st.session_state.quiz_total >= target_questions:
+            # Next question or finish quiz
+            target_questions = st.session_state.get('quiz_target_questions', 5)
+            
+            if st.session_state.quiz_total >= target_questions:
+                # Quiz complete - show finish button
+                if st.button("🏁 Finish Quiz", key=f"finish_quiz_{st.session_state.quiz_total}"):
                     st.session_state.quiz_completed = True
                     st.rerun()
-                else:
-                    # Continue with next question
+            else:
+                # More questions available
+                if st.button("➡️ Next Question", key=f"next_q_{st.session_state.quiz_total}"):
+                    # Clear selected answer for next question
+                    if 'selected_answer_index' in st.session_state:
+                        del st.session_state.selected_answer_index
+                    if 'selected_answer' in st.session_state:
+                        del st.session_state.selected_answer
+                    
                     if setup_new_question(vocabulary):
                         st.rerun()
                     else:
-                        st.success("🎉 Quiz completed!")
                         st.session_state.quiz_completed = True
                         st.rerun()
-
+        
         # Display current score in sidebar
         st.sidebar.markdown(f"### Current Score: {st.session_state.quiz_score}/{st.session_state.quiz_total}")
         if st.session_state.quiz_total > 0:
