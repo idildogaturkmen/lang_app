@@ -1058,7 +1058,151 @@ class GamificationSystem:
                 self.display_achievements()
             with col2:
                 self.display_badges()
-    
+
+    def update_category_progress_with_real_data(self, actual_vocabulary):
+        """Update progress with real Supabase vocabulary data."""
+        from collections import defaultdict
+        
+        # Count totals by category and language
+        category_counts = defaultdict(int)
+        language_counts = defaultdict(lambda: defaultdict(int))
+        
+        for word in actual_vocabulary:
+            if word and 'category' in word and word['category']:
+                category_counts[word['category']] += 1
+            
+            if word and 'language_translated' in word and 'category' in word and word['category']:
+                language_counts[word['language_translated']][word['category']] += 1
+        
+        # Calculate progress for each category (assume targets)
+        category_targets = {
+            "food": 15,
+            "animals": 10,
+            "vehicles": 8,
+            "electronics": 10,
+            "furniture": 8,
+            "personal": 6,
+            "sports": 8,
+            "household": 10,
+            "other": 10,
+            "manual": 5,
+            "text": 10
+        }
+        
+        # Calculate overall progress
+        total_words = sum(category_counts.values())
+        overall_target = sum(category_targets.values())
+        overall_progress = min(1.0, total_words / max(1, overall_target))
+        
+        # FORCE UPDATE progress state with real data
+        st.session_state.category_progress = {
+            "categories": {cat: min(1.0, category_counts[cat] / max(1, category_targets.get(cat, 10))) 
+                        for cat in set(list(category_counts.keys()) + list(category_targets.keys()))},
+            "languages": {lang: {cat: count for cat, count in cats.items()} 
+                        for lang, cats in language_counts.items()},
+            "overall": overall_progress,
+            "total_words": total_words  # This was the key missing piece!
+        }
+        
+        print(f"✅ Updated category progress - total words: {total_words}")
+
+    def check_real_achievements(self, actual_vocabulary, actual_word_count):
+        """Check and update achievements based on real vocabulary data."""
+        # Initialize achievements if not exists
+        if 'achievements' not in st.session_state:
+            st.session_state.achievements = []
+        if 'badges' not in st.session_state:
+            st.session_state.badges = []
+        
+        # Clear old achievements to recalculate
+        achievements = []
+        badges = []
+        
+        # Basic word count achievements
+        if actual_word_count >= 1:
+            achievements.append({
+                'name': 'First Steps',
+                'description': 'Learned your first word!',
+                'icon': '🥇',
+                'date_earned': 'Recently'
+            })
+            badges.append('first_word')
+        
+        if actual_word_count >= 5:
+            achievements.append({
+                'name': 'Vocabulary Builder',
+                'description': 'Learned 5 words!',
+                'icon': '📚',
+                'date_earned': 'Recently'
+            })
+            badges.append('vocab_builder')
+        
+        if actual_word_count >= 10:
+            achievements.append({
+                'name': 'Dedicated Learner',
+                'description': 'Learned 10 words!',
+                'icon': '🎯',
+                'date_earned': 'Recently'
+            })
+            badges.append('dedicated_learner')
+        
+        if actual_word_count >= 25:
+            achievements.append({
+                'name': 'Word Master',
+                'description': 'Learned 25 words!',
+                'icon': '🏆',
+                'date_earned': 'Recently'
+            })
+            badges.append('word_master')
+        
+        if actual_word_count >= 50:
+            achievements.append({
+                'name': 'Vocabulary Expert',
+                'description': 'Learned 50 words!',
+                'icon': '🌟',
+                'date_earned': 'Recently'
+            })
+            badges.append('vocab_expert')
+        
+        # Category-based achievements
+        category_counts = defaultdict(int)
+        language_counts = defaultdict(int)
+        
+        for word in actual_vocabulary:
+            if word and 'category' in word and word['category']:
+                category_counts[word['category']] += 1
+            if word and 'language_translated' in word:
+                language_counts[word['language_translated']] += 1
+        
+        # Category achievements
+        for category, count in category_counts.items():
+            if count >= 5:
+                achievements.append({
+                    'name': f'{category.title()} Explorer',
+                    'description': f'Learned 5 {category} words!',
+                    'icon': '🗂️',
+                    'date_earned': 'Recently'
+                })
+                badges.append(f'{category}_explorer')
+        
+        # Language achievements  
+        for language, count in language_counts.items():
+            if count >= 10:
+                achievements.append({
+                    'name': f'Language Explorer',
+                    'description': f'Learned 10 words in {language}!',
+                    'icon': '🌍',
+                    'date_earned': 'Recently'
+                })
+                badges.append(f'{language}_explorer')
+        
+        # Update session state
+        st.session_state.achievements = achievements
+        st.session_state.badges = badges
+        
+        print(f"✅ Updated achievements: {len(achievements)} achievements, {len(badges)} badges")
+
+
     def update_sidebar(self):
         """Update the sidebar with gamification information."""
         try:
