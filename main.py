@@ -1214,9 +1214,18 @@ def get_object_category(label):
 
 
 def get_image_hash(image):
-    """Create a hash of an image for caching purposes."""
+    """Generate a hash for the image to detect changes."""
     img_byte_arr = io.BytesIO()
-    image.save(img_byte_arr, format='JPEG', quality=70)  # Lower quality for hash stability
+    # Fix RGBA to JPEG conversion issue
+    if image.mode in ('RGBA', 'LA', 'P'):
+        # Convert to RGB if image has transparency
+        rgb_image = Image.new('RGB', image.size, (255, 255, 255))
+        if image.mode == 'P':
+            image = image.convert('RGBA')
+        rgb_image.paste(image, mask=image.split()[-1] if image.mode in ('RGBA', 'LA') else None)
+        image = rgb_image
+    
+    image.save(img_byte_arr, format='JPEG', quality=70)
     return hashlib.md5(img_byte_arr.getvalue()).hexdigest()
 
 # Function to detect objects in image
@@ -1343,7 +1352,7 @@ def detect_text_in_image(image):
         return f"Text detection failed: {str(e)}."
 
 def display_my_progress():
-    """Display user progress with proper error handling."""
+    """Display user progress with enhanced visuals."""
     try:
         style_title("My Progress")
         
@@ -1356,80 +1365,185 @@ def display_my_progress():
         vocabulary = get_all_vocabulary_direct()
         total_words = len(vocabulary) if vocabulary else 0
         
-        # Basic stats
-        col1, col2, col3 = st.columns(3)
+        # Enhanced stats with better visuals
+        col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.metric("Total Words Learned", total_words)
+            st.markdown("""
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                        padding: 20px; border-radius: 15px; text-align: center; color: white;">
+                <h1 style="margin: 0; font-size: 2.5em;">📚</h1>
+                <h2 style="margin: 5px 0; color: white;">{}</h2>
+                <p style="margin: 0; opacity: 0.9;">Words Learned</p>
+            </div>
+            """.format(total_words), unsafe_allow_html=True)
         
         with col2:
             current_streak = st.session_state.get('streak_days', 0)
-            st.metric("Current Streak", f"{current_streak} days")
+            streak_emoji = "🔥" if current_streak > 0 else "❄️"
+            streak_color = "#ff6b6b" if current_streak > 7 else "#4ecdc4"
+            st.markdown(f"""
+            <div style="background: linear-gradient(135deg, {streak_color} 0%, #45b7d1 100%); 
+                        padding: 20px; border-radius: 15px; text-align: center; color: white;">
+                <h1 style="margin: 0; font-size: 2.5em;">{streak_emoji}</h1>
+                <h2 style="margin: 5px 0; color: white;">{current_streak} days</h2>
+                <p style="margin: 0; opacity: 0.9;">Current Streak</p>
+            </div>
+            """, unsafe_allow_html=True)
         
         with col3:
             current_level = st.session_state.get('level', 1)
-            st.metric("Current Level", current_level)
+            level_emoji = "🥇" if current_level >= 10 else "🥈" if current_level >= 5 else "🥉"
+            st.markdown(f"""
+            <div style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); 
+                        padding: 20px; border-radius: 15px; text-align: center; color: white;">
+                <h1 style="margin: 0; font-size: 2.5em;">{level_emoji}</h1>
+                <h2 style="margin: 5px 0; color: white;">Level {current_level}</h2>
+                <p style="margin: 0; opacity: 0.9;">Current Level</p>
+            </div>
+            """, unsafe_allow_html=True)
         
-        # Achievements section
-        st.subheader("🏆 Your Achievements")
-        try:
-            achievements = st.session_state.get('achievements', {})
-            if achievements:
-                for achievement_id, achievement_data in achievements.items():
+        with col4:
+            points = st.session_state.get('points', 0)
+            st.markdown(f"""
+            <div style="background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%); 
+                        padding: 20px; border-radius: 15px; text-align: center; color: #333;">
+                <h1 style="margin: 0; font-size: 2.5em;">⭐</h1>
+                <h2 style="margin: 5px 0; color: #333;">{points}</h2>
+                <p style="margin: 0; opacity: 0.8;">Total Points</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # Enhanced Achievements section
+        st.markdown("## 🏆 Your Achievement Collection")
+        
+        achievements = st.session_state.get('achievements', {})
+        if achievements:
+            # Create achievement cards
+            cols = st.columns(3)
+            for i, (achievement_id, achievement_data) in enumerate(achievements.items()):
+                with cols[i % 3]:
                     if isinstance(achievement_data, dict):
                         title = achievement_data.get('title', achievement_id)
                         description = achievement_data.get('description', 'No description')
-                        date_earned = achievement_data.get('date_earned', 'Unknown date')
                         
-                        st.success(f"🎉 **{title}** - {description} (Earned: {date_earned})")
-                    else:
-                        st.info(f"🎯 {achievement_id}")
-            else:
-                st.info("No achievements yet. Keep learning to unlock them!")
-                
-        except Exception as e:
-            print(f"Error displaying achievements: {e}")
-            st.info("Achievement data is loading...")
+                        # Different badge styles for different achievements
+                        badge_colors = [
+                            "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+                            "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)",
+                            "linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)",
+                            "linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)",
+                            "linear-gradient(135deg, #fa709a 0%, #fee140 100%)"
+                        ]
+                        badge_color = badge_colors[i % len(badge_colors)]
+                        
+                        # Achievement emojis
+                        achievement_emojis = ["🎯", "🌟", "🚀", "💎", "👑", "🔥", "⚡", "🎨", "🎪", "🎭"]
+                        emoji = achievement_emojis[i % len(achievement_emojis)]
+                        
+                        st.markdown(f"""
+                        <div style="background: {badge_color}; 
+                                    padding: 15px; border-radius: 12px; text-align: center; 
+                                    color: white; margin-bottom: 10px;
+                                    box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+                            <h1 style="margin: 0; font-size: 2em;">{emoji}</h1>
+                            <h3 style="margin: 5px 0; color: white;">{title}</h3>
+                            <p style="margin: 0; opacity: 0.9; font-size: 0.9em;">{description}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+        else:
+            st.markdown("""
+            <div style="background: linear-gradient(135deg, #e0e0e0 0%, #f5f5f5 100%); 
+                        padding: 30px; border-radius: 15px; text-align: center;">
+                <h1 style="margin: 0; font-size: 3em;">🏆</h1>
+                <h3>No achievements yet!</h3>
+                <p>Keep learning to unlock amazing badges and achievements!</p>
+            </div>
+            """, unsafe_allow_html=True)
         
-        # Learning progress by category
-        st.subheader("📊 Learning Progress by Category")
-        try:
-            if vocabulary:
-                # Count words by category
-                category_counts = {}
-                for word in vocabulary:
-                    category = word.get('category', 'Other')
-                    category_counts[category] = category_counts.get(category, 0) + 1
-                
-                # Display as metrics
-                if category_counts:
-                    cols = st.columns(min(len(category_counts), 4))
-                    for i, (category, count) in enumerate(category_counts.items()):
-                        with cols[i % 4]:
-                            st.metric(f"{category.title()}", count)
-                else:
-                    st.info("No categorized vocabulary yet.")
-            else:
-                st.info("No vocabulary learned yet. Start with Camera Mode!")
-                
-        except Exception as e:
-            print(f"Error displaying category progress: {e}")
-            st.info("Progress data is loading...")
+        # Enhanced Vocabulary Tree
+        st.markdown("## 🌳 Your Learning Tree")
         
-        # Vocabulary tree visualization
-        st.subheader("🌳 Your Vocabulary Tree")
-        try:
-            tree_data = st.session_state.get('vocabulary_tree', {})
-            tree_level = tree_data.get('level', 1)
-            tree_size = tree_data.get('size', 1)
+        tree_data = st.session_state.get('vocabulary_tree', {})
+        tree_level = tree_data.get('level', 1)
+        tree_size = tree_data.get('size', total_words if total_words > 0 else 1)
+        
+        # Calculate progress for next level
+        words_for_next_level = tree_level * 10
+        progress = min(tree_size / words_for_next_level, 1.0)
+        
+        # Visual tree representation
+        tree_stages = [
+            {"level": 1, "emoji": "🌱", "name": "Seedling", "color": "#8FBC8F"},
+            {"level": 3, "emoji": "🌿", "name": "Sprout", "color": "#90EE90"},
+            {"level": 5, "emoji": "🌳", "name": "Young Tree", "color": "#32CD32"},
+            {"level": 8, "emoji": "🎄", "name": "Mature Tree", "color": "#228B22"},
+            {"level": 10, "emoji": "🌲", "name": "Forest Giant", "color": "#006400"}
+        ]
+        
+        current_stage = tree_stages[0]
+        for stage in tree_stages:
+            if tree_level >= stage["level"]:
+                current_stage = stage
+        
+        col1, col2 = st.columns([1, 2])
+        
+        with col1:
+            st.markdown(f"""
+            <div style="background: linear-gradient(135deg, {current_stage['color']} 0%, #87CEEB 100%); 
+                        padding: 25px; border-radius: 15px; text-align: center; color: white;">
+                <h1 style="margin: 0; font-size: 4em;">{current_stage['emoji']}</h1>
+                <h2 style="margin: 10px 0; color: white;">Level {tree_level}</h2>
+                <p style="margin: 0; opacity: 0.9;">{current_stage['name']}</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            st.markdown(f"**Tree Growth Progress** (Level {tree_level} → {tree_level + 1})")
+            st.progress(progress)
+            st.markdown(f"**Words learned:** {tree_size} / {words_for_next_level}")
             
-            progress_bar = min(tree_size / (tree_level * 10), 1.0)  # Max 10 words per level
-            st.progress(progress_bar)
-            st.write(f"Tree Level: {tree_level} | Words: {tree_size}")
+            if progress >= 1.0:
+                st.success("🎉 Ready to level up! Keep learning to grow your tree!")
+            else:
+                remaining = words_for_next_level - tree_size
+                st.info(f"📚 Learn {remaining} more words to reach the next level!")
+        
+        # Category progress with visual elements
+        st.markdown("## 📊 Learning Progress by Category")
+        
+        if vocabulary:
+            category_counts = {}
+            category_colors = {
+                'electronics': '#FF6B6B',
+                'food': '#4ECDC4', 
+                'sports': '#45B7D1',
+                'other': '#96CEB4',
+                'text': '#FECA57',
+                'manual': '#FF9FF3'
+            }
             
-        except Exception as e:
-            print(f"Error displaying vocabulary tree: {e}")
-            st.info("Vocabulary tree is growing...")
+            for word in vocabulary:
+                category = word.get('category', 'Other')
+                category_counts[category] = category_counts.get(category, 0) + 1
+            
+            if category_counts:
+                cols = st.columns(min(len(category_counts), 3))
+                for i, (category, count) in enumerate(category_counts.items()):
+                    with cols[i % 3]:
+                        color = category_colors.get(category.lower(), '#95A5A6')
+                        
+                        st.markdown(f"""
+                        <div style="background: {color}; padding: 15px; border-radius: 10px; 
+                                    text-align: center; color: white; margin-bottom: 10px;">
+                            <h2 style="margin: 0; color: white;">{count}</h2>
+                            <p style="margin: 5px 0; opacity: 0.9;">{category.title()} Words</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+        else:
+            st.info("🚀 Start learning to see your progress by category!")
             
     except Exception as e:
         print(f"❌ Error in display_my_progress: {e}")
@@ -2192,6 +2306,8 @@ def save_image_to_supabase(image, label, detection_bbox=None):
             print("❌ No auth token available for image upload")
             return None
         
+        print(f"🔄 Starting Supabase upload for user: {user_id}")
+        
         # Process image (crop if bbox provided)
         processed_image = image
         if detection_bbox:
@@ -2213,8 +2329,18 @@ def save_image_to_supabase(image, label, detection_bbox=None):
             
             cropped_img = img_array[crop_top:crop_bottom, crop_left:crop_right]
             processed_image = PILImage.fromarray(cropped_img)
+            print(f"🎯 Image cropped to: {cropped_img.shape}")
         
-        # Create a unique filename with user folder structure
+        # Fix RGBA to JPEG conversion
+        if processed_image.mode in ('RGBA', 'LA', 'P'):
+            rgb_image = PILImage.new('RGB', processed_image.size, (255, 255, 255))
+            if processed_image.mode == 'P':
+                processed_image = processed_image.convert('RGBA')
+            rgb_image.paste(processed_image, mask=processed_image.split()[-1] if processed_image.mode in ('RGBA', 'LA') else None)
+            processed_image = rgb_image
+            print(f"🔧 Converted {processed_image.mode} to RGB")
+        
+        # Create a unique filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         unique_id = str(uuid.uuid4())[:8]
         filename = f"{user_id}/{label}_{timestamp}_{unique_id}.jpg"
@@ -2224,18 +2350,20 @@ def save_image_to_supabase(image, label, detection_bbox=None):
         processed_image.save(img_bytes, format='JPEG', quality=85)
         img_bytes.seek(0)
         
-        # Upload to Supabase Storage
+        # Upload to Supabase Storage using the correct endpoint
         supabase_url = "https://csszlzpsfwmsezursivk.supabase.co"
+        
+        # Use the standard file upload endpoint
+        upload_url = f"{supabase_url}/storage/v1/object/vocabulary-images/{filename}"
         
         headers = {
             'Authorization': f'Bearer {auth_token}',
             'Content-Type': 'image/jpeg',
+            'x-upsert': 'true'  # Allow overwrite if exists
         }
         
-        # Correct upload URL format
-        upload_url = f"{supabase_url}/storage/v1/object/vocabulary-images/{filename}"
-        
-        print(f"🔄 Uploading image to: {upload_url}")
+        print(f"🔄 Uploading to: {upload_url}")
+        print(f"📋 Headers: {headers}")
         
         response = requests.post(
             upload_url,
@@ -2247,9 +2375,9 @@ def save_image_to_supabase(image, label, detection_bbox=None):
         print(f"📋 Upload response: {response.text}")
         
         if response.status_code in [200, 201]:
-            # Return the storage path (not public URL)
+            # Return the storage path that we'll use for retrieval
             storage_path = f"vocabulary-images/{filename}"
-            print(f"✅ Image uploaded to Supabase Storage: {storage_path}")
+            print(f"✅ Image uploaded successfully to: {storage_path}")
             return storage_path
         else:
             print(f"❌ Failed to upload image: {response.status_code} - {response.text}")
@@ -2257,6 +2385,8 @@ def save_image_to_supabase(image, label, detection_bbox=None):
             
     except Exception as e:
         print(f"❌ Error uploading image to Supabase: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 def test_supabase_storage_permissions():
@@ -2364,56 +2494,15 @@ def try_alternative_upload(supabase_url, supabase_key, filename, image_data):
 
 # Update the save_image function call in your vocabulary saving:
 def save_image(image, label, detection_bbox=None):
-    """Save image with cropping support - tries Supabase first, falls back to local."""
-    # Try Supabase Storage first (private)
+    """Save image with cropping support - Supabase only, no local fallback."""
+    # Try Supabase Storage first
     supabase_path = save_image_to_supabase(image, label, detection_bbox)
     if supabase_path:
+        print(f"✅ Image saved to Supabase: {supabase_path}")
         return supabase_path
-    
-    # Fallback to local storage with cropping
-    try:
-        img_array = np.array(image)
-        os.makedirs("object_images", exist_ok=True)
-        
-        timestamp = int(time.time())
-        
-        # Save original image
-        original_filename = f"object_images/{label}_{timestamp}_original.jpg"
-        img_cv_original = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
-        cv2.imwrite(original_filename, img_cv_original)
-        
-        # Save cropped image if bbox provided
-        if detection_bbox:
-            left, top, right, bottom = [int(x) for x in detection_bbox]
-            height, width = img_array.shape[:2]
-            
-            # Add padding
-            obj_width = right - left
-            obj_height = bottom - top
-            padding_x = max(10, int(obj_width * 0.1))
-            padding_y = max(10, int(obj_height * 0.1))
-            
-            crop_left = max(0, left - padding_x)
-            crop_top = max(0, top - padding_y)
-            crop_right = min(width, right + padding_x)
-            crop_bottom = min(height, bottom + padding_y)
-            
-            # Crop the image
-            cropped_img = img_array[crop_top:crop_bottom, crop_left:crop_right]
-            
-            # Save cropped image
-            cropped_filename = f"object_images/{label}_{timestamp}_cropped.jpg"
-            img_cv_cropped = cv2.cvtColor(cropped_img, cv2.COLOR_RGB2BGR)
-            cv2.imwrite(cropped_filename, img_cv_cropped)
-            
-            print(f"✅ Saved images: {original_filename} and {cropped_filename}")
-            return cropped_filename  # Return cropped version as primary
-        else:
-            print(f"✅ Saved original image: {original_filename}")
-            return original_filename
-            
-    except Exception as e:
-        error_message(f"Error saving image: {e}")
+    else:
+        print(f"❌ Failed to save image to Supabase")
+        error_message("Failed to save image. Please check your internet connection and try again.")
         return None
 
 def get_signed_image_url(storage_path, expires_in=3600):
@@ -3449,106 +3538,121 @@ if app_mode == "Camera Mode":
             
             with st.spinner("Detecting text..."):
                 detected_text = detect_text_in_image(image)
-                
-                # Clear the spinner
                 spinner_container.empty()
-                
-                # Add scroll indicator for mobile
                 add_scroll_indicator()
                 
-                # FIX: Only process actual detected text, not error messages
-                if detected_text and isinstance(detected_text, str) and len(detected_text.strip()) > 0:
-                    # Additional validation - make sure it's not an error message
-                    error_indicators = [
-                        "no clear text", "text detection", "error", "failed", "try using",
-                        "not detected", "please try", "install", "requires", "unavailable"
-                    ]
+                if detected_text and detected_text != "No text found in this image.":
+                    style_section_title("📝 Detected Text")
+                    st.write(f"**Full Text:** {detected_text}")
                     
-                    is_error_message = any(indicator in detected_text.lower() for indicator in error_indicators)
+                    # Split into words for learning (filter out short words and numbers)
+                    import re
+                    words = [word.strip() for word in re.split(r'[^\w]', detected_text) 
+                            if word.strip() and len(word.strip()) > 2 and not word.strip().isdigit()]
                     
-                    if not is_error_message:
-                        style_section_title("📝 Detected Text")
-                        st.success(f"Found text: **{detected_text}**")
+                    if words:
+                        st.subheader("📚 Words to Learn")
+                        
+                        # Create selection checkboxes like in object detection
+                        for i, word in enumerate(words[:10]):  # Limit to 10 words
+                            checkbox_key = f"text_word_{i}_{word}"
                             
-                        # Split into meaningful words for learning (filter out very short words)
-                        import re
-                        words = [word.strip() for word in re.split(r'[^\w]', detected_text) 
-                                if word.strip() and len(word.strip()) > 2]
-                            
-                        if words:
-                            st.subheader("Words to Learn")
+                            if st.checkbox(f"Learn: **{word.lower()}**", key=checkbox_key):
+                                col1, col2 = st.columns([1, 1])
                                 
-                            # Create containers for each word
-                            for i, word in enumerate(words):
-                                # Skip very common words that aren't useful for learning
-                                skip_words = {'the', 'and', 'this', 'that', 'with', 'for', 'are', 'was', 'were', 'been'}
-                                if word.lower() in skip_words:
-                                    continue
-                                        
-                                # Translate the word
-                                translated_word = translate_text(word, st.session_state.target_language)
+                                with col1:
+                                    st.markdown(f"### 📖 {word.lower()}")
                                     
-                                # Display in a container
-                                with st.container():
-                                    cols = st.columns([3, 1])
+                                    # Get translation using the same function as object detection
+                                    translation_result = translate_text(word.lower(), st.session_state.target_language)
+                                    if translation_result and translation_result != word.lower():
+                                        st.markdown(f"**Translation:** {translation_result}")
+                                        
+                                        # Pronunciation guide
+                                        pronunciation_notes = get_pronunciation_guide(translation_result, st.session_state.target_language)
+                                        if pronunciation_notes:
+                                            st.markdown("**Pronunciation tips:**")
+                                            for note in pronunciation_notes[:2]:
+                                                st.markdown(f"• {note}")
+                                        
+                                        # Audio pronunciation
+                                        try:
+                                            audio_bytes = text_to_speech(translation_result, st.session_state.target_language)
+                                            if audio_bytes:
+                                                st.markdown("**🔊 Listen:**")
+                                                audio_html = get_audio_html(audio_bytes)
+                                                st.markdown(audio_html, unsafe_allow_html=True)
+                                        except Exception as e:
+                                            print(f"Audio generation error: {e}")
+                                    else:
+                                        st.markdown("*Translation not available*")
                                 
-                                    with cols[0]:
-                                        st.write(f"**{word}** → {translated_word}")
-                                        # Add audio
-                                        audio_bytes = text_to_speech(translated_word, st.session_state.target_language)
-                                        if audio_bytes:
-                                            st.markdown(get_audio_html(audio_bytes), unsafe_allow_html=True)
+                                with col2:
+                                    # Example sentence using the same function as object detection
+                                    try:
+                                        example = get_example_sentence(word.lower(), st.session_state.target_language)
+                                        if example and example.get('translated'):
+                                            st.markdown("**Example:**")
+                                            st.markdown(f"*{example['translated']}*")
+                                            
+                                            if example.get('english'):
+                                                st.markdown(f"*{example['english']}*")
+                                            
+                                            # Example audio
+                                            try:
+                                                example_audio_bytes = text_to_speech(example['translated'], st.session_state.target_language)
+                                                if example_audio_bytes:
+                                                    st.markdown("**🔊 Example audio:**")
+                                                    example_audio_html = get_audio_html(example_audio_bytes)
+                                                    st.markdown(example_audio_html, unsafe_allow_html=True)
+                                            except Exception as e:
+                                                print(f"Example audio generation error: {e}")
+                                        else:
+                                            st.markdown("*Example sentence not available*")
+                                    except Exception as e:
+                                        print(f"Example sentence error: {e}")
+                                        st.markdown("*Example sentence not available*")
+                                
+                                # Save button for this word (same as object detection)
+                                save_key = f"save_text_word_{i}_{word}"
+                                if st.button(f"💾 Save '{word.lower()}' to vocabulary", key=save_key):
+                                    if translation_result and translation_result != word.lower():
+                                        vocab_id = add_vocabulary_direct(
+                                            word.lower(), 
+                                            translation_result, 
+                                            st.session_state.target_language, 
+                                            category="text",
+                                            image_path=None  # No image for text detection
+                                        )
                                         
-                                    with cols[1]:
-                                        # Add save button for each word
-                                        if st.button(f"Save", key=f"save_text_{i}"):
-                                            # Auto-start session if needed
-                                            if st.session_state.session_id is None:
-                                                manage_session("start")
-                                                
-                                            # Save to vocabulary
-                                            vocab_id = add_vocabulary_direct(
-                                                word_original=word,
-                                                word_translated=translated_word,
-                                                language_translated=st.session_state.target_language,
-                                                category="text",
-                                                image_path=None
-                                            )
-                                                
-                                            if vocab_id and vocab_id != 'duplicate':
-                                                success_message(f"Added '{word}' to vocabulary!")
-                                                st.session_state.words_studied += 1
-                                                st.session_state.words_learned += 1
-                                            elif vocab_id == 'duplicate':
-                                                warning_message(f"'{word}' is already in your vocabulary!")
-                                            else:
-                                                error_message(f"Failed to save '{word}'")
-                                        
-                                    st.markdown("---")
-                        else:
-                            info_message("The detected text doesn't contain meaningful words to learn.")
+                                        if vocab_id:
+                                            success_message(f"✅ '{word.lower()}' saved to vocabulary!")
+                                            st.session_state.words_studied += 1
+                                            st.session_state.words_learned += 1
+                                            
+                                            # Update gamification like in object detection
+                                            try:
+                                                gamification.check_achievements(
+                                                    "word_learned",
+                                                    word=word.lower(),
+                                                    category="text",
+                                                    language=st.session_state.target_language
+                                                )
+                                            except Exception as e:
+                                                print(f"Gamification error: {e}")
+                                            
+                                            time.sleep(1)
+                                            st.rerun()
+                                        else:
+                                            error_message("Failed to save word to vocabulary.")
+                                    else:
+                                        error_message("Cannot save - translation not available.")
+                                
+                                st.divider()
                     else:
-                        # It's an error message, so show failure
-                        warning_message("No clear text was detected in this image.")
-                        st.info("💡 **Tips for better text detection:**")
-                        st.markdown("""
-                        - Use images with **large, clear text**
-                        - Ensure **good lighting** and contrast
-                        - Try **zooming in** on the text
-                        - Use **simple fonts** (avoid decorative text)
-                        - Make sure text is **horizontal** (not rotated)
-                        """)
+                        st.info("No meaningful words found for vocabulary learning.")
                 else:
-                    # No text detected at all
-                    warning_message("No text was detected in this image.")
-                    st.info("💡 **Try these tips:**")
-                    st.markdown("""
-                    - Take a photo with **clear, readable text**
-                    - Ensure the text is **well-lit** and **in focus**
-                    - Try **getting closer** to the text
-                    - Use **high contrast** text (dark text on light background or vice versa)
-                    - Or switch to **Object Detection** mode to learn vocabulary from objects
-                    """)
+                    st.warning("No text detected in the image. Try an image with clearer text.")
 
 elif app_mode == "My Vocabulary":
     style_title("My Vocabulary")
