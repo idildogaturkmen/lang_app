@@ -1283,75 +1283,158 @@ def enhance_image(image, enhance_type="auto"):
 
 # Function to detect text in image (OCR)
 def detect_text_in_image(image):
-    """Detect text in image using Google Vision API with EasyOCR fallback."""
+    """Detect text in image using Google Vision API only."""
     try:
-        # Method 1: Try Google Vision API first
-        try:
-            from google.cloud import vision
-            import io
-            
-            # Initialize the client
-            client = vision.ImageAnnotatorClient()
-            
-            # Convert PIL image to bytes
-            img_byte_arr = io.BytesIO()
-            image.save(img_byte_arr, format='JPEG')
-            img_byte_arr = img_byte_arr.getvalue()
-            
-            # Create vision image object
-            vision_image = vision.Image(content=img_byte_arr)
-            
-            # Perform text detection
-            response = client.text_detection(image=vision_image)
-            texts = response.text_annotations
-            
-            if texts:
-                # Return the first (most comprehensive) text detection
-                detected_text = texts[0].description
-                print(f"✅ Google Vision detected: {detected_text}")
-                return detected_text
-            
-        except ImportError:
-            print("Google Vision API not available, trying EasyOCR...")
-        except Exception as e:
-            print(f"Google Vision API failed: {e}, trying EasyOCR...")
+        from google.cloud import vision
+        import io
+        import os
+        import json
+        import tempfile
         
-        # Method 2: Fallback to EasyOCR
-        try:
-            import easyocr
+        # Handle credentials for cloud deployment
+        credentials_json = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS_JSON')
+        if credentials_json:
+            # Create a temporary file with the credentials
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                f.write(credentials_json)
+                temp_cred_file = f.name
             
-            # Initialize EasyOCR reader
-            reader = easyocr.Reader(['en'], gpu=False)
-            
-            # Convert PIL image to numpy array
-            import numpy as np
-            img_array = np.array(image)
-            
-            # Use EasyOCR to detect text
-            results = reader.readtext(img_array)
-            
-            # Extract text from results
-            detected_texts = []
-            for (bbox, text, confidence) in results:
-                if confidence > 0.5:  # Only include confident detections
-                    detected_texts.append(text)
-            
-            if detected_texts:
-                combined_text = ' '.join(detected_texts)
-                print(f"✅ EasyOCR detected: {combined_text}")
-                return combined_text
-                
-        except ImportError:
-            print("EasyOCR not available")
-        except Exception as e:
-            print(f"EasyOCR failed: {e}")
+            # Set the environment variable to point to the temp file
+            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = temp_cred_file
         
-        # Method 3: Fallback message
-        return "Text detection requires Google Vision API or EasyOCR. Please set up the necessary credentials or install EasyOCR."
+        # Initialize the client
+        client = vision.ImageAnnotatorClient()
         
+        # Convert PIL image to bytes
+        img_byte_arr = io.BytesIO()
+        image.save(img_byte_arr, format='JPEG')
+        img_byte_arr = img_byte_arr.getvalue()
+        
+        # Create vision image object
+        vision_image = vision.Image(content=img_byte_arr)
+        
+        # Perform text detection
+        response = client.text_detection(image=vision_image)
+        texts = response.text_annotations
+        
+        # Clean up temp file if created
+        if credentials_json and 'temp_cred_file' in locals():
+            try:
+                os.unlink(temp_cred_file)
+            except:
+                pass
+        
+        if response.error.message:
+            raise Exception(f"Google Vision API error: {response.error.message}")
+        
+        if texts:
+            # Return the first (most comprehensive) text detection
+            detected_text = texts[0].description.strip()
+            print(f"✅ Google Vision detected text: {detected_text}")
+            return detected_text
+        else:
+            print("No text detected in image")
+            return "No text found in this image."
+            
+    except ImportError:
+        return "Google Vision API is not installed. Please install google-cloud-vision with compatible protobuf version."
     except Exception as e:
-        return f"Text detection error: {str(e)}"
-    
+        print(f"❌ Google Vision API error: {e}")
+        return f"Text detection failed: {str(e)}."
+
+def display_my_progress():
+    """Display user progress with proper error handling."""
+    try:
+        style_title("My Progress")
+        
+        user = get_authenticated_user()
+        if not user:
+            st.warning("Please log in to view your progress.")
+            return
+        
+        # Get vocabulary stats
+        vocabulary = get_all_vocabulary_direct()
+        total_words = len(vocabulary) if vocabulary else 0
+        
+        # Basic stats
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("Total Words Learned", total_words)
+        
+        with col2:
+            current_streak = st.session_state.get('streak_days', 0)
+            st.metric("Current Streak", f"{current_streak} days")
+        
+        with col3:
+            current_level = st.session_state.get('level', 1)
+            st.metric("Current Level", current_level)
+        
+        # Achievements section
+        st.subheader("🏆 Your Achievements")
+        try:
+            achievements = st.session_state.get('achievements', {})
+            if achievements:
+                for achievement_id, achievement_data in achievements.items():
+                    if isinstance(achievement_data, dict):
+                        title = achievement_data.get('title', achievement_id)
+                        description = achievement_data.get('description', 'No description')
+                        date_earned = achievement_data.get('date_earned', 'Unknown date')
+                        
+                        st.success(f"🎉 **{title}** - {description} (Earned: {date_earned})")
+                    else:
+                        st.info(f"🎯 {achievement_id}")
+            else:
+                st.info("No achievements yet. Keep learning to unlock them!")
+                
+        except Exception as e:
+            print(f"Error displaying achievements: {e}")
+            st.info("Achievement data is loading...")
+        
+        # Learning progress by category
+        st.subheader("📊 Learning Progress by Category")
+        try:
+            if vocabulary:
+                # Count words by category
+                category_counts = {}
+                for word in vocabulary:
+                    category = word.get('category', 'Other')
+                    category_counts[category] = category_counts.get(category, 0) + 1
+                
+                # Display as metrics
+                if category_counts:
+                    cols = st.columns(min(len(category_counts), 4))
+                    for i, (category, count) in enumerate(category_counts.items()):
+                        with cols[i % 4]:
+                            st.metric(f"{category.title()}", count)
+                else:
+                    st.info("No categorized vocabulary yet.")
+            else:
+                st.info("No vocabulary learned yet. Start with Camera Mode!")
+                
+        except Exception as e:
+            print(f"Error displaying category progress: {e}")
+            st.info("Progress data is loading...")
+        
+        # Vocabulary tree visualization
+        st.subheader("🌳 Your Vocabulary Tree")
+        try:
+            tree_data = st.session_state.get('vocabulary_tree', {})
+            tree_level = tree_data.get('level', 1)
+            tree_size = tree_data.get('size', 1)
+            
+            progress_bar = min(tree_size / (tree_level * 10), 1.0)  # Max 10 words per level
+            st.progress(progress_bar)
+            st.write(f"Tree Level: {tree_level} | Words: {tree_size}")
+            
+        except Exception as e:
+            print(f"Error displaying vocabulary tree: {e}")
+            st.info("Vocabulary tree is growing...")
+            
+    except Exception as e:
+        print(f"❌ Error in display_my_progress: {e}")
+        st.error("❌ There was an error displaying progress. Please refresh the page.")
+
 # Function to get example sentence
 def get_example_sentence(word, target_language):
     """Generate an example sentence using the word via the example generator."""
@@ -2088,14 +2171,14 @@ def manage_session(action):
         return False
     
 def save_image_to_supabase(image, label, detection_bbox=None):
-    """Save image to private Supabase Storage with detailed debugging."""
+    """Save image to private Supabase Storage with proper authentication."""
     try:
         import requests
         import io
         import uuid
         from datetime import datetime
-        
-        print(f"🔄 Starting Supabase image upload for: {label}")
+        import numpy as np
+        from PIL import Image as PILImage
         
         user = get_authenticated_user()
         if not user:
@@ -2105,23 +2188,17 @@ def save_image_to_supabase(image, label, detection_bbox=None):
         user_id = user.get('id')
         auth_token = user.get('auth_token')
         
-        print(f"👤 User ID: {user_id}")
-        print(f"🔑 Auth token exists: {bool(auth_token)}")
-        
-        # Create a unique filename
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        unique_id = str(uuid.uuid4())[:8]
-        filename = f"{user_id}/{label}_{timestamp}_{unique_id}.jpg"
-        
-        print(f"📁 Target filename: {filename}")
+        if not auth_token:
+            print("❌ No auth token available for image upload")
+            return None
         
         # Process image (crop if bbox provided)
         processed_image = image
         if detection_bbox:
-            print(f"✂️ Cropping image with bbox: {detection_bbox}")
             left, top, right, bottom = [int(x) for x in detection_bbox]
             img_array = np.array(image)
             
+            # Add padding
             height, width = img_array.shape[:2]
             obj_width = right - left
             obj_height = bottom - top
@@ -2135,90 +2212,51 @@ def save_image_to_supabase(image, label, detection_bbox=None):
             crop_bottom = min(height, bottom + padding_y)
             
             cropped_img = img_array[crop_top:crop_bottom, crop_left:crop_right]
-            processed_image = Image.fromarray(cropped_img)
-            print(f"✅ Image cropped to size: {processed_image.size}")
+            processed_image = PILImage.fromarray(cropped_img)
+        
+        # Create a unique filename with user folder structure
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        unique_id = str(uuid.uuid4())[:8]
+        filename = f"{user_id}/{label}_{timestamp}_{unique_id}.jpg"
         
         # Convert image to bytes
         img_bytes = io.BytesIO()
-        if processed_image.width > 800 or processed_image.height > 800:
-            processed_image.thumbnail((800, 800), Image.Resampling.LANCZOS)
-            print(f"📏 Image resized to: {processed_image.size}")
-        
-        processed_image.save(img_bytes, format='JPEG', quality=85, optimize=True)
+        processed_image.save(img_bytes, format='JPEG', quality=85)
         img_bytes.seek(0)
-        file_size = len(img_bytes.getvalue())
-        print(f"💾 Image size: {file_size} bytes")
         
-        # Supabase configuration
+        # Upload to Supabase Storage
         supabase_url = "https://csszlzpsfwmsezursivk.supabase.co"
-        supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNzc3psenBzZndtc2V6dXJzaXZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA1Mjg1MjEsImV4cCI6MjA2NjEwNDUyMX0.gIi0Q_pifYpXeM1r8kWlgTO1LD8bc91lQ3suH8OWDKI"
         
-        # Test different header combinations
-        header_combinations = [
-            # Method 1: With auth token
-            {
-                'apikey': supabase_key,
-                'Authorization': f'Bearer {auth_token}' if auth_token else f'Bearer {supabase_key}',
-                'Content-Type': 'image/jpeg',
-            },
-            # Method 2: Service role only
-            {
-                'apikey': supabase_key,
-                'Authorization': f'Bearer {supabase_key}',
-                'Content-Type': 'image/jpeg',
-            },
-            # Method 3: With x-upsert header
-            {
-                'apikey': supabase_key,
-                'Authorization': f'Bearer {supabase_key}',
-                'Content-Type': 'image/jpeg',
-                'x-upsert': 'true',
-            }
-        ]
+        headers = {
+            'Authorization': f'Bearer {auth_token}',
+            'Content-Type': 'image/jpeg',
+        }
         
+        # Correct upload URL format
         upload_url = f"{supabase_url}/storage/v1/object/vocabulary-images/{filename}"
-        print(f"🌐 Upload URL: {upload_url}")
         
-        # Try each header combination
-        for i, headers in enumerate(header_combinations):
-            print(f"🔄 Trying upload method {i+1}/3")
-            print(f"📋 Headers: {list(headers.keys())}")
+        print(f"🔄 Uploading image to: {upload_url}")
+        
+        response = requests.post(
+            upload_url,
+            headers=headers,
+            data=img_bytes.getvalue()
+        )
+        
+        print(f"📋 Upload response status: {response.status_code}")
+        print(f"📋 Upload response: {response.text}")
+        
+        if response.status_code in [200, 201]:
+            # Return the storage path (not public URL)
+            storage_path = f"vocabulary-images/{filename}"
+            print(f"✅ Image uploaded to Supabase Storage: {storage_path}")
+            return storage_path
+        else:
+            print(f"❌ Failed to upload image: {response.status_code} - {response.text}")
+            return None
             
-            try:
-                response = requests.post(
-                    upload_url,
-                    headers=headers,
-                    data=img_bytes.getvalue(),
-                    timeout=30
-                )
-                
-                print(f"📤 Response status: {response.status_code}")
-                print(f"📤 Response headers: {dict(response.headers)}")
-                print(f"📤 Response text: {response.text[:200]}...")
-                
-                if response.status_code in [200, 201]:
-                    storage_path = f"vocabulary-images/{filename}"
-                    print(f"✅ Upload successful! Path: {storage_path}")
-                    return storage_path
-                elif response.status_code == 409:
-                    print("⚠️ File already exists, but that's okay")
-                    storage_path = f"vocabulary-images/{filename}"
-                    return storage_path
-                else:
-                    print(f"❌ Upload failed with status {response.status_code}")
-                    continue
-                    
-            except Exception as e:
-                print(f"❌ Upload attempt {i+1} failed: {e}")
-                continue
-        
-        print("❌ All upload methods failed")
-        return None
-        
     except Exception as e:
-        print(f"❌ Critical error in save_image_to_supabase: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"❌ Error uploading image to Supabase: {e}")
         return None
 
 def test_supabase_storage_permissions():
@@ -2385,10 +2423,12 @@ def get_signed_image_url(storage_path, expires_in=3600):
         
         user = get_authenticated_user()
         if not user:
+            print("❌ No authenticated user for signed URL")
             return None
         
         auth_token = user.get('auth_token')
         if not auth_token:
+            print("❌ No auth token for signed URL")
             return None
         
         supabase_url = "https://csszlzpsfwmsezursivk.supabase.co"
@@ -2398,12 +2438,17 @@ def get_signed_image_url(storage_path, expires_in=3600):
             'Content-Type': 'application/json',
         }
         
-        # Fix: Correct endpoint for creating signed URLs
-        signed_url_endpoint = f"{supabase_url}/storage/v1/object/sign/{storage_path}"
+        # Remove 'vocabulary-images/' prefix if present for the API call
+        clean_path = storage_path.replace('vocabulary-images/', '') if storage_path.startswith('vocabulary-images/') else storage_path
+        
+        # Create signed URL for private access
+        signed_url_endpoint = f"{supabase_url}/storage/v1/object/sign/vocabulary-images/{clean_path}"
         
         data = {
             'expiresIn': expires_in
         }
+        
+        print(f"🔄 Requesting signed URL from: {signed_url_endpoint}")
         
         response = requests.post(
             signed_url_endpoint,
@@ -2411,12 +2456,17 @@ def get_signed_image_url(storage_path, expires_in=3600):
             json=data
         )
         
+        print(f"📋 Signed URL response status: {response.status_code}")
+        print(f"📋 Signed URL response: {response.text}")
+        
         if response.status_code == 200:
             result = response.json()
-            # Fix: Get the correct signed URL
-            signed_url = result.get('signedURL')
-            if signed_url:
-                return f"{supabase_url}/storage/v1{signed_url}"
+            signed_token = result.get('signedURL')
+            if signed_token:
+                # Return full signed URL
+                full_signed_url = f"{supabase_url}/storage/v1{signed_token}"
+                print(f"✅ Generated signed URL: {full_signed_url}")
+                return full_signed_url
         
         print(f"❌ Failed to get signed URL: {response.status_code} - {response.text}")
         return None
@@ -2590,28 +2640,39 @@ def display_vocabulary_image(image_path, word_original):
         return False
     
     try:
+        print(f"🔍 Attempting to display image: {image_path}")
+        
+        # Check if it's a Supabase storage path
         if image_path.startswith('vocabulary-images/'):
-            # Supabase Storage path - get signed URL
+            print(f"🔍 Supabase storage path detected")
             signed_url = get_signed_image_url(image_path)
             if signed_url:
                 st.image(signed_url, caption=f"📷 {word_original}", width=300)
+                st.markdown("*🔒 Private image - only visible to you*")
                 return True
             else:
-                st.markdown("*Image temporarily unavailable*")
+                st.markdown("*Image temporarily unavailable - please try refreshing*")
                 return False
+        
+        # Legacy handling for old image paths
         elif image_path.startswith('http'):
-            # Legacy public URL (for old images)
+            print(f"🔍 Public URL detected")
             st.image(image_path, caption=f"📷 {word_original}", width=300)
             return True
+        
         elif os.path.exists(image_path):
-            # Local file (fallback)
+            print(f"🔍 Local file detected")
             image = Image.open(image_path)
             st.image(image, caption=f"📷 {word_original}", width=300)
             return True
+        
         else:
+            print(f"❌ Could not find image: {image_path}")
             return False
+            
     except Exception as e:
-        print(f"Error displaying image: {e}")
+        print(f"❌ Error displaying image: {e}")
+        st.markdown("*Error loading image*")
         return False
 
 def get_cropped_image_path(image_path):
@@ -3019,7 +3080,7 @@ if app_mode == "Camera Mode":
             # Use a placeholder for the spinner that we can clear later
             spinner_placeholder = st.empty()
             with spinner_placeholder.container():
-                show_loading_spinner("Detecting objects with Google AI... This may take a few seconds.")
+                show_loading_spinner("Detecting objects... This may take a few seconds.")
             
             # Add visual separator for mobile
             separator_placeholder = st.empty()
@@ -4139,135 +4200,7 @@ elif app_mode == "Statistics":
             st.markdown("*This is sample data. Start learning with Camera Mode to begin tracking your real progress!*")
             
 elif app_mode == "My Progress":
-    style_title("My Progress")
-    
-    try:
-        # Force fresh user data
-        user = get_authenticated_user()
-        
-        # Get user's actual vocabulary count from Supabase
-        actual_vocabulary = get_all_vocabulary_direct()
-        actual_word_count = len(actual_vocabulary)
-        
-        print(f"📊 Progress page - vocabulary count: {actual_word_count}")
-        
-        # FORCE UPDATE session state with actual data BEFORE creating gamification
-        st.session_state.words_learned = actual_word_count
-        st.session_state.total_words_learned = actual_word_count
-        
-        # Calculate proper level and points
-        st.session_state.level = max(1, actual_word_count // 10 + 1)
-        st.session_state.points = actual_word_count * 10
-        
-        # Initialize/update streak
-        if 'streak_days' not in st.session_state:
-            st.session_state.streak_days = 1 if actual_word_count > 0 else 0
-        
-        # Get or create gamification instance with forced refresh
-        user_gamification = get_user_scoped_gamification()
-        
-        # Use the full dashboard
-        if actual_word_count == 0:
-            st.info("🌱 Start learning words in Camera Mode to see your progress!")
-            
-            # Show minimal progress for new users
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Level", "1")
-            with col2:
-                st.metric("Words Learned", "0")
-            with col3:
-                st.metric("Points", "0")
-        else:
-            # Show main metrics first (guaranteed to show real data)
-            st.markdown("### 🏆 Your Learning Progress")
-            
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Level", st.session_state.level)
-            with col2:
-                st.metric("Words Learned", actual_word_count)
-            with col3:
-                st.metric("Points", st.session_state.points)
-            with col4:
-                st.metric("Streak", f"{st.session_state.streak_days} days")
-            
-            # Progress to next level
-            current_level_min = (st.session_state.level - 1) * 10
-            next_level_min = st.session_state.level * 10
-            progress = min((actual_word_count - current_level_min) / 10, 1.0)
-            
-            st.markdown("### 📈 Progress to Next Level")
-            st.progress(progress)
-            st.markdown(f"**{actual_word_count}/{next_level_min} words** to reach Level {st.session_state.level + 1}")
-            
-            # Show achievements
-            st.markdown("### 🏅 Your Achievements")
-            
-            if st.session_state.get('achievements'):
-                # Display achievements in a nice grid
-                achievement_cols = st.columns(min(3, len(st.session_state.achievements)))
-                
-                for i, achievement in enumerate(st.session_state.achievements[-6:]):  # Show last 6
-                    col_idx = i % len(achievement_cols)
-                    with achievement_cols[col_idx]:
-                        st.markdown(f"""
-                        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                                    color: white; padding: 15px; border-radius: 10px; margin: 5px; text-align: center;">
-                            <div style="font-size: 2em;">{achievement['icon']}</div>
-                            <div style="font-weight: bold; margin: 5px 0;">{achievement['name']}</div>
-                            <div style="font-size: 0.9em; opacity: 0.9;">{achievement['description']}</div>
-                        </div>
-                        """, unsafe_allow_html=True)
-                
-                st.markdown(f"**Total achievements unlocked: {len(st.session_state.achievements)}**")
-            else:
-                st.info("Keep learning to unlock achievements!")
-            
-            # Language breakdown
-            if actual_vocabulary:
-                st.markdown("### 🌍 Learning Progress by Language")
-                
-                language_stats = {}
-                for word in actual_vocabulary:
-                    lang = word.get('language_translated', 'unknown')
-                    lang_name = next((k for k, v in languages.items() if v == lang), lang)
-                    language_stats[lang_name] = language_stats.get(lang_name, 0) + 1
-                
-                # Create a nice progress display for each language
-                for lang, count in language_stats.items():
-                    col1, col2 = st.columns([3, 1])
-                    with col1:
-                        st.markdown(f"**{lang}**")
-                        # Create a progress bar based on words learned
-                        progress = min(count / 20, 1.0)  # 20 words = 100%
-                        st.progress(progress)
-                    with col2:
-                        st.markdown(f"**{count} words**")
-            
-            # Try to show the full gamification dashboard as additional content
-            try:
-                st.markdown("---")
-                st.markdown("### 📊 Detailed Progress")
-                user_gamification.render_dashboard()
-            except Exception as e:
-                print(f"Dashboard error (non-critical): {e}")
-                # Don't show error to user since we already have the main content above
-                pass
-                
-    except Exception as e:
-        error_message("There was an error displaying progress.")
-        print(f"Progress error: {e}")
-        
-        # Fallback display
-        st.markdown("### 🏆 Your Learning Progress")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Level", "1")
-        with col2:
-            st.metric("Words Learned", "0")
-        with col3:
-            st.metric("Points", "0")
+    display_my_progress()
 
 elif app_mode == "Pronunciation Practice":
     style_title("Pronunciation Practice")
