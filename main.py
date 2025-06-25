@@ -12,7 +12,6 @@ from PIL import Image
 from io import BytesIO
 from gamification import GamificationSystem
 import random
-from collections import defaultdict
 import io
 from vocam_ui import apply_custom_css
 from streamlit.components.v1 import components
@@ -20,11 +19,7 @@ import hashlib
 from example_sentences import ExampleSentenceGenerator
 import requests
 from deep_translator import GoogleTranslator
-from ultralytics import YOLO
-import json
-from urllib.parse import parse_qs
 from database import LanguageLearningDB
-import jwt
 
 class SupabaseDB:
     def __init__(self):
@@ -805,92 +800,6 @@ def get_user_database():
         print("✅ Supabase database connection initialized")
     return st.session_state.supabase_db
 
-@st.cache_resource
-def load_yolov8_nano():
-    """Load ultra-lightweight YOLOv8 Nano - only 4MB!"""
-    try:
-        import os
-        import sys
-        import warnings
-        from io import StringIO
-        from contextlib import redirect_stdout, redirect_stderr
-        
-        # Set environment variables to suppress ultralytics output
-        os.environ['ULTRALYTICS_LOGGING_LEVEL'] = 'ERROR'
-        os.environ['YOLO_VERBOSE'] = 'False'
-        
-        # Suppress all warnings
-        warnings.filterwarnings("ignore")
-        
-        # Redirect all output to nowhere
-        devnull = StringIO()
-        
-        with redirect_stdout(devnull), redirect_stderr(devnull):
-            # Also suppress print statements temporarily
-            original_stdout = sys.stdout
-            original_stderr = sys.stderr
-            sys.stdout = devnull
-            sys.stderr = devnull
-            
-            try:
-                model = YOLO('yolov8n.pt')
-                model.to('cpu')
-            finally:
-                # Restore stdout and stderr
-                sys.stdout = original_stdout
-                sys.stderr = original_stderr
-        
-        return model
-        
-    except Exception as e:
-        return None
-
-def detect_objects_yolov8(image, confidence_threshold=0.5):
-    """YOLOv8-based object detection with better error handling"""
-    try:
-        # Load model
-        model = load_yolov8_nano()
-        if model is None:
-            return [], np.array(image)
-        
-        # Convert PIL to numpy if needed
-        if hasattr(image, 'convert'):
-            image = image.convert('RGB')
-            image_np = np.array(image)
-        else:
-            image_np = np.array(image)
-        
-        # Run detection
-        results = model.predict(image_np, conf=confidence_threshold, verbose=False)
-        
-        detections = []
-        for result in results:
-            boxes = result.boxes
-            if boxes is not None:
-                for box in boxes:
-                    # Get coordinates and info
-                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                    class_id = int(box.cls[0].cpu().numpy())
-                    confidence = float(box.conf[0].cpu().numpy())
-                    class_name = model.names[class_id]
-                    
-                    detections.append({
-                        'label': class_name.lower(),
-                        'confidence': confidence,
-                        'bbox': [float(x1), float(y1), float(x2), float(y2)],
-                        'class_id': class_id
-                    })
-        
-        # Draw detections on image
-        result_image = draw_detections(image_np, detections)
-        
-        return detections, result_image
-        
-    except Exception as e:
-        print(f"YOLOv8 detection error: {e}")
-        return [], np.array(image)
-    
-
 # First, display Python version for
 st.set_page_config(
     layout="wide",
@@ -1002,31 +911,6 @@ except ImportError as e:
     
     # Replace cv2 with our dummy implementation
     cv2 = DummyCV2()
-
-# Import other dependencies with careful error handling
-try:
-    import torch
-except ImportError as e:
-    # Dummy torch for fallback
-    class DummyTorch:
-        def __init__(self):
-            self.hub = type('obj', (object,), {
-                'load': lambda *args, **kwargs: DummyModel()
-            })
-            
-    class DummyModel:
-        def __call__(self, *args, **kwargs):
-            return type('obj', (object,), {
-                'xyxy': [[]], 
-                'render': lambda: [[np.zeros((300, 300, 3), dtype=np.uint8)]],
-                'names': {0: 'unknown'}
-            })
-            
-        def eval(self):
-            return self
-            
-    torch = DummyTorch()
-
 
 # Try importing gTTS
 try:
@@ -1337,23 +1221,8 @@ def get_image_hash(image):
 
 # Function to detect objects in image
 def detect_objects(image, confidence_threshold=0.5, iou_threshold=0.45):
-    """Main detection function - now using Google Cloud Vision API."""
-    try:
-        # Try Google Cloud Vision first
-        detections, result_image = detect_objects_google_vision(image, confidence_threshold)
-        
-        if detections:
-            print(f"✅ Google Vision found {len(detections)} objects")
-            return detections, result_image
-        else:
-            print("⚠️ Google Vision found no objects, falling back to YOLOv8")
-            # Fallback to YOLOv8 if Google Vision finds nothing
-            return detect_objects_yolov8(image, confidence_threshold)
-            
-    except Exception as e:
-        print(f"❌ Detection error: {e}")
-        # Fallback to YOLOv8 on any error
-        return detect_objects_yolov8(image, confidence_threshold)
+    """Main detection function - Google Cloud Vision only."""
+    return detect_objects_google_vision(image, confidence_threshold)
 
 
 # Function to enhance image quality
@@ -2481,7 +2350,7 @@ def save_image_to_supabase(image, label, detection_bbox=None):
         return None
 
 def test_supabase_storage_permissions():
-    """Test Supabase Storage permissions and setup."""
+    """Test Supabase Storage permissions and setup - FIXED VERSION."""
     try:
         import requests
         
@@ -2497,11 +2366,12 @@ def test_supabase_storage_permissions():
             'Authorization': f'Bearer {supabase_key}',
         }
         
+        results = []
+        
         # Test 1: List buckets
         buckets_url = f"{supabase_url}/storage/v1/bucket"
         response = requests.get(buckets_url, headers=headers, timeout=10)
         
-        results = []
         results.append(f"Buckets test: {response.status_code}")
         if response.status_code == 200:
             buckets = response.json()
@@ -2513,19 +2383,23 @@ def test_supabase_storage_permissions():
                 results.append("✅ vocabulary-images bucket exists")
             else:
                 results.append("❌ vocabulary-images bucket NOT found")
+                results.append("🔧 Create bucket in Supabase Dashboard: Storage → Create bucket → name: 'vocabulary-images'")
         
-        # Test 2: Try to list files in vocabulary-images
+        # Test 2: Try to list files in vocabulary-images (FIXED)
         list_url = f"{supabase_url}/storage/v1/object/list/vocabulary-images"
-        response = requests.post(list_url, headers=headers, json={}, timeout=10)
+        list_payload = {'prefix': ''}  # FIX: Add empty prefix to list all files
+        response = requests.post(list_url, headers=headers, json=list_payload, timeout=10)
         
         results.append(f"List files test: {response.status_code}")
         if response.status_code == 200:
             files = response.json()
             results.append(f"Files in bucket: {len(files)}")
+            if files:
+                results.append(f"Sample files: {[f.get('name', 'unknown')[:50] for f in files[:3]]}")
         else:
             results.append(f"List files error: {response.text}")
         
-        # Test 3: Check bucket policies
+        # Test 3: Check bucket policies (FIXED)
         policy_url = f"{supabase_url}/storage/v1/bucket/vocabulary-images"
         response = requests.get(policy_url, headers=headers, timeout=10)
         
@@ -2533,7 +2407,11 @@ def test_supabase_storage_permissions():
         if response.status_code == 200:
             bucket_info = response.json()
             results.append(f"Bucket public: {bucket_info.get('public', 'unknown')}")
-            results.append(f"Bucket allowed mime types: {bucket_info.get('allowed_mime_types', 'unknown')}")
+            results.append(f"Bucket allowed mime types: {bucket_info.get('allowed_mime_types', 'any')}")
+        elif response.status_code == 404:
+            results.append("❌ Bucket not found - create it in Supabase Dashboard")
+        else:
+            results.append(f"Bucket info error: {response.text}")
         
         return "\n".join(results)
         
@@ -2729,18 +2607,21 @@ def debug_supabase_connection():
             latest_data = latest_response.json()
             latest_words = [f"{item['word_original']} → {item['word_translated']}" for item in latest_data]
         
-        # Test 4: Test image storage
+        # Test 4: Test image storage (FIXED)
         storage_url = f'{db.supabase_url}/storage/v1/object/list/vocabulary-images'
+        storage_payload = {'prefix': f'{user_id}/'}  # FIX: Add required prefix
         storage_response = requests.post(
             storage_url,
             headers=headers,
-            json={'prefix': user_id},
+            json=storage_payload,
             timeout=10
         )
         
         image_count = 0
         if storage_response.status_code == 200:
             image_count = len(storage_response.json())
+        else:
+            print(f"Storage list error: {storage_response.status_code} - {storage_response.text}")
         
         return {
             'connection': connection_status,
@@ -3321,17 +3202,14 @@ if app_mode == "Camera Mode":
                 if enhanced_image is None:
                     raise Exception("Image enhancement failed")
                 
-                # Choose detection method
+                # Use Google Cloud Vision
                 detections, result_image = detect_objects_google_vision(
                     enhanced_image, confidence_threshold
                 )
                 
             except Exception as e:
-                if "memory" in str(e).lower() or "resource" in str(e).lower():
-                    error_message("Memory limit reached. Please try a smaller image or refresh the page.")
-                else:
-                    error_message(f"Detection error: {str(e)}")
-                # Fallback behavior
+                error_message(f"Detection error: {str(e)}")
+                # Return empty results on error
                 detections, result_image = [], np.array(image)
             
             # Clear the spinner and separator completely

@@ -30,5 +30,3 @@ services:
         value: "false"
       - key: STREAMLIT_SERVER_FILE_WATCHER_TYPE
         value: "none"
-      - key: TORCH_HOME
-        value: "/tmp/torch"
