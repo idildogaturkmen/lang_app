@@ -1838,44 +1838,11 @@ def get_gamification():
     return GamificationSystem()
 
 def get_user_scoped_gamification():
-    """Get gamification instance with Supabase data - FIXED VERSION."""
-    user = get_authenticated_user()
-    if not user:
-        return get_gamification()
-    
-    # Get actual vocabulary count from Supabase
-    actual_vocabulary = get_all_vocabulary_direct()
-    actual_word_count = len(actual_vocabulary)
-    
-    print(f"🔍 Actual vocabulary count from Supabase: {actual_word_count}")
-    
-    # FORCE UPDATE session state with actual data
-    st.session_state.words_learned = actual_word_count
-    st.session_state.total_words_learned = actual_word_count
-    
-    # Calculate proper level and points
-    st.session_state.level = max(1, actual_word_count // 10 + 1)
-    st.session_state.points = actual_word_count * 10
-    
-    # Initialize/update streak (you can calculate this from session data)
-    if 'streak_days' not in st.session_state:
-        st.session_state.streak_days = 1 if actual_word_count > 0 else 0
-    
-    # Create fresh gamification instance
-    fresh_gamification = get_gamification()
-    fresh_gamification.initialize_state()
-    
-    # FORCE UPDATE the gamification system with real vocabulary data
-    fresh_gamification.actual_vocabulary = actual_vocabulary
-    fresh_gamification.actual_word_count = actual_word_count
-    
-    # Update category progress with real data
-    fresh_gamification.update_category_progress_with_real_data(actual_vocabulary)
-    
-    # Check and update achievements based on real data
-    fresh_gamification.check_real_achievements(actual_vocabulary, actual_word_count)
-    
-    return fresh_gamification
+    """Get gamification instance with Supabase data."""
+    if 'gamification' not in st.session_state:
+        db = get_user_database()  # This gets your SupabaseDB instance
+        st.session_state.gamification = GamificationSystem(db_instance=db)
+    return st.session_state.gamification
 
 # Initialize user-scoped gamification
 gamification = get_user_scoped_gamification()
