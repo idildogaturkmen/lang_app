@@ -2615,15 +2615,74 @@ def try_alternative_upload(supabase_url, supabase_key, filename, image_data):
 
 # Update the save_image function call in your vocabulary saving:
 def save_image(image, label, detection_bbox=None):
-    """Save image with cropping support - Supabase only, no local fallback."""
-    # Try Supabase Storage first
-    supabase_path = save_image_to_supabase(image, label, detection_bbox)
-    if supabase_path:
-        print(f"✅ Image saved to Supabase: {supabase_path}")
-        return supabase_path
-    else:
-        print(f"❌ Failed to save image to Supabase")
-        error_message("Failed to save image. Please check your internet connection and try again.")
+    """Save image with cropping support - tries Supabase first, allows graceful fallback."""
+    try:
+        # Fix RGBA conversion first
+        processed_image = image
+        if image.mode in ('RGBA', 'LA', 'P'):
+            rgb_image = Image.new('RGB', image.size, (255, 255, 255))
+            if image.mode == 'P':
+                image = image.convert('RGBA')
+            rgb_image.paste(image, mask=image.split()[-1] if image.mode in ('RGBA', 'LA') else None)
+            processed_image = rgb_image
+        
+        # Try Supabase Storage first
+        supabase_path = save_image_to_supabase(processed_image, label, detection_bbox)
+        if supabase_path:
+            print(f"✅ Image saved to Supabase: {supabase_path}")
+            return supabase_path
+        
+        # Fallback to local storage
+        print(f"⚠️ Supabase save failed, trying local storage for {label}")
+        
+        import numpy as np
+        import cv2
+        import os
+        import time
+        
+        img_array = np.array(processed_image)
+        os.makedirs("object_images", exist_ok=True)
+        
+        timestamp = int(time.time())
+        
+        # Save original image
+        original_filename = f"object_images/{label}_{timestamp}_original.jpg"
+        img_cv_original = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+        cv2.imwrite(original_filename, img_cv_original)
+        
+        # Save cropped image if bbox provided
+        if detection_bbox:
+            left, top, right, bottom = [int(x) for x in detection_bbox]
+            height, width = img_array.shape[:2]
+            
+            # Add padding
+            obj_width = right - left
+            obj_height = bottom - top
+            padding_x = max(10, int(obj_width * 0.1))
+            padding_y = max(10, int(obj_height * 0.1))
+            
+            crop_left = max(0, left - padding_x)
+            crop_top = max(0, top - padding_y)
+            crop_right = min(width, right + padding_x)
+            crop_bottom = min(height, bottom + padding_y)
+            
+            # Crop the image
+            cropped_img = img_array[crop_top:crop_bottom, crop_left:crop_right]
+            
+            # Save cropped image
+            cropped_filename = f"object_images/{label}_{timestamp}_cropped.jpg"
+            img_cv_cropped = cv2.cvtColor(cropped_img, cv2.COLOR_RGB2BGR)
+            cv2.imwrite(cropped_filename, img_cv_cropped)
+            
+            print(f"✅ Local images saved: {original_filename} and {cropped_filename}")
+            return cropped_filename  # Return cropped version as primary
+        else:
+            print(f"✅ Local image saved: {original_filename}")
+            return original_filename
+            
+    except Exception as e:
+        print(f"❌ All image save methods failed for {label}: {e}")
+        # Return None but don't raise exception - allow vocabulary saving to continue
         return None
 
 def get_signed_image_url(storage_path, expires_in=3600):
@@ -3051,6 +3110,124 @@ def check_answer(selected_index):
     
     return is_correct
 
+def sync_user_data_to_supabase():
+    """Sync all user data to Supabase immediately."""
+    try:
+        user = get_authenticated_user()
+        if not user:
+            return False
+        
+        user_id = user.get('id')
+        if not user_id:
+            return False
+        
+        # Get actual vocabulary count
+        vocabulary = get_all_vocabulary_direct()
+        actual_word_count = len(vocabulary) if vocabulary else 0
+        
+        # Calculate consistent values
+        calculated_level = max(1, actual_word_count // 10 + 1)
+        calculated_points = actual_word_count * 10
+        
+        # Update session state
+        st.session_state.words_learned = actual_word_count
+        st.session_state.total_words_learned = actual_word_count
+        st.session_state.level = calculated_level
+        st.session_state.points = calculated_points
+        
+        # Prepare data for Supabase
+        user_data = {
+            'user_id': user_id,
+            'words_learned': actual_word_count,
+            'total_words_learned': actual_word_count,
+            'level': calculated_level,
+            'points': calculated_points,
+            'streak_days': st.session_state.get('streak_days', 0),
+            'last_active_date': str(date.today()),
+            'streak_savers': st.session_state.get('streak_savers', 0),
+            'achievements': json.dumps(st.session_state.get('achievements', {})),
+            'badges': json.dumps(st.session_state.get('badges', {})),
+            'updated_at': datetime.now().isoformat()
+        }
+        
+        # Save to Supabase
+        db = get_user_database()
+        response = db.supabase.table('user_game_state').upsert(
+            user_data,
+            on_conflict='user_id'
+        ).execute()
+        
+        if response.data:
+            print(f"✅ Data synced: {actual_word_count} words, Level {calculated_level}, {calculated_points} points")
+            return True
+        else:
+            print(f"❌ Sync failed: {response}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Sync error: {e}")
+        return False
+
+def load_user_data_from_supabase():
+    """Load user data from Supabase on startup."""
+    try:
+        user = get_authenticated_user()
+        if not user:
+            return False
+        
+        user_id = user.get('id')
+        if not user_id:
+            return False
+        
+        # Get actual vocabulary first
+        vocabulary = get_all_vocabulary_direct()
+        actual_word_count = len(vocabulary) if vocabulary else 0
+        
+        # Load saved data from Supabase
+        db = get_user_database()
+        response = db.supabase.table('user_game_state').select('*').eq('user_id', user_id).execute()
+        
+        if response.data and len(response.data) > 0:
+            user_data = response.data[0]
+            
+            # Use actual vocabulary count but load other data from Supabase
+            st.session_state.words_learned = actual_word_count
+            st.session_state.total_words_learned = actual_word_count
+            st.session_state.level = max(user_data.get('level', 1), max(1, actual_word_count // 10 + 1))
+            st.session_state.points = max(user_data.get('points', 0), actual_word_count * 10)
+            st.session_state.streak_days = user_data.get('streak_days', 0)
+            st.session_state.last_active_date = user_data.get('last_active_date')
+            st.session_state.streak_savers = user_data.get('streak_savers', 0)
+            
+            # Load JSON data safely
+            try:
+                st.session_state.achievements = json.loads(user_data.get('achievements', '{}'))
+                st.session_state.badges = json.loads(user_data.get('badges', '{}'))
+            except:
+                st.session_state.achievements = {}
+                st.session_state.badges = {}
+            
+            print(f"✅ Data loaded: {actual_word_count} words, Level {st.session_state.level}")
+            return True
+        else:
+            # Initialize with actual vocabulary count
+            st.session_state.words_learned = actual_word_count
+            st.session_state.total_words_learned = actual_word_count
+            st.session_state.level = max(1, actual_word_count // 10 + 1)
+            st.session_state.points = actual_word_count * 10
+            st.session_state.streak_days = 0
+            st.session_state.achievements = {}
+            st.session_state.badges = {}
+            
+            # Save initial data
+            sync_user_data_to_supabase()
+            print(f"🆕 Initialized with {actual_word_count} words")
+            return True
+            
+    except Exception as e:
+        print(f"❌ Load error: {e}")
+        return False
+
 # Global counter for truly unique widget IDs
 if 'widget_counter' not in st.session_state:
     st.session_state.widget_counter = 0
@@ -3430,7 +3607,7 @@ if app_mode == "Camera Mode":
                 # Display save button if objects haven't been saved yet
                 if not st.session_state.words_just_saved:
                     # Create a button with a fixed, consistent key
-                    if st.button("💾 Save Selected Objects to Vocabulary", key=save_button_id):
+                    if st.button("Save Selected Objects to Vocabulary", key=save_button_id):
                         # Auto-start session if needed
                         if st.session_state.session_id is None:
                             if manage_session("start"):
@@ -3451,65 +3628,84 @@ if app_mode == "Camera Mode":
                             # Save the selected objects
                             saved_count = 0
                             saved_items = []
-                            duplicate_count = 0
-                            duplicate_items = []
+                            failed_items = []
                             
                             for i in selected_objects:
+                                vocab_id = None  # Initialize vocab_id for each iteration
                                 try:
                                     detection = detections[i]
                                     label = detection['label']
-                                    translated_label = translate_text(label, st.session_state.target_language)
                                     
-                                    # Save the image with bounding box info for cropping
-                                    print(f"🔄 Saving image for label: {label}")
-                                    image_path = save_image(image, label, detection['bbox'])
-                                    print(f"📁 Image saved to: {image_path}")
-
-                                    if image_path and image_path.startswith('vocabulary-images/'):
-                                        print(f"✅ Image successfully saved to Supabase: {image_path}")
-                                    elif image_path:
-                                        print(f"⚠️ Image saved locally (Supabase failed): {image_path}")
-                                    else:
-                                        print(f"❌ Image save failed completely")
+                                    print(f"🔄 Processing {label}...")
+                                    
+                                    # Translate the label
+                                    translated_label = translate_text(label, st.session_state.target_language)
+                                    if not translated_label or translated_label == label:
+                                        print(f"❌ Translation failed for {label}")
+                                        failed_items.append(label)
+                                        continue
+                                    
+                                    # Try to save image (allow this to fail without stopping vocabulary save)
+                                    image_path = None
+                                    try:
+                                        image_path = save_image(image, label, detection['bbox'])
+                                        if image_path:
+                                            print(f"✅ Image saved: {image_path}")
+                                        else:
+                                            print(f"⚠️ Image save failed for {label}, continuing without image")
+                                    except Exception as img_error:
+                                        print(f"⚠️ Image save error for {label}: {img_error}, continuing without image")
                                     
                                     # Get object category
                                     category = get_object_category(label)
                                     
-                                    # Add to database using direct method
+                                    # Save vocabulary regardless of image save status
                                     vocab_id = add_vocabulary_direct(
                                         word_original=label,
                                         word_translated=translated_label,
                                         language_translated=st.session_state.target_language,
                                         category=category,
-                                        image_path=image_path
+                                        image_path=image_path  # This can be None
                                     )
                                     
-                                    if vocab_id == 'duplicate':
-                                        duplicate_count += 1
-                                        duplicate_items.append(f"{label} → {translated_label}")
-                                    elif vocab_id:
+                                    if vocab_id:
                                         saved_count += 1
                                         saved_items.append(f"{label} → {translated_label}")
                                         # Update session stats
                                         st.session_state.words_studied += 1
                                         st.session_state.words_learned += 1
+                                        print(f"✅ Vocabulary saved: {label}")
+                                        
+                                        # Sync data after each successful save
+                                        try:
+                                            sync_user_data_to_supabase()
+                                        except Exception as sync_error:
+                                            print(f"⚠️ Data sync failed: {sync_error}")
                                     else:
-                                        error_message(f"Failed to save {label} to vocabulary.")
+                                        failed_items.append(label)
+                                        print(f"❌ Vocabulary save failed: {label}")
+                                        
                                 except Exception as e:
-                                    error_message(f"Error saving {label}: {str(e)}")
+                                    print(f"❌ Error saving {label}: {e}")
+                                    failed_items.append(label)
                             
-                            # Update success message to handle duplicates
-                            if saved_count > 0 or duplicate_count > 0:
-                                # Store the saved state and items in session state
+                            # Display results
+                            if saved_count > 0:
+                                success_message(f"Successfully saved {saved_count} words to vocabulary!")
+                                st.session_state.saved_items = saved_items
                                 st.session_state.words_just_saved = True
                                 st.session_state.saved_count = saved_count
-                                st.session_state.saved_items = saved_items
-                                st.session_state.duplicate_count = duplicate_count
-                                st.session_state.duplicate_items = duplicate_items
-                                st.rerun()  # Rerun once to update the UI
-                            else:
+                            
+                            if failed_items:
+                                error_message(f"Failed to save: {', '.join(failed_items)}")
+                            
+                            if saved_count == 0:
                                 error_message("Failed to save any words. Please check database connection.")
-
+                            
+                            # Clear the checkboxes and rerun
+                            st.session_state.detection_checkboxes = {}
+                            time.sleep(1.5)
+                            st.rerun()
                 # Show success message and navigation AFTER saving (persists across reruns)
                 if st.session_state.words_just_saved:
                     # Create a container for the success message
@@ -4410,6 +4606,11 @@ elif app_mode == "Statistics":
             st.markdown("*This is sample data. Start learning with Camera Mode to begin tracking your real progress!*")
             
 elif app_mode == "My Progress":
+    try:
+        sync_user_data_to_supabase()
+    except:
+        pass
+    
     display_my_progress()
 
 elif app_mode == "Pronunciation Practice":
@@ -4760,8 +4961,24 @@ elif app_mode == "Pronunciation Practice":
         st.markdown("Install these packages for real-time AI pronunciation analysis:")
         st.code("pip install streamlit-webrtc speech-recognition librosa python-Levenshtein av")
 
-st.sidebar.markdown("---")
-st.sidebar.markdown("### Session Info")
+try:
+    vocabulary = get_all_vocabulary_direct()
+    actual_word_count = len(vocabulary) if vocabulary else 0
+    
+    # Update session state to match reality
+    st.session_state.words_learned = actual_word_count
+    st.session_state.total_words_learned = actual_word_count
+    
+    if actual_word_count > 0:
+        st.sidebar.success(f"Session active")
+        st.sidebar.info(f"Words studied: {actual_word_count}")
+        st.sidebar.info(f"Words learned: {actual_word_count}")
+    else:
+        st.sidebar.warning("No vocabulary yet")
+        st.sidebar.markdown("*Start learning in Camera Mode*")
+except Exception as e:
+    st.sidebar.error("Error loading session data")
+    print(f"Session data error: {e}")
 
 # Get actual vocabulary count for display
 vocabulary = get_all_vocabulary_direct()
