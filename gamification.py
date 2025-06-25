@@ -23,6 +23,7 @@ from collections import defaultdict
 from PIL import Image, ImageDraw, ImageFont
 import io
 import sqlite3
+from supabase_gamification import SupabaseGamificationManager
 
 class GamificationSystem:
     def __init__(self, db_path="language_learning.db", translate_func=None):
@@ -1431,103 +1432,120 @@ class GamificationSystem:
     #=========================================================================
     
     def save_game_state(self):
-        """Save game state to the database."""
+        """Save game state to Supabase."""
         try:
-            # Create a JSON representation of the gamification state
+            # Use Supabase for streak data
+            supabase_gam = SupabaseGamificationManager()
+            supabase_gam.save_streak_data()
+            
+            # Save other gamification data to Supabase user_game_state table
+            user = st.session_state.get('user')
+            if not user:
+                print("❌ No user found in session state")
+                return
+            
+            user_id = user.get('id')
+            if not user_id:
+                print("❌ No user ID found")
+                return
+            
+            # Ensure user_id is a proper UUID string
+            if isinstance(user_id, str):
+                try:
+                    import uuid
+                    uuid.UUID(user_id)  # Validate UUID format
+                except ValueError:
+                    print(f"❌ Invalid UUID format: {user_id}")
+                    return
+            else:
+                user_id = str(user_id)
+            
             game_state = {
-                "achievements": st.session_state.achievements,
-                "badges": st.session_state.badges,
-                "streak_days": st.session_state.streak_days,
-                "last_active_date": str(st.session_state.last_active_date) if st.session_state.last_active_date else None,
-                "streak_savers": st.session_state.streak_savers,
-                "points": st.session_state.points,
-                "level": st.session_state.level,
-                "daily_challenges": st.session_state.daily_challenges,
-                "daily_challenges_completed": list(st.session_state.daily_challenges_completed),
-                "word_of_the_day": st.session_state.word_of_the_day,
-                "word_of_the_day_date": st.session_state.word_of_the_day_date,
-                "category_progress": st.session_state.category_progress,
-                "vocabulary_tree": st.session_state.vocabulary_tree
+                'user_id': user_id,
+                'achievements': json.dumps(st.session_state.get('achievements', {})),
+                'badges': json.dumps(st.session_state.get('badges', {})),
+                'points': st.session_state.get('points', 0),
+                'level': st.session_state.get('level', 1),
+                'daily_challenges': json.dumps(st.session_state.get('daily_challenges', [])),
+                'word_of_the_day': json.dumps(st.session_state.get('word_of_the_day')),
+                'category_progress': json.dumps(st.session_state.get('category_progress', {})),
+                'vocabulary_tree': json.dumps(st.session_state.get('vocabulary_tree', {})),
+                'updated_at': datetime.now().isoformat()
             }
             
-            # Convert to JSON string
-            game_state_json = json.dumps(game_state)
+            from main import SupabaseDB
+            db = SupabaseDB()
             
-            # Save to database
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
+            response = db.supabase.table('user_game_state').upsert(
+                game_state,
+                on_conflict='user_id'
+            ).execute()
             
-            # Check if game_state table exists, create if not
-            cursor.execute('''
-            CREATE TABLE IF NOT EXISTS game_state (
-                id INTEGER PRIMARY KEY,
-                state_json TEXT,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-            ''')
-            
-            # Update or insert game state
-            cursor.execute("SELECT id FROM game_state WHERE id = 1")
-            if cursor.fetchone():
-                cursor.execute("UPDATE game_state SET state_json = ?, updated_at = ? WHERE id = 1", 
-                            (game_state_json, datetime.now()))
+            if response.data:
+                print(f"✅ Game state saved to Supabase")
             else:
-                cursor.execute("INSERT INTO game_state (id, state_json, updated_at) VALUES (1, ?, ?)", 
-                            (game_state_json, datetime.now()))
-            
-            conn.commit()
-            conn.close()
+                print(f"❌ Failed to save game state: {response}")
             
         except Exception as e:
-            # If database operations fail, just log and continue
-            print(f"Error saving game state: {e}")
-    
+            print(f"❌ Error saving game state: {e}")
+
     def load_game_state(self):
-        """Load game state from the database."""
+        """Load game state from Supabase."""
         try:
-            # Connect to the database
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
+            # Load streak data
+            from supabase_gamification import SupabaseGamificationManager
+            supabase_gam = SupabaseGamificationManager()
+            supabase_gam.load_streak_data()
             
-            # Check if table exists
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='game_state'")
-            if not cursor.fetchone():
-                conn.close()
+            # Load other game state
+            user = st.session_state.get('user')
+            if not user:
+                print("❌ No user found in session state")
                 return False
             
-            # Get the state
-            cursor.execute("SELECT state_json FROM game_state WHERE id = 1")
-            result = cursor.fetchone()
-            conn.close()
-            
-            if not result:
+            user_id = user.get('id')
+            if not user_id:
+                print("❌ No user ID found")
                 return False
             
-            # Parse the state
-            game_state = json.loads(result[0])
+            # Ensure user_id is a proper UUID string
+            if isinstance(user_id, str):
+                try:
+                    import uuid
+                    uuid.UUID(user_id)  # Validate UUID format
+                except ValueError:
+                    print(f"❌ Invalid UUID format: {user_id}")
+                    return False
+            else:
+                user_id = str(user_id)
             
-            # Update session state
-            st.session_state.achievements = game_state.get("achievements", {})
-            st.session_state.badges = game_state.get("badges", {})
-            st.session_state.streak_days = game_state.get("streak_days", 0)
-            st.session_state.last_active_date = game_state.get("last_active_date")
-            st.session_state.streak_savers = game_state.get("streak_savers", 0)
-            st.session_state.points = game_state.get("points", 0)
-            st.session_state.level = game_state.get("level", 1)
-            st.session_state.daily_challenges = game_state.get("daily_challenges", [])
-            st.session_state.daily_challenges_completed = set(game_state.get("daily_challenges_completed", []))
-            st.session_state.word_of_the_day = game_state.get("word_of_the_day")
-            st.session_state.word_of_the_day_date = game_state.get("word_of_the_day_date")
-            st.session_state.category_progress = game_state.get("category_progress", {})
-            st.session_state.vocabulary_tree = game_state.get("vocabulary_tree", {
-                'size': 1, 'leaves': 0, 'fruit': 0, 'level': 1
-            })
+            from main import SupabaseDB
+            db = SupabaseDB()
             
-            return True
+            response = db.supabase.table('user_game_state').select('*').eq('user_id', user_id).execute()
+            
+            if response.data and len(response.data) > 0:
+                game_data = response.data[0]
+                
+                st.session_state.achievements = json.loads(game_data.get('achievements', '{}'))
+                st.session_state.badges = json.loads(game_data.get('badges', '{}'))
+                st.session_state.points = game_data.get('points', 0)
+                st.session_state.level = game_data.get('level', 1)
+                st.session_state.daily_challenges = json.loads(game_data.get('daily_challenges', '[]'))
+                st.session_state.word_of_the_day = json.loads(game_data.get('word_of_the_day', 'null'))
+                st.session_state.category_progress = json.loads(game_data.get('category_progress', '{}'))
+                st.session_state.vocabulary_tree = json.loads(game_data.get('vocabulary_tree', '{}'))
+                
+                print(f"✅ Game state loaded from Supabase")
+                return True
+            else:
+                print(f"🆕 No existing game state, using defaults")
+                return False
+            
         except Exception as e:
-            print(f"Error loading game state: {e}")
+            print(f"❌ Error loading game state: {e}")
             return False
-        
+            
     def get_translation_for_word(self, word, target_language):
         """
         Get translation for word with multiple fallback options.

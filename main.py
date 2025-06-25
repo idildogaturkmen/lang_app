@@ -1283,157 +1283,74 @@ def enhance_image(image, enhance_type="auto"):
 
 # Function to detect text in image (OCR)
 def detect_text_in_image(image):
-    """Detect text in image with improved preprocessing and multiple methods."""
+    """Detect text in image using Google Vision API with EasyOCR fallback."""
     try:
-        # Convert PIL image to numpy array for processing
-        img_array = np.array(image)
+        # Method 1: Try Google Vision API first
+        try:
+            from google.cloud import vision
+            import io
+            
+            # Initialize the client
+            client = vision.ImageAnnotatorClient()
+            
+            # Convert PIL image to bytes
+            img_byte_arr = io.BytesIO()
+            image.save(img_byte_arr, format='JPEG')
+            img_byte_arr = img_byte_arr.getvalue()
+            
+            # Create vision image object
+            vision_image = vision.Image(content=img_byte_arr)
+            
+            # Perform text detection
+            response = client.text_detection(image=vision_image)
+            texts = response.text_annotations
+            
+            if texts:
+                # Return the first (most comprehensive) text detection
+                detected_text = texts[0].description
+                print(f"✅ Google Vision detected: {detected_text}")
+                return detected_text
+            
+        except ImportError:
+            print("Google Vision API not available, trying EasyOCR...")
+        except Exception as e:
+            print(f"Google Vision API failed: {e}, trying EasyOCR...")
         
-        # Method 1: Try EasyOCR with better preprocessing
+        # Method 2: Fallback to EasyOCR
         try:
             import easyocr
             
             # Initialize EasyOCR reader
-            if 'easyocr_reader' not in st.session_state:
-                st.session_state.easyocr_reader = easyocr.Reader(
-                    ['en'], 
-                    gpu=False, 
-                    verbose=False
-                )
-                print("✅ EasyOCR initialized")
+            reader = easyocr.Reader(['en'], gpu=False)
             
-            reader = st.session_state.easyocr_reader
+            # Convert PIL image to numpy array
+            import numpy as np
+            img_array = np.array(image)
             
-            # Preprocess image for better text detection
-            processed_images = []
+            # Use EasyOCR to detect text
+            results = reader.readtext(img_array)
             
-            # Original image
-            processed_images.append(img_array)
+            # Extract text from results
+            detected_texts = []
+            for (bbox, text, confidence) in results:
+                if confidence > 0.5:  # Only include confident detections
+                    detected_texts.append(text)
             
-            # Convert to grayscale and enhance contrast
-            gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
-            
-            # Apply different preprocessing techniques
-            # 1. Adaptive threshold
-            adaptive_thresh = cv2.adaptiveThreshold(
-                gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
-            )
-            processed_images.append(cv2.cvtColor(adaptive_thresh, cv2.COLOR_GRAY2RGB))
-            
-            # 2. OTSU threshold
-            _, otsu_thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            processed_images.append(cv2.cvtColor(otsu_thresh, cv2.COLOR_GRAY2RGB))
-            
-            # 3. Enhance contrast
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
-            enhanced = clahe.apply(gray)
-            processed_images.append(cv2.cvtColor(enhanced, cv2.COLOR_GRAY2RGB))
-            
-            # Try OCR on each processed image
-            all_results = []
-            for i, processed_img in enumerate(processed_images):
-                try:
-                    results = reader.readtext(processed_img)
-                    for (bbox, text, confidence) in results:
-                        if confidence > 0.3 and len(text.strip()) > 0:
-                            all_results.append((text.strip(), confidence))
-                            print(f"EasyOCR found: '{text.strip()}' (confidence: {confidence:.2f})")
-                except Exception as e:
-                    print(f"EasyOCR processing {i} failed: {e}")
-                    continue
-            
-            # Return best results
-            if all_results:
-                # Sort by confidence and return best text
-                all_results.sort(key=lambda x: x[1], reverse=True)
-                detected_texts = [text for text, conf in all_results if conf > 0.4]
-                if detected_texts:
-                    return ' '.join(detected_texts)
+            if detected_texts:
+                combined_text = ' '.join(detected_texts)
+                print(f"✅ EasyOCR detected: {combined_text}")
+                return combined_text
                 
+        except ImportError:
+            print("EasyOCR not available")
         except Exception as e:
             print(f"EasyOCR failed: {e}")
         
-        # Method 2: Try Pytesseract with multiple configurations
-        try:
-            import pytesseract
-            from PIL import Image as PILImage
-            
-            # Different OCR configurations to try
-            configs = [
-                r'--oem 3 --psm 6',  # Default
-                r'--oem 3 --psm 8',  # Single word
-                r'--oem 3 --psm 7',  # Single text line
-                r'--oem 3 --psm 13', # Raw line. Treat image as single text line
-                r'--oem 3 --psm 10', # Single character
-            ]
-            
-            # Try different preprocessing
-            gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
-            
-            # List of processed images to try
-            test_images = []
-            
-            # 1. Original grayscale
-            test_images.append(gray)
-            
-            # 2. Inverted (white text on black background)
-            inverted = cv2.bitwise_not(gray)
-            test_images.append(inverted)
-            
-            # 3. Gaussian blur + threshold
-            blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-            _, thresh1 = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            test_images.append(thresh1)
-            
-            # 4. Morphological operations
-            kernel = np.ones((2, 2), np.uint8)
-            morph = cv2.morphologyEx(gray, cv2.MORPH_CLOSE, kernel)
-            test_images.append(morph)
-            
-            # 5. Edge enhancement
-            enhanced = cv2.addWeighted(gray, 1.5, cv2.GaussianBlur(gray, (0, 0), 10), -0.5, 0)
-            test_images.append(enhanced)
-            
-            best_results = []
-            
-            for img in test_images:
-                for config in configs:
-                    try:
-                        # Convert to PIL Image
-                        pil_img = PILImage.fromarray(img)
-                        
-                        # Extract text
-                        text = pytesseract.image_to_string(pil_img, config=config)
-                        text = text.strip()
-                        
-                        if text and len(text) > 0 and not text.isspace():
-                            # Clean the text
-                            import re
-                            # Remove extra whitespace and clean up
-                            text = re.sub(r'\s+', ' ', text)
-                            text = re.sub(r'[^\w\s]', '', text)  # Remove special chars
-                            
-                            if len(text) > 0:
-                                best_results.append(text)
-                                print(f"Pytesseract found: '{text}'")
-                                
-                    except Exception as e:
-                        continue
-            
-            if best_results:
-                # Return the longest/most complete result
-                best_result = max(best_results, key=len)
-                if len(best_result.strip()) > 0:
-                    return best_result.strip()
-                    
-        except Exception as e:
-            print(f"Pytesseract failed: {e}")
-        
-        # If everything fails, return None (not an error message)
-        return None
+        # Method 3: Fallback message
+        return "Text detection requires Google Vision API or EasyOCR. Please set up the necessary credentials or install EasyOCR."
         
     except Exception as e:
-        print(f"Text detection error: {e}")
-        return None
+        return f"Text detection error: {str(e)}"
     
 # Function to get example sentence
 def get_example_sentence(word, target_language):
@@ -1840,13 +1757,6 @@ def prepare_vocabulary_for_diverse_questions(vocabulary, languages):
         except:
             pass
     
-    if st.session_state.debug_quiz:
-        st.sidebar.markdown("### Vocabulary Stats")
-        st.sidebar.markdown(f"Total words: {total_words}")
-        st.sidebar.markdown(f"With categories: {words_with_categories}")
-        st.sidebar.markdown(f"With images: {words_with_images}")
-        st.sidebar.markdown(f"With examples: {words_with_examples}")
-    
     return vocabulary
 
 if 'db_checked' not in st.session_state:
@@ -1898,10 +1808,6 @@ if 'daily_challenges' not in st.session_state:
     st.session_state.daily_challenges = []
 if 'word_of_the_day' not in st.session_state:
     st.session_state.word_of_the_day = None
-# For debugging question type selection
-if 'debug_quiz' not in st.session_state:
-    st.session_state.debug_quiz = False
-# Add these initializations with your other session state initializations
 # Add these initializations with your other session state initializations
 if 'audio_data' not in st.session_state:
     st.session_state.audio_data = None
@@ -1909,8 +1815,7 @@ if 'audio_data_received' not in st.session_state:
     st.session_state.audio_data_received = False
 if 'current_recording_word' not in st.session_state:
     st.session_state.current_recording_word = None
-if 'use_vision_api' not in st.session_state:
-    st.session_state.use_vision_api = True
+st.session_state.use_vision_api = True
 # Always force it to be True
 st.session_state.use_vision_api = True
 if 'app_mode' not in st.session_state:
@@ -2507,63 +2412,46 @@ def save_image(image, label, detection_bbox=None):
         return None
 
 def get_signed_image_url(storage_path, expires_in=3600):
-    """Get a signed URL for private image access with better error handling."""
+    """Get a signed URL for private image access."""
     try:
         import requests
         
-        supabase_url = "https://csszlzpsfwmsezursivk.supabase.co"
-        supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNzc3psenBzZndtc2V6dXJzaXZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA1Mjg1MjEsImV4cCI6MjA2NjEwNDUyMX0.gIi0Q_pifYpXeM1r8kWlgTO1LD8bc91lQ3suH8OWDKI"
-        
         user = get_authenticated_user()
-        auth_token = user.get('auth_token') if user else None
+        if not user:
+            return None
         
-        # Headers with API key
+        auth_token = user.get('auth_token')
+        if not auth_token:
+            return None
+        
+        supabase_url = "https://csszlzpsfwmsezursivk.supabase.co"
+        
         headers = {
-            'apikey': supabase_key,
+            'Authorization': f'Bearer {auth_token}',
             'Content-Type': 'application/json',
         }
         
-        # Add auth token if available
-        if auth_token:
-            headers['Authorization'] = f'Bearer {auth_token}'
-        else:
-            headers['Authorization'] = f'Bearer {supabase_key}'
-        
-        # Create signed URL
+        # Fix: Correct endpoint for creating signed URLs
         signed_url_endpoint = f"{supabase_url}/storage/v1/object/sign/{storage_path}"
         
         data = {
             'expiresIn': expires_in
         }
         
-        print(f"🔄 Getting signed URL for: {storage_path}")
-        
         response = requests.post(
             signed_url_endpoint,
             headers=headers,
-            json=data,
-            timeout=10
+            json=data
         )
         
         if response.status_code == 200:
             result = response.json()
-            signed_token = result.get('signedURL')
-            if signed_token:
-                # Return the full URL
-                full_url = f"{supabase_url}/storage/v1{signed_token}"
-                print(f"✅ Signed URL created successfully")
-                return full_url
-            else:
-                print(f"❌ No signedURL in response: {result}")
-        else:
-            print(f"❌ Failed to get signed URL: {response.status_code}")
-            print(f"❌ Response: {response.text}")
-            
-            # Try direct public access as fallback
-            public_url = f"{supabase_url}/storage/v1/object/public/vocabulary-images/{storage_path.replace('vocabulary-images/', '')}"
-            print(f"🔄 Trying public URL: {public_url}")
-            return public_url
+            # Fix: Get the correct signed URL
+            signed_url = result.get('signedURL')
+            if signed_url:
+                return f"{supabase_url}/storage/v1{signed_url}"
         
+        print(f"❌ Failed to get signed URL: {response.status_code} - {response.text}")
         return None
         
     except Exception as e:
@@ -2634,6 +2522,29 @@ def debug_supabase_connection():
         
     except Exception as e:
         return f"❌ Debug error: {e}"
+    
+def debug_user_info():
+    """Debug function to check user info format."""
+    user = st.session_state.get('user')
+    if user:
+        user_id = user.get('id')
+        print(f"🔍 User ID: {user_id}")
+        print(f"🔍 User ID type: {type(user_id)}")
+        
+        if isinstance(user_id, str):
+            try:
+                import uuid
+                uuid.UUID(user_id)
+                print(f"✅ Valid UUID format")
+            except ValueError:
+                print(f"❌ Invalid UUID format")
+        
+        # Print full user object structure
+        print(f"🔍 Full user object: {user}")
+    else:
+        print("❌ No user in session state")
+
+debug_user_info()
 
 def verify_last_save_operation():
     """Verify the last vocabulary save operation."""
@@ -3046,50 +2957,9 @@ with st.sidebar.expander("ℹ️ Need Help?"):
     - Tap buttons to navigate between sections
     """)
 
-# Add this to your sidebar gamification section
-with st.sidebar.expander("🔥 Streak Info", expanded=True):
-    streak_days = st.session_state.get('streak_days', 0)
-    streak_savers = st.session_state.get('streak_savers', 0)
-    
-    if streak_days > 0:
-        st.markdown(f"**Current Streak:** {streak_days} days")
-        
-        if streak_days >= 7:
-            st.success("🔥 On fire!")
-        elif streak_days >= 3:
-            st.success("🔥 Getting hot!")
-        
-        if streak_savers > 0:
-            st.info(f"🛟 Streak Savers: {streak_savers}")
-            st.caption("Protects your streak if you miss a day")
-        
-        # Show next milestone
-        if streak_days < 3:
-            target = 3
-        elif streak_days < 7:
-            target = 7
-        elif streak_days < 30:
-            target = 30
-        else:
-            target = (streak_days // 7 + 1) * 7  # Next week milestone
-        
-        days_to_go = target - streak_days
-        if days_to_go > 0:
-            st.caption(f"🎯 {days_to_go} days to {target}-day milestone")
-    else:
-        st.info("Start learning to begin your streak!")
-
 # Display appropriate content based on selected mode
 if app_mode == "Camera Mode":
     style_title("Camera Mode")
-
-
-    # Add this right after the Camera Mode title for debugging
-    if st.sidebar.button("🔍 Debug Storage"):
-        storage_status = debug_storage_status()
-        st.sidebar.write(storage_status)
-
-
 
     # Use the enhanced info message
     info_message("Take a photo or upload an image to identify objects and learn new vocabulary.")
@@ -3174,14 +3044,6 @@ if app_mode == "Camera Mode":
         
         # Auto-enhancement is always applied
         enhancement_type = "auto"
-    
-        with st.expander("🔍 Google Vision Status"):
-                status = get_google_vision_status()
-                if "✅" in status:
-                    st.success(status)
-                else:
-                    st.error(status)
-                    st.info("Will fall back to YOLOv8 if Google Vision fails")
                     
     # Process image if available
     if image is not None:
@@ -3291,7 +3153,7 @@ if app_mode == "Camera Mode":
                                             st.markdown(f"- {tip}")
                                 
                                 with col2:
-                                    # Add example sentence directly (no nested expander)
+                                    # Add example sentence directly
                                     example = get_example_sentence(label, st.session_state.target_language)
                                     st.markdown("**Example:**")
                                     st.markdown(f"EN: {example['english']}")
@@ -4798,84 +4660,5 @@ else:
     st.sidebar.warning("No active session")
     st.sidebar.markdown("*Start a session in Camera Mode to track progress*")
 
-
-# Add Supabase debugging section to sidebar
-with st.sidebar.expander("🔍 Database Debug"):
-    if st.button("Check Supabase Connection"):
-        debug_result = debug_supabase_connection()
-        if isinstance(debug_result, dict):
-            st.write("**Connection Status:**", debug_result['connection'])
-            st.write("**User ID:**", debug_result['user_id'])
-            st.write("**Vocabulary Count:**", debug_result['vocab_count'])
-            st.write("**Auth Token:**", "✅" if debug_result['auth_token_exists'] else "❌")
-            st.write("**Images in Storage:**", debug_result['image_count'])
-            
-            if debug_result['latest_words']:
-                st.write("**Latest Words:**")
-                for word in debug_result['latest_words']:
-                    st.write(f"- {word}")
-        else:
-            st.write(debug_result)
-
-    if st.button("Test Storage Permissions"):
-        storage_result = test_supabase_storage_permissions()
-        st.text_area("Storage Test Results:", storage_result, height=200)
-    
-    if st.button("Verify Last Save"):
-        verify_result = verify_last_save_operation()
-        if isinstance(verify_result, dict):
-            st.write("**Last Saved Word:**")
-            st.write(f"Word: {verify_result['word']}")
-            st.write(f"Language: {verify_result['language']}")
-            st.write(f"Category: {verify_result['category']}")
-            st.write(f"Date: {verify_result['date_added']}")
-            st.write(f"Has Image: {'✅' if verify_result['has_image'] else '❌'}")
-            if verify_result['has_image']:
-                st.write(f"Image Path: {verify_result['image_path']}")
-        else:
-            st.write(verify_result)
-    
-    if st.button("Force Refresh Data"):
-        # Clear cached data and reload
-        if 'supabase_db' in st.session_state:
-            del st.session_state.supabase_db
-        st.rerun()
-
-# Add to your debug section
-if st.button("Check Streak Status"):
-    user = get_authenticated_user()
-    if user:
-        db = get_user_database()
-        streak_data = db.get_user_streak_data()
-        
-        if streak_data:
-            st.write("**Streak Data from Supabase:**")
-            st.write(f"Streak Days: {streak_data.get('streak_days')}")
-            st.write(f"Last Active: {streak_data.get('last_active_date')}")
-            st.write(f"Streak Savers: {streak_data.get('streak_savers')}")
-            st.write(f"Updated: {streak_data.get('updated_at')}")
-        else:
-            st.write("No streak data found in Supabase")
-        
-        st.write("**Session State:**")
-        st.write(f"streak_days: {st.session_state.get('streak_days', 'Not set')}")
-        st.write(f"last_active_date: {st.session_state.get('last_active_date', 'Not set')}")
-        st.write(f"streak_savers: {st.session_state.get('streak_savers', 'Not set')}")
-
-# Add to your debug section
-if st.button("Test Google Vision API"):
-    status = get_google_vision_status()
-    st.write(status)
-    
-    # Show usage info
-    if "✅" in status:
-        st.info("🎯 Google Cloud Vision provides:")
-        st.markdown("""
-        - More accurate object detection
-        - Better label recognition  
-        - Consistent results across deployments
-        - No memory issues
-        - 1000 free requests per month
-        """)
 
 add_footer()
