@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import base64
 import time
 import sqlite3
-from datetime import datetime
+from datetime import datetime, date
 import re
 from PIL import Image
 from io import BytesIO
@@ -20,6 +20,7 @@ from example_sentences import ExampleSentenceGenerator
 import requests
 from deep_translator import GoogleTranslator
 from database import LanguageLearningDB
+import json
 
 class SupabaseDB:
     def __init__(self):
@@ -360,6 +361,145 @@ def require_authentication():
     
     return user
 
+def sync_user_data_to_supabase():
+    """Comprehensive function to sync all user data to Supabase."""
+    try:
+        user = get_authenticated_user()
+        if not user:
+            print("❌ No authenticated user for data sync")
+            return False
+        
+        user_id = user.get('id')
+        if not user_id:
+            print("❌ No user ID for data sync")
+            return False
+        
+        # Get actual vocabulary count from Supabase
+        vocabulary = get_all_vocabulary_direct()
+        actual_word_count = len(vocabulary) if vocabulary else 0
+        
+        # Calculate level and points based on actual vocabulary
+        calculated_level = max(1, actual_word_count // 10 + 1)
+        calculated_points = actual_word_count * 10
+        
+        # Update session state with actual data
+        st.session_state.words_learned = actual_word_count
+        st.session_state.total_words_learned = actual_word_count
+        st.session_state.level = calculated_level
+        st.session_state.points = calculated_points
+        
+        # Prepare comprehensive user data
+        user_data = {
+            'user_id': user_id,
+            'words_learned': actual_word_count,
+            'total_words_learned': actual_word_count,
+            'level': calculated_level,
+            'points': calculated_points,
+            'streak_days': st.session_state.get('streak_days', 0),
+            'last_active_date': str(date.today()),
+            'streak_savers': st.session_state.get('streak_savers', 0),
+            'achievements': json.dumps(st.session_state.get('achievements', {})),
+            'badges': json.dumps(st.session_state.get('badges', {})),
+            'daily_challenges': json.dumps(st.session_state.get('daily_challenges', [])),
+            'word_of_the_day': json.dumps(st.session_state.get('word_of_the_day')),
+            'category_progress': json.dumps(st.session_state.get('category_progress', {})),
+            'vocabulary_tree': json.dumps({'size': actual_word_count, 'level': calculated_level}),
+            'updated_at': datetime.now().isoformat()
+        }
+        
+        # Save to Supabase user_game_state table
+        db = get_user_database()
+        response = db.supabase.table('user_game_state').upsert(
+            user_data,
+            on_conflict='user_id'
+        ).execute()
+        
+        if response.data:
+            print(f"✅ User data synced to Supabase: {actual_word_count} words, Level {calculated_level}, {calculated_points} points")
+            return True
+        else:
+            print(f"❌ Failed to sync user data: {response}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Error syncing user data: {e}")
+        return False
+
+def load_user_data_from_supabase():
+    """Load all user data from Supabase on app startup."""
+    try:
+        user = get_authenticated_user()
+        if not user:
+            return False
+        
+        user_id = user.get('id')
+        if not user_id:
+            return False
+        
+        # First, get actual vocabulary count
+        vocabulary = get_all_vocabulary_direct()
+        actual_word_count = len(vocabulary) if vocabulary else 0
+        
+        # Load from Supabase
+        db = get_user_database()
+        response = db.supabase.table('user_game_state').select('*').eq('user_id', user_id).execute()
+        
+        if response.data and len(response.data) > 0:
+            user_data = response.data[0]
+            
+            # Load data but prioritize actual vocabulary count
+            st.session_state.words_learned = actual_word_count
+            st.session_state.total_words_learned = actual_word_count
+            st.session_state.level = max(user_data.get('level', 1), max(1, actual_word_count // 10 + 1))
+            st.session_state.points = max(user_data.get('points', 0), actual_word_count * 10)
+            st.session_state.streak_days = user_data.get('streak_days', 0)
+            st.session_state.last_active_date = user_data.get('last_active_date')
+            st.session_state.streak_savers = user_data.get('streak_savers', 0)
+            
+            # Load JSON data safely
+            try:
+                st.session_state.achievements = json.loads(user_data.get('achievements', '{}'))
+                st.session_state.badges = json.loads(user_data.get('badges', '{}'))
+                st.session_state.daily_challenges = json.loads(user_data.get('daily_challenges', '[]'))
+                st.session_state.word_of_the_day = json.loads(user_data.get('word_of_the_day', 'null'))
+                st.session_state.category_progress = json.loads(user_data.get('category_progress', '{}'))
+                st.session_state.vocabulary_tree = json.loads(user_data.get('vocabulary_tree', '{}'))
+            except:
+                # If JSON parsing fails, use defaults
+                st.session_state.achievements = {}
+                st.session_state.badges = {}
+                st.session_state.daily_challenges = []
+                st.session_state.word_of_the_day = None
+                st.session_state.category_progress = {}
+                st.session_state.vocabulary_tree = {'size': actual_word_count, 'level': st.session_state.level}
+            
+            print(f"✅ User data loaded: {actual_word_count} words, Level {st.session_state.level}, {st.session_state.points} points")
+            return True
+        else:
+            # Initialize with actual vocabulary count
+            st.session_state.words_learned = actual_word_count
+            st.session_state.total_words_learned = actual_word_count
+            st.session_state.level = max(1, actual_word_count // 10 + 1)
+            st.session_state.points = actual_word_count * 10
+            st.session_state.streak_days = 0
+            st.session_state.last_active_date = None
+            st.session_state.streak_savers = 0
+            st.session_state.achievements = {}
+            st.session_state.badges = {}
+            st.session_state.daily_challenges = []
+            st.session_state.word_of_the_day = None
+            st.session_state.category_progress = {}
+            st.session_state.vocabulary_tree = {'size': actual_word_count, 'level': st.session_state.level}
+            
+            # Save initial data
+            sync_user_data_to_supabase()
+            print(f"🆕 Initialized user data with {actual_word_count} existing words")
+            return True
+            
+    except Exception as e:
+        print(f"❌ Error loading user data: {e}")
+        return False
+
 def detect_objects_google_vision(image, confidence_threshold=0.5):
     """Google Cloud Vision-based object detection."""
     try:
@@ -585,6 +725,7 @@ def get_google_vision_status():
         return "❌ Google Cloud Vision library not installed"
     except Exception as e:
         return f"❌ Configuration Error: {str(e)}"
+
     
 def display_quiz_image(word, caption=""):
     """Display an image for quiz questions, prioritizing cropped versions."""
@@ -622,52 +763,62 @@ def display_quiz_image(word, caption=""):
         print(f"Error displaying quiz image: {e}")
         return False
     
-def clear_user_session_data():
-    """Clear all session state data for a clean user experience."""
+
+def get_all_vocabulary_direct():
+    """Get all vocabulary using Supabase."""
     user = get_authenticated_user()
     if not user:
-        return
+        print("❌ No authenticated user for vocabulary retrieval")
+        return []
     
-    # Get current user identifier
-    current_user_id = user.get('id', user.get('email', 'unknown'))
-    
-    # Check if this is a different user than last time
-    if 'last_user_id' not in st.session_state or st.session_state.last_user_id != current_user_id:
-        print(f"🔄 New user detected: {current_user_id}")
-        print(f"🧹 Clearing session data...")
+    try:
+        db = get_user_database()
+        vocabulary = db.get_all_vocabulary()
         
-        # List of all session state keys to clear
-        keys_to_clear = [
-            'level', 'points', 'streak_days', 'daily_challenges', 'word_of_the_day',
-            'achievements', 'badges', 'quiz_score', 'quiz_total', 'words_studied',
-            'words_learned', 'user_progress', 'gamification_data', 'learning_stats',
-            'vocabulary_tree', 'category_progress', 'total_words_learned'
-        ]
+        # Convert to the format expected by the app
+        formatted_vocab = []
+        for item in vocabulary:
+            # Flatten user_progress data if it exists
+            progress = item.get('user_progress', [])
+            progress_data = progress[0] if progress else {}
+            
+            formatted_item = {
+                'id': item['id'],
+                'word_original': item['word_original'],
+                'word_translated': item['word_translated'],
+                'language_translated': item['language_translated'],
+                'category': item.get('category'),
+                'image_path': item.get('image_path'),
+                'date_added': item['date_added'],
+                'source': item.get('source'),
+                'proficiency_level': progress_data.get('proficiency_level', 0),
+                'review_count': progress_data.get('review_count', 0),
+                'correct_count': progress_data.get('correct_count', 0),
+                'last_reviewed': progress_data.get('last_reviewed')
+            }
+            formatted_vocab.append(formatted_item)
         
-        # Clear specific gamification keys
-        for key in list(st.session_state.keys()):
-            if any(x in key.lower() for x in ['gamification', 'achievement', 'badge', 'progress', 'level', 'point']):
-                del st.session_state[key]
-                print(f"🗑️ Cleared: {key}")
+        print(f"📊 Retrieved {len(formatted_vocab)} vocabulary items for user")
+        return formatted_vocab
         
-        # Reset core learning variables
-        st.session_state.level = 1
-        st.session_state.points = 0
-        st.session_state.streak_days = 0
-        st.session_state.daily_challenges = []
-        st.session_state.word_of_the_day = None
-        st.session_state.words_studied = 0
-        st.session_state.words_learned = 0
-        st.session_state.quiz_score = 0
-        st.session_state.quiz_total = 0
-        
-        # Mark this user as the current one
-        st.session_state.last_user_id = current_user_id
-        
-        print(f"✅ Session data cleared for user: {current_user_id}")
+    except Exception as e:
+        print(f"❌ Error getting vocabulary: {e}")
+        return []
 
 user = require_authentication()
-clear_user_session_data()
+
+if 'data_loaded' not in st.session_state:
+    load_user_data_from_supabase()
+    st.session_state.data_loaded = True
+
+# Sync data periodically (every 10 vocabulary additions)
+if 'last_sync_count' not in st.session_state:
+    st.session_state.last_sync_count = 0
+
+current_word_count = len(get_all_vocabulary_direct()) if get_all_vocabulary_direct() else 0
+if current_word_count != st.session_state.last_sync_count:
+    sync_user_data_to_supabase()
+    st.session_state.last_sync_count = current_word_count
 
 def check_and_update_user_streak():
     """Check and update user's daily streak with Supabase storage."""
@@ -1214,8 +1365,9 @@ def get_object_category(label):
 
 
 def get_image_hash(image):
-    """Generate a hash for the image to detect changes."""
+    """Create a hash of an image for caching purposes."""
     img_byte_arr = io.BytesIO()
+    
     # Fix RGBA to JPEG conversion issue
     if image.mode in ('RGBA', 'LA', 'P'):
         # Convert to RGB if image has transparency
@@ -1300,15 +1452,21 @@ def detect_text_in_image(image):
         import json
         import tempfile
         
+        # Fix RGBA to JPEG conversion for text detection
+        processed_image = image
+        if image.mode in ('RGBA', 'LA', 'P'):
+            rgb_image = Image.new('RGB', image.size, (255, 255, 255))
+            if image.mode == 'P':
+                image = image.convert('RGBA')
+            rgb_image.paste(image, mask=image.split()[-1] if image.mode in ('RGBA', 'LA') else None)
+            processed_image = rgb_image
+        
         # Handle credentials for cloud deployment
         credentials_json = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS_JSON')
         if credentials_json:
-            # Create a temporary file with the credentials
             with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
                 f.write(credentials_json)
                 temp_cred_file = f.name
-            
-            # Set the environment variable to point to the temp file
             os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = temp_cred_file
         
         # Initialize the client
@@ -1316,7 +1474,7 @@ def detect_text_in_image(image):
         
         # Convert PIL image to bytes
         img_byte_arr = io.BytesIO()
-        image.save(img_byte_arr, format='JPEG')
+        processed_image.save(img_byte_arr, format='JPEG')
         img_byte_arr = img_byte_arr.getvalue()
         
         # Create vision image object
@@ -1337,7 +1495,6 @@ def detect_text_in_image(image):
             raise Exception(f"Google Vision API error: {response.error.message}")
         
         if texts:
-            # Return the first (most comprehensive) text detection
             detected_text = texts[0].description.strip()
             print(f"✅ Google Vision detected text: {detected_text}")
             return detected_text
@@ -1673,6 +1830,11 @@ def display_vocabulary_image(image_path, word_original):
 def add_vocabulary_direct(word_original, word_translated, language_translated, category=None, image_path=None):
     """Add vocabulary using Supabase - Production version with enhanced logging."""
     user = get_authenticated_user()
+
+    if vocab_id:
+        # Sync user data after successful vocabulary addition
+        sync_user_data_to_supabase()
+
     if not user:
         error_message("Please log in to save vocabulary.")
         return None
@@ -1719,48 +1881,7 @@ def add_vocabulary_direct(word_original, word_translated, language_translated, c
         print(f"❌ Save error: {e}")
         error_message("There was a problem saving your vocabulary. Please check your connection and try again.")
         return None
-
-
-def get_all_vocabulary_direct():
-    """Get all vocabulary using Supabase."""
-    user = get_authenticated_user()
-    if not user:
-        print("❌ No authenticated user for vocabulary retrieval")
-        return []
     
-    try:
-        db = get_user_database()
-        vocabulary = db.get_all_vocabulary()
-        
-        # Convert to the format expected by the app
-        formatted_vocab = []
-        for item in vocabulary:
-            # Flatten user_progress data if it exists
-            progress = item.get('user_progress', [])
-            progress_data = progress[0] if progress else {}
-            
-            formatted_item = {
-                'id': item['id'],
-                'word_original': item['word_original'],
-                'word_translated': item['word_translated'],
-                'language_translated': item['language_translated'],
-                'category': item.get('category'),
-                'image_path': item.get('image_path'),
-                'date_added': item['date_added'],
-                'source': item.get('source'),
-                'proficiency_level': progress_data.get('proficiency_level', 0),
-                'review_count': progress_data.get('review_count', 0),
-                'correct_count': progress_data.get('correct_count', 0),
-                'last_reviewed': progress_data.get('last_reviewed')
-            }
-            formatted_vocab.append(formatted_item)
-        
-        print(f"📊 Retrieved {len(formatted_vocab)} vocabulary items for user")
-        return formatted_vocab
-        
-    except Exception as e:
-        print(f"❌ Error getting vocabulary: {e}")
-        return []
 
     
 def create_session_direct():
@@ -3551,104 +3672,89 @@ if app_mode == "Camera Mode":
                             if word.strip() and len(word.strip()) > 2 and not word.strip().isdigit()]
                     
                     if words:
-                        st.subheader("📚 Words to Learn")
+                        st.subheader("📚 Words Available for Learning")
                         
-                        # Create selection checkboxes like in object detection
+                        # Display all words without checkboxes
                         for i, word in enumerate(words[:10]):  # Limit to 10 words
-                            checkbox_key = f"text_word_{i}_{word}"
+                            st.markdown("---")
                             
-                            if st.checkbox(f"Learn: **{word.lower()}**", key=checkbox_key):
-                                col1, col2 = st.columns([1, 1])
+                            col1, col2 = st.columns([1, 1])
+                            
+                            with col1:
+                                st.markdown(f"### 📖 {word.lower()}")
                                 
-                                with col1:
-                                    st.markdown(f"### 📖 {word.lower()}")
+                                # Get translation
+                                translation_result = translate_text(word.lower(), st.session_state.target_language)
+                                if translation_result and translation_result != word.lower():
+                                    st.markdown(f"**Translation:** {translation_result}")
                                     
-                                    # Get translation using the same function as object detection
-                                    translation_result = translate_text(word.lower(), st.session_state.target_language)
-                                    if translation_result and translation_result != word.lower():
-                                        st.markdown(f"**Translation:** {translation_result}")
-                                        
-                                        # Pronunciation guide
-                                        pronunciation_notes = get_pronunciation_guide(translation_result, st.session_state.target_language)
-                                        if pronunciation_notes:
-                                            st.markdown("**Pronunciation tips:**")
-                                            for note in pronunciation_notes[:2]:
-                                                st.markdown(f"• {note}")
-                                        
-                                        # Audio pronunciation
-                                        try:
-                                            audio_bytes = text_to_speech(translation_result, st.session_state.target_language)
-                                            if audio_bytes:
-                                                st.markdown("**🔊 Listen:**")
-                                                audio_html = get_audio_html(audio_bytes)
-                                                st.markdown(audio_html, unsafe_allow_html=True)
-                                        except Exception as e:
-                                            print(f"Audio generation error: {e}")
-                                    else:
-                                        st.markdown("*Translation not available*")
-                                
-                                with col2:
-                                    # Example sentence using the same function as object detection
+                                    # Pronunciation guide
+                                    pronunciation_notes = get_pronunciation_guide(translation_result, st.session_state.target_language)
+                                    if pronunciation_notes:
+                                        st.markdown("**Pronunciation tips:**")
+                                        for note in pronunciation_notes[:2]:
+                                            st.markdown(f"• {note}")
+                                    
+                                    # Audio pronunciation
                                     try:
-                                        example = get_example_sentence(word.lower(), st.session_state.target_language)
-                                        if example and example.get('translated'):
-                                            st.markdown("**Example:**")
-                                            st.markdown(f"*{example['translated']}*")
-                                            
-                                            if example.get('english'):
-                                                st.markdown(f"*{example['english']}*")
-                                            
-                                            # Example audio
-                                            try:
-                                                example_audio_bytes = text_to_speech(example['translated'], st.session_state.target_language)
-                                                if example_audio_bytes:
-                                                    st.markdown("**🔊 Example audio:**")
-                                                    example_audio_html = get_audio_html(example_audio_bytes)
-                                                    st.markdown(example_audio_html, unsafe_allow_html=True)
-                                            except Exception as e:
-                                                print(f"Example audio generation error: {e}")
-                                        else:
-                                            st.markdown("*Example sentence not available*")
+                                        audio_bytes = text_to_speech(translation_result, st.session_state.target_language)
+                                        if audio_bytes:
+                                            st.markdown("**🔊 Listen:**")
+                                            audio_html = get_audio_html(audio_bytes)
+                                            st.markdown(audio_html, unsafe_allow_html=True)
                                     except Exception as e:
-                                        print(f"Example sentence error: {e}")
-                                        st.markdown("*Example sentence not available*")
-                                
-                                # Save button for this word (same as object detection)
-                                save_key = f"save_text_word_{i}_{word}"
-                                if st.button(f"💾 Save '{word.lower()}' to vocabulary", key=save_key):
-                                    if translation_result and translation_result != word.lower():
-                                        vocab_id = add_vocabulary_direct(
-                                            word.lower(), 
-                                            translation_result, 
-                                            st.session_state.target_language, 
-                                            category="text",
-                                            image_path=None  # No image for text detection
-                                        )
+                                        print(f"Audio generation error: {e}")
+                                else:
+                                    st.markdown("*Translation not available*")
+                            
+                            with col2:
+                                # Example sentence
+                                try:
+                                    example = get_example_sentence(word.lower(), st.session_state.target_language)
+                                    if example and example.get('translated'):
+                                        st.markdown("**Example:**")
+                                        st.markdown(f"*{example['translated']}*")
                                         
-                                        if vocab_id:
-                                            success_message(f"✅ '{word.lower()}' saved to vocabulary!")
-                                            st.session_state.words_studied += 1
-                                            st.session_state.words_learned += 1
-                                            
-                                            # Update gamification like in object detection
-                                            try:
-                                                gamification.check_achievements(
-                                                    "word_learned",
-                                                    word=word.lower(),
-                                                    category="text",
-                                                    language=st.session_state.target_language
-                                                )
-                                            except Exception as e:
-                                                print(f"Gamification error: {e}")
-                                            
-                                            time.sleep(1)
-                                            st.rerun()
-                                        else:
-                                            error_message("Failed to save word to vocabulary.")
+                                        if example.get('english'):
+                                            st.markdown(f"*{example['english']}*")
+                                        
+                                        # Example audio
+                                        try:
+                                            example_audio_bytes = text_to_speech(example['translated'], st.session_state.target_language)
+                                            if example_audio_bytes:
+                                                st.markdown("**🔊 Example audio:**")
+                                                example_audio_html = get_audio_html(example_audio_bytes)
+                                                st.markdown(example_audio_html, unsafe_allow_html=True)
+                                        except Exception as e:
+                                            print(f"Example audio generation error: {e}")
                                     else:
-                                        error_message("Cannot save - translation not available.")
-                                
-                                st.divider()
+                                        st.markdown("*Example sentence not available*")
+                                except Exception as e:
+                                    print(f"Example sentence error: {e}")
+                                    st.markdown("*Example sentence not available*")
+                            
+                            # Save button for this word
+                            save_key = f"save_text_word_{i}_{word}_{hash(word)}"
+                            if st.button(f"💾 Save '{word.lower()}' to vocabulary", key=save_key):
+                                if translation_result and translation_result != word.lower():
+                                    vocab_id = add_vocabulary_direct(
+                                        word.lower(), 
+                                        translation_result, 
+                                        st.session_state.target_language, 
+                                        category="text",
+                                        image_path=None
+                                    )
+                                    
+                                    if vocab_id:
+                                        success_message(f"✅ '{word.lower()}' saved to vocabulary!")
+                                        # Update counters and save to Supabase
+                                        sync_user_data_to_supabase()
+                                        time.sleep(1)
+                                        st.rerun()
+                                    else:
+                                        error_message("Failed to save word to vocabulary.")
+                                else:
+                                    error_message("Cannot save - translation not available.")
                     else:
                         st.info("No meaningful words found for vocabulary learning.")
                 else:
@@ -4656,13 +4762,19 @@ elif app_mode == "Pronunciation Practice":
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Session Info")
-if st.session_state.session_id:
+
+# Get actual vocabulary count for display
+vocabulary = get_all_vocabulary_direct()
+actual_word_count = len(vocabulary) if vocabulary else 0
+
+# Always show as active if user has vocabulary
+if actual_word_count > 0:
     st.sidebar.success(f"Session active")
-    st.sidebar.info(f"Words studied: {st.session_state.words_studied}")
-    st.sidebar.info(f"Words learned: {st.session_state.words_learned}")
+    st.sidebar.info(f"Words studied: {actual_word_count}")
+    st.sidebar.info(f"Words learned: {actual_word_count}")
 else:
-    st.sidebar.warning("No active session")
-    st.sidebar.markdown("*Start a session in Camera Mode to track progress*")
+    st.sidebar.warning("No vocabulary yet")
+    st.sidebar.markdown("*Start learning in Camera Mode*")
 
 
 add_footer()
