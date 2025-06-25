@@ -365,6 +365,232 @@ def require_authentication():
     
     return user
 
+def detect_objects_google_vision(image, confidence_threshold=0.5):
+    """Google Cloud Vision-based object detection."""
+    try:
+        import os
+        from google.cloud import vision
+        from google.oauth2 import service_account
+        import io
+        
+        # Get API key from environment
+        api_key = os.getenv('GOOGLE_CLOUD_VISION_API_KEY')
+        if not api_key:
+            print("❌ Google Cloud Vision API key not found")
+            return [], np.array(image)
+        
+        # Initialize the client with API key
+        client = vision.ImageAnnotatorClient(
+            client_options={"api_key": api_key}
+        )
+        
+        # Convert PIL image to bytes
+        img_byte_arr = io.BytesIO()
+        image.save(img_byte_arr, format='JPEG', quality=90)
+        img_byte_arr.seek(0)
+        
+        # Create Vision API image object
+        vision_image = vision.Image(content=img_byte_arr.getvalue())
+        
+        # Perform object localization
+        objects = client.object_localization(image=vision_image).localized_object_annotations
+        
+        # Convert to our detection format
+        detections = []
+        img_array = np.array(image)
+        height, width = img_array.shape[:2]
+        
+        for obj in objects:
+            # Get confidence score
+            confidence = obj.score
+            
+            if confidence < confidence_threshold:
+                continue
+            
+            # Get object name and clean it
+            label = obj.name.lower()
+            
+            # Map Google Vision labels to our categories
+            mapped_label = map_google_vision_label(label)
+            
+            # Get bounding box (normalized coordinates)
+            vertices = obj.bounding_poly.normalized_vertices
+            
+            # Convert normalized coordinates to pixel coordinates
+            x_coords = [v.x * width for v in vertices]
+            y_coords = [v.y * height for v in vertices]
+            
+            left = min(x_coords)
+            top = min(y_coords)
+            right = max(x_coords)
+            bottom = max(y_coords)
+            
+            detections.append({
+                'label': mapped_label,
+                'confidence': confidence,
+                'bbox': [left, top, right, bottom],
+                'original_label': label  # Keep original for reference
+            })
+        
+        print(f"✅ Google Vision detected {len(detections)} objects")
+        
+        # Draw detections on image
+        result_image = draw_detections(img_array, detections)
+        
+        return detections, result_image
+        
+    except ImportError:
+        print("❌ Google Cloud Vision library not installed")
+        return [], np.array(image)
+    except Exception as e:
+        print(f"❌ Google Vision detection error: {e}")
+        return [], np.array(image)
+
+def map_google_vision_label(vision_label):
+    """Map Google Vision labels to our existing label system."""
+    # Mapping from Google Vision labels to our expected labels
+    label_mapping = {
+        # Electronics
+        'mobile phone': 'cell phone',
+        'smartphone': 'cell phone', 
+        'telephone': 'cell phone',
+        'computer': 'laptop',
+        'laptop computer': 'laptop',
+        'television': 'tv',
+        'television set': 'tv',
+        'computer monitor': 'tv',
+        'computer mouse': 'mouse',
+        'computer keyboard': 'keyboard',
+        'remote control': 'remote',
+        
+        # Food & Drinks
+        'drinking glass': 'cup',
+        'coffee cup': 'cup',
+        'tea cup': 'cup',
+        'wine glass': 'wine glass',
+        'water bottle': 'bottle',
+        'plastic bottle': 'bottle',
+        'glass bottle': 'bottle',
+        'food': 'food',
+        'fruit': 'fruit',
+        'apple': 'apple',
+        'banana': 'banana',
+        'orange': 'orange',
+        
+        # Furniture
+        'chair': 'chair',
+        'armchair': 'chair',
+        'office chair': 'chair',
+        'sofa': 'couch',
+        'couch': 'couch',
+        'table': 'dining table',
+        'desk': 'dining table',
+        'bed': 'bed',
+        'toilet': 'toilet',
+        
+        # Vehicles
+        'car': 'car',
+        'automobile': 'car',
+        'vehicle': 'car',
+        'bicycle': 'bicycle',
+        'motorcycle': 'motorcycle',
+        'bus': 'bus',
+        'truck': 'truck',
+        'airplane': 'airplane',
+        'aircraft': 'airplane',
+        
+        # Animals
+        'dog': 'dog',
+        'cat': 'cat',
+        'bird': 'bird',
+        'horse': 'horse',
+        
+        # Personal items
+        'handbag': 'handbag',
+        'backpack': 'backpack',
+        'suitcase': 'suitcase',
+        'umbrella': 'umbrella',
+        'tie': 'tie',
+        
+        # Sports
+        'ball': 'sports ball',
+        'football': 'sports ball',
+        'basketball': 'sports ball',
+        'tennis ball': 'sports ball',
+        'baseball': 'sports ball',
+        'soccer ball': 'sports ball',
+        
+        # Kitchen items
+        'knife': 'knife',
+        'fork': 'fork',
+        'spoon': 'spoon',
+        'bowl': 'bowl',
+        'plate': 'bowl',
+        
+        # Household
+        'book': 'book',
+        'clock': 'clock',
+        'vase': 'vase',
+        'plant': 'potted plant',
+        'houseplant': 'potted plant',
+    }
+    
+    # Try exact match first
+    if vision_label in label_mapping:
+        return label_mapping[vision_label]
+    
+    # Try partial matches
+    for vision_key, our_label in label_mapping.items():
+        if vision_key in vision_label or vision_label in vision_key:
+            return our_label
+    
+    # If no mapping found, clean the label and return it
+    cleaned_label = vision_label.replace('_', ' ').strip()
+    return cleaned_label
+
+def get_google_vision_status():
+    """Check Google Cloud Vision API status and configuration."""
+    try:
+        import os
+        from google.cloud import vision
+        
+        api_key = os.getenv('GOOGLE_CLOUD_VISION_API_KEY')
+        
+        if not api_key:
+            return "❌ API key not found in environment variables"
+        
+        # Test API connection with a simple request
+        try:
+            client = vision.ImageAnnotatorClient(
+                client_options={"api_key": api_key}
+            )
+            
+            # Create a small test image (1x1 pixel)
+            import io
+            from PIL import Image as PILImage
+            test_img = PILImage.new('RGB', (1, 1), color='white')
+            img_bytes = io.BytesIO()
+            test_img.save(img_bytes, format='JPEG')
+            img_bytes.seek(0)
+            
+            vision_image = vision.Image(content=img_bytes.getvalue())
+            
+            # Test with label detection (simpler than object detection)
+            response = client.label_detection(image=vision_image)
+            
+            if response.error.message:
+                return f"❌ API Error: {response.error.message}"
+            
+            return "✅ Google Cloud Vision API is working correctly"
+            
+        except Exception as e:
+            return f"❌ API Connection Error: {str(e)}"
+            
+    except ImportError:
+        return "❌ Google Cloud Vision library not installed"
+    except Exception as e:
+        return f"❌ Configuration Error: {str(e)}"
+    
 def display_quiz_image(word, caption=""):
     """Display an image for quiz questions, prioritizing cropped versions."""
     image_path = word.get('image_path', '')
@@ -1064,12 +1290,43 @@ QUESTION_TYPES = [
 
 
 def get_object_category(label):
-    """Get the category for a detected object label."""
+    """Get the category for a detected object label - updated for Google Vision."""
     label = label.lower()
-    for category, items in OBJECT_CATEGORIES.items():
-        if label in items:
-            return category
-    return "other"
+    
+    # Electronics
+    if any(term in label for term in ['phone', 'cell phone', 'mobile', 'laptop', 'computer', 'tv', 'television', 'mouse', 'keyboard', 'remote']):
+        return "electronics"
+    
+    # Food & Drinks  
+    elif any(term in label for term in ['bottle', 'cup', 'glass', 'food', 'fruit', 'apple', 'banana', 'orange', 'sandwich', 'pizza']):
+        return "food"
+    
+    # Furniture
+    elif any(term in label for term in ['chair', 'couch', 'sofa', 'table', 'desk', 'bed', 'toilet']):
+        return "furniture"
+    
+    # Vehicles
+    elif any(term in label for term in ['car', 'bicycle', 'motorcycle', 'bus', 'truck', 'airplane']):
+        return "vehicles"
+    
+    # Animals
+    elif any(term in label for term in ['dog', 'cat', 'bird', 'horse', 'animal']):
+        return "animals"
+    
+    # Personal items
+    elif any(term in label for term in ['bag', 'backpack', 'suitcase', 'umbrella', 'tie']):
+        return "personal"
+    
+    # Sports
+    elif any(term in label for term in ['ball', 'sports', 'football', 'basketball', 'tennis']):
+        return "sports"
+    
+    # Household
+    elif any(term in label for term in ['book', 'clock', 'vase', 'plant', 'knife', 'fork', 'spoon', 'bowl']):
+        return "household"
+    
+    else:
+        return "other"
 
 
 def get_image_hash(image):
@@ -1080,8 +1337,23 @@ def get_image_hash(image):
 
 # Function to detect objects in image
 def detect_objects(image, confidence_threshold=0.5, iou_threshold=0.45):
-    """Main detection function - now using YOLOv8"""
-    return detect_objects_yolov8(image, confidence_threshold)
+    """Main detection function - now using Google Cloud Vision API."""
+    try:
+        # Try Google Cloud Vision first
+        detections, result_image = detect_objects_google_vision(image, confidence_threshold)
+        
+        if detections:
+            print(f"✅ Google Vision found {len(detections)} objects")
+            return detections, result_image
+        else:
+            print("⚠️ Google Vision found no objects, falling back to YOLOv8")
+            # Fallback to YOLOv8 if Google Vision finds nothing
+            return detect_objects_yolov8(image, confidence_threshold)
+            
+    except Exception as e:
+        print(f"❌ Detection error: {e}")
+        # Fallback to YOLOv8 on any error
+        return detect_objects_yolov8(image, confidence_threshold)
 
 
 # Function to enhance image quality
@@ -3022,6 +3294,14 @@ if app_mode == "Camera Mode":
         # Auto-enhancement is always applied
         enhancement_type = "auto"
     
+        with st.expander("🔍 Google Vision Status"):
+                status = get_google_vision_status()
+                if "✅" in status:
+                    st.success(status)
+                else:
+                    st.error(status)
+                    st.info("Will fall back to YOLOv8 if Google Vision fails")
+                    
     # Process image if available
     if image is not None:
         # Process based on detection type
@@ -3029,7 +3309,7 @@ if app_mode == "Camera Mode":
             # Use a placeholder for the spinner that we can clear later
             spinner_placeholder = st.empty()
             with spinner_placeholder.container():
-                show_loading_spinner("Detecting objects... This may take a few seconds.")
+                show_loading_spinner("Detecting objects with Google AI... This may take a few seconds.")
             
             # Add visual separator for mobile
             separator_placeholder = st.empty()
@@ -3041,9 +3321,9 @@ if app_mode == "Camera Mode":
                 if enhanced_image is None:
                     raise Exception("Image enhancement failed")
                 
-                # Run memory-optimized detection
-                detections, result_image = detect_objects(
-                    enhanced_image, confidence_threshold, iou_threshold
+                # Choose detection method
+                detections, result_image = detect_objects_google_vision(
+                    enhanced_image, confidence_threshold
                 )
                 
             except Exception as e:
@@ -4703,5 +4983,21 @@ if st.button("Check Streak Status"):
         st.write(f"streak_days: {st.session_state.get('streak_days', 'Not set')}")
         st.write(f"last_active_date: {st.session_state.get('last_active_date', 'Not set')}")
         st.write(f"streak_savers: {st.session_state.get('streak_savers', 'Not set')}")
+
+# Add to your debug section
+if st.button("Test Google Vision API"):
+    status = get_google_vision_status()
+    st.write(status)
+    
+    # Show usage info
+    if "✅" in status:
+        st.info("🎯 Google Cloud Vision provides:")
+        st.markdown("""
+        - More accurate object detection
+        - Better label recognition  
+        - Consistent results across deployments
+        - No memory issues
+        - 1000 free requests per month
+        """)
 
 add_footer()

@@ -16,9 +16,7 @@ services:
         value: "1"
       - key: PYTHONDONTWRITEBYTECODE  
         value: "1"
-      
-      # Only need Clerk secret key now
-      - key: CLERK_SECRET_KEY
+      - key: GOOGLE_CLOUD_VISION_API_KEY  # Add this
         sync: false
       
       # Basic optimizations
