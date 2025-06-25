@@ -211,6 +211,78 @@ class SupabaseDB:
         except Exception as e:
             print(f"Error ending session: {e}")
             return False
+        
+    def get_user_streak_data(self):
+        """Get user's streak data from Supabase."""
+        user_id = self.get_user_id()
+        if not user_id:
+            return None
+            
+        try:
+            import requests
+            
+            headers = self.get_headers()
+            url = f'{self.supabase_url}/rest/v1/user_streaks?user_id=eq.{user_id}'
+            
+            response = requests.get(url, headers=headers, timeout=30)
+            
+            if response.status_code == 200:
+                result = response.json()
+                return result[0] if result else None
+            return None
+                
+        except Exception as e:
+            print(f"Error getting streak data: {e}")
+            return None
+
+    def update_user_streak_data(self, streak_days, last_active_date, streak_savers=0):
+        """Update user's streak data in Supabase."""
+        user_id = self.get_user_id()
+        if not user_id:
+            return False
+            
+        try:
+            import requests
+            from datetime import datetime
+            
+            headers = self.get_headers()
+            
+            # Convert date to string if needed
+            if hasattr(last_active_date, 'isoformat'):
+                date_str = last_active_date.isoformat()
+            else:
+                date_str = str(last_active_date)
+            
+            data = {
+                'user_id': user_id,
+                'streak_days': streak_days,
+                'last_active_date': date_str,
+                'streak_savers': streak_savers,
+                'updated_at': datetime.now().isoformat()
+            }
+            
+            # Try to update first, then insert if not exists
+            update_url = f'{self.supabase_url}/rest/v1/user_streaks?user_id=eq.{user_id}'
+            update_response = requests.patch(update_url, headers=headers, json=data, timeout=30)
+            
+            if update_response.status_code in [200, 204]:
+                print(f"✅ Streak updated: {streak_days} days")
+                return True
+            
+            # If update failed, try insert (user doesn't exist yet)
+            insert_url = f'{self.supabase_url}/rest/v1/user_streaks'
+            insert_response = requests.post(insert_url, headers=headers, json=data, timeout=30)
+            
+            if insert_response.status_code in [200, 201]:
+                print(f"✅ Streak created: {streak_days} days")
+                return True
+            else:
+                print(f"❌ Failed to save streak: {insert_response.status_code} - {insert_response.text}")
+                return False
+                
+        except Exception as e:
+            print(f"Error updating streak data: {e}")
+            return False
 
         
 # Authentication Functions for Supabase
@@ -375,6 +447,130 @@ def clear_user_session_data():
 
 user = require_authentication()
 clear_user_session_data()
+
+def check_and_update_user_streak():
+    """Check and update user's daily streak with Supabase storage."""
+    try:
+        from datetime import date, datetime, timedelta
+        
+        user = get_authenticated_user()
+        if not user:
+            return
+        
+        db = get_user_database()
+        today = date.today()
+        
+        print(f"🔥 Checking streak for date: {today}")
+        
+        # Get current streak data from Supabase
+        streak_data = db.get_user_streak_data()
+        
+        if not streak_data:
+            # First time user - start streak
+            print("🔥 First time user - starting streak")
+            st.session_state.streak_days = 1
+            st.session_state.last_active_date = today
+            st.session_state.streak_savers = 0
+            
+            # Save to Supabase
+            db.update_user_streak_data(1, today, 0)
+            
+            # Show welcome message
+            st.toast("🔥 Welcome! Your learning streak has started!")
+            return
+        
+        # Parse existing data
+        current_streak = streak_data.get('streak_days', 0)
+        last_active_str = streak_data.get('last_active_date', '')
+        streak_savers = streak_data.get('streak_savers', 0)
+        
+        # Parse last active date
+        try:
+            if 'T' in last_active_str:  # ISO format with time
+                last_active = datetime.fromisoformat(last_active_str.replace('Z', '+00:00')).date()
+            else:  # Date only
+                last_active = datetime.strptime(last_active_str, '%Y-%m-%d').date()
+        except:
+            last_active = today - timedelta(days=2)  # Force streak reset if can't parse
+        
+        print(f"🔥 Current streak: {current_streak}, Last active: {last_active}")
+        
+        # Calculate days since last activity
+        days_passed = (today - last_active).days
+        
+        # Update session state with current values
+        st.session_state.streak_days = current_streak
+        st.session_state.last_active_date = last_active
+        st.session_state.streak_savers = streak_savers
+        
+        # If already active today, no change needed
+        if days_passed == 0:
+            print("🔥 Already active today - no streak change")
+            return
+        
+        # Streak continues (visited yesterday)
+        if days_passed == 1:
+            new_streak = current_streak + 1
+            st.session_state.streak_days = new_streak
+            st.session_state.last_active_date = today
+            
+            print(f"🔥 Streak continued! New streak: {new_streak}")
+            
+            # Save to Supabase
+            db.update_user_streak_data(new_streak, today, streak_savers)
+            
+            # Check for streak milestones
+            if new_streak == 3:
+                st.toast("🔥 3-day streak! You're on fire!")
+            elif new_streak == 7:
+                st.session_state.streak_savers += 1
+                db.update_user_streak_data(new_streak, today, streak_savers + 1)
+                st.toast("🔥 7-day streak! You earned a Streak Saver! 🛟")
+            elif new_streak == 30:
+                st.session_state.streak_savers += 2
+                db.update_user_streak_data(new_streak, today, streak_savers + 2)
+                st.toast("🔥 30-day streak! Amazing dedication! You earned 2 Streak Savers! 🛟")
+            elif new_streak % 7 == 0 and new_streak > 7:  # Every week after first
+                st.toast(f"🔥 {new_streak}-day streak! Keep it up!")
+            
+        # Missed a day but have streak saver
+        elif days_passed == 2 and streak_savers > 0:
+            new_savers = streak_savers - 1
+            st.session_state.streak_savers = new_savers
+            st.session_state.last_active_date = today
+            
+            print(f"🛟 Used streak saver! Remaining: {new_savers}")
+            
+            # Save to Supabase
+            db.update_user_streak_data(current_streak, today, new_savers)
+            
+            st.toast("🛟 Used a Streak Saver to maintain your streak!")
+            
+        # Streak broken
+        else:
+            print(f"💔 Streak broken! Days passed: {days_passed}")
+            
+            st.session_state.streak_days = 1  # Start new streak
+            st.session_state.last_active_date = today
+            
+            # Save to Supabase
+            db.update_user_streak_data(1, today, streak_savers)
+            
+            if current_streak > 1:
+                st.toast(f"💔 Your {current_streak}-day streak ended, but you're starting fresh!")
+            
+    except Exception as e:
+        print(f"❌ Error in streak check: {e}")
+        # Initialize with safe defaults
+        st.session_state.streak_days = 1
+        st.session_state.last_active_date = date.today()
+        st.session_state.streak_savers = 0
+
+# CHECK AND UPDATE STREAK - Add this new section
+try:
+    check_and_update_user_streak()
+except Exception as e:
+    print(f"⚠️ Streak check error (non-critical): {e}")
 
 def get_user_database():
     """Get Supabase database instance."""
@@ -1879,12 +2075,14 @@ def manage_session(action):
         return False
     
 def save_image_to_supabase(image, label, detection_bbox=None):
-    """Save image to private Supabase Storage with improved error handling."""
+    """Save image to private Supabase Storage with detailed debugging."""
     try:
         import requests
         import io
         import uuid
         from datetime import datetime
+        
+        print(f"🔄 Starting Supabase image upload for: {label}")
         
         user = get_authenticated_user()
         if not user:
@@ -1894,20 +2092,23 @@ def save_image_to_supabase(image, label, detection_bbox=None):
         user_id = user.get('id')
         auth_token = user.get('auth_token')
         
-        # Create a unique filename with user folder structure
+        print(f"👤 User ID: {user_id}")
+        print(f"🔑 Auth token exists: {bool(auth_token)}")
+        
+        # Create a unique filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         unique_id = str(uuid.uuid4())[:8]
         filename = f"{user_id}/{label}_{timestamp}_{unique_id}.jpg"
         
-        print(f"🔄 Uploading image: {filename}")
+        print(f"📁 Target filename: {filename}")
         
         # Process image (crop if bbox provided)
         processed_image = image
         if detection_bbox:
+            print(f"✂️ Cropping image with bbox: {detection_bbox}")
             left, top, right, bottom = [int(x) for x in detection_bbox]
             img_array = np.array(image)
             
-            # Add padding
             height, width = img_array.shape[:2]
             obj_width = right - left
             obj_height = bottom - top
@@ -1922,64 +2123,151 @@ def save_image_to_supabase(image, label, detection_bbox=None):
             
             cropped_img = img_array[crop_top:crop_bottom, crop_left:crop_right]
             processed_image = Image.fromarray(cropped_img)
+            print(f"✅ Image cropped to size: {processed_image.size}")
         
-        # Convert image to bytes with optimization
+        # Convert image to bytes
         img_bytes = io.BytesIO()
-        # Optimize image size for storage
         if processed_image.width > 800 or processed_image.height > 800:
             processed_image.thumbnail((800, 800), Image.Resampling.LANCZOS)
+            print(f"📏 Image resized to: {processed_image.size}")
+        
         processed_image.save(img_bytes, format='JPEG', quality=85, optimize=True)
         img_bytes.seek(0)
+        file_size = len(img_bytes.getvalue())
+        print(f"💾 Image size: {file_size} bytes")
         
         # Supabase configuration
         supabase_url = "https://csszlzpsfwmsezursivk.supabase.co"
         supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNzc3psenBzZndtc2V6dXJzaXZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA1Mjg1MjEsImV4cCI6MjA2NjEwNDUyMX0.gIi0Q_pifYpXeM1r8kWlgTO1LD8bc91lQ3suH8OWDKI"
         
-        # Headers with both API key and auth token
+        # Test different header combinations
+        header_combinations = [
+            # Method 1: With auth token
+            {
+                'apikey': supabase_key,
+                'Authorization': f'Bearer {auth_token}' if auth_token else f'Bearer {supabase_key}',
+                'Content-Type': 'image/jpeg',
+            },
+            # Method 2: Service role only
+            {
+                'apikey': supabase_key,
+                'Authorization': f'Bearer {supabase_key}',
+                'Content-Type': 'image/jpeg',
+            },
+            # Method 3: With x-upsert header
+            {
+                'apikey': supabase_key,
+                'Authorization': f'Bearer {supabase_key}',
+                'Content-Type': 'image/jpeg',
+                'x-upsert': 'true',
+            }
+        ]
+        
+        upload_url = f"{supabase_url}/storage/v1/object/vocabulary-images/{filename}"
+        print(f"🌐 Upload URL: {upload_url}")
+        
+        # Try each header combination
+        for i, headers in enumerate(header_combinations):
+            print(f"🔄 Trying upload method {i+1}/3")
+            print(f"📋 Headers: {list(headers.keys())}")
+            
+            try:
+                response = requests.post(
+                    upload_url,
+                    headers=headers,
+                    data=img_bytes.getvalue(),
+                    timeout=30
+                )
+                
+                print(f"📤 Response status: {response.status_code}")
+                print(f"📤 Response headers: {dict(response.headers)}")
+                print(f"📤 Response text: {response.text[:200]}...")
+                
+                if response.status_code in [200, 201]:
+                    storage_path = f"vocabulary-images/{filename}"
+                    print(f"✅ Upload successful! Path: {storage_path}")
+                    return storage_path
+                elif response.status_code == 409:
+                    print("⚠️ File already exists, but that's okay")
+                    storage_path = f"vocabulary-images/{filename}"
+                    return storage_path
+                else:
+                    print(f"❌ Upload failed with status {response.status_code}")
+                    continue
+                    
+            except Exception as e:
+                print(f"❌ Upload attempt {i+1} failed: {e}")
+                continue
+        
+        print("❌ All upload methods failed")
+        return None
+        
+    except Exception as e:
+        print(f"❌ Critical error in save_image_to_supabase: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+def test_supabase_storage_permissions():
+    """Test Supabase Storage permissions and setup."""
+    try:
+        import requests
+        
+        user = get_authenticated_user()
+        if not user:
+            return "❌ No authenticated user"
+        
+        supabase_url = "https://csszlzpsfwmsezursivk.supabase.co"
+        supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNzc3psenBzZndtc2V6dXJzaXZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA1Mjg1MjEsImV4cCI6MjA2NjEwNDUyMX0.gIi0Q_pifYpXeM1r8kWlgTO1LD8bc91lQ3suH8OWDKI"
+        
         headers = {
             'apikey': supabase_key,
-            'Content-Type': 'image/jpeg',
-            'Cache-Control': 'max-age=3600',
+            'Authorization': f'Bearer {supabase_key}',
         }
         
-        # Add authorization header if available
-        if auth_token:
-            headers['Authorization'] = f'Bearer {auth_token}'
-        else:
-            # Use service role key as fallback
-            headers['Authorization'] = f'Bearer {supabase_key}'
+        # Test 1: List buckets
+        buckets_url = f"{supabase_url}/storage/v1/bucket"
+        response = requests.get(buckets_url, headers=headers, timeout=10)
         
-        # Correct Supabase Storage upload endpoint
-        upload_url = f"{supabase_url}/storage/v1/object/vocabulary-images/{filename}"
-        
-        print(f"🔄 Uploading to: {upload_url}")
-        print(f"🔄 Headers: {list(headers.keys())}")
-        
-        # Upload to Supabase Storage
-        response = requests.post(
-            upload_url,
-            headers=headers,
-            data=img_bytes.getvalue(),
-            timeout=30
-        )
-        
-        print(f"📤 Upload response: {response.status_code}")
-        
-        if response.status_code in [200, 201]:
-            # Return the storage path
-            storage_path = f"vocabulary-images/{filename}"
-            print(f"✅ Image uploaded successfully: {storage_path}")
-            return storage_path
-        else:
-            print(f"❌ Upload failed: {response.status_code}")
-            print(f"❌ Response: {response.text}")
+        results = []
+        results.append(f"Buckets test: {response.status_code}")
+        if response.status_code == 200:
+            buckets = response.json()
+            bucket_names = [b.get('name', 'unknown') for b in buckets]
+            results.append(f"Available buckets: {bucket_names}")
             
-            # Try alternative upload method
-            return try_alternative_upload(supabase_url, supabase_key, filename, img_bytes.getvalue())
-            
+            # Check if vocabulary-images bucket exists
+            if 'vocabulary-images' in bucket_names:
+                results.append("✅ vocabulary-images bucket exists")
+            else:
+                results.append("❌ vocabulary-images bucket NOT found")
+        
+        # Test 2: Try to list files in vocabulary-images
+        list_url = f"{supabase_url}/storage/v1/object/list/vocabulary-images"
+        response = requests.post(list_url, headers=headers, json={}, timeout=10)
+        
+        results.append(f"List files test: {response.status_code}")
+        if response.status_code == 200:
+            files = response.json()
+            results.append(f"Files in bucket: {len(files)}")
+        else:
+            results.append(f"List files error: {response.text}")
+        
+        # Test 3: Check bucket policies
+        policy_url = f"{supabase_url}/storage/v1/bucket/vocabulary-images"
+        response = requests.get(policy_url, headers=headers, timeout=10)
+        
+        results.append(f"Bucket info test: {response.status_code}")
+        if response.status_code == 200:
+            bucket_info = response.json()
+            results.append(f"Bucket public: {bucket_info.get('public', 'unknown')}")
+            results.append(f"Bucket allowed mime types: {bucket_info.get('allowed_mime_types', 'unknown')}")
+        
+        return "\n".join(results)
+        
     except Exception as e:
-        print(f"❌ Error uploading image to Supabase: {e}")
-        return None
+        return f"❌ Storage test error: {e}"
+
 
 def try_alternative_upload(supabase_url, supabase_key, filename, image_data):
     """Try alternative upload method with service role."""
@@ -2605,6 +2893,38 @@ with st.sidebar.expander("ℹ️ Need Help?"):
     - Tap buttons to navigate between sections
     """)
 
+# Add this to your sidebar gamification section
+with st.sidebar.expander("🔥 Streak Info", expanded=True):
+    streak_days = st.session_state.get('streak_days', 0)
+    streak_savers = st.session_state.get('streak_savers', 0)
+    
+    if streak_days > 0:
+        st.markdown(f"**Current Streak:** {streak_days} days")
+        
+        if streak_days >= 7:
+            st.success("🔥 On fire!")
+        elif streak_days >= 3:
+            st.success("🔥 Getting hot!")
+        
+        if streak_savers > 0:
+            st.info(f"🛟 Streak Savers: {streak_savers}")
+            st.caption("Protects your streak if you miss a day")
+        
+        # Show next milestone
+        if streak_days < 3:
+            target = 3
+        elif streak_days < 7:
+            target = 7
+        elif streak_days < 30:
+            target = 30
+        else:
+            target = (streak_days // 7 + 1) * 7  # Next week milestone
+        
+        days_to_go = target - streak_days
+        if days_to_go > 0:
+            st.caption(f"🎯 {days_to_go} days to {target}-day milestone")
+    else:
+        st.info("Start learning to begin your streak!")
 
 # Display appropriate content based on selected mode
 if app_mode == "Camera Mode":
@@ -4338,6 +4658,10 @@ with st.sidebar.expander("🔍 Database Debug"):
                     st.write(f"- {word}")
         else:
             st.write(debug_result)
+
+    if st.button("Test Storage Permissions"):
+        storage_result = test_supabase_storage_permissions()
+        st.text_area("Storage Test Results:", storage_result, height=200)
     
     if st.button("Verify Last Save"):
         verify_result = verify_last_save_operation()
@@ -4358,4 +4682,26 @@ with st.sidebar.expander("🔍 Database Debug"):
         if 'supabase_db' in st.session_state:
             del st.session_state.supabase_db
         st.rerun()
+
+# Add to your debug section
+if st.button("Check Streak Status"):
+    user = get_authenticated_user()
+    if user:
+        db = get_user_database()
+        streak_data = db.get_user_streak_data()
+        
+        if streak_data:
+            st.write("**Streak Data from Supabase:**")
+            st.write(f"Streak Days: {streak_data.get('streak_days')}")
+            st.write(f"Last Active: {streak_data.get('last_active_date')}")
+            st.write(f"Streak Savers: {streak_data.get('streak_savers')}")
+            st.write(f"Updated: {streak_data.get('updated_at')}")
+        else:
+            st.write("No streak data found in Supabase")
+        
+        st.write("**Session State:**")
+        st.write(f"streak_days: {st.session_state.get('streak_days', 'Not set')}")
+        st.write(f"last_active_date: {st.session_state.get('last_active_date', 'Not set')}")
+        st.write(f"streak_savers: {st.session_state.get('streak_savers', 'Not set')}")
+
 add_footer()
