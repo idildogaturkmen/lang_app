@@ -1220,20 +1220,34 @@ def display_vocabulary_image(image_path, word_original):
         return False
     
 def add_vocabulary_direct(word_original, word_translated, language_translated, category=None, image_path=None):
-    """Add vocabulary using Supabase - Production version with duplicate prevention."""
+    """Add vocabulary using Supabase - Production version with enhanced logging."""
     user = get_authenticated_user()
     if not user:
         error_message("Please log in to save vocabulary.")
         return None
     
     try:
+        print(f"🔄 Attempting to save: {word_original} → {word_translated}")
+        print(f"📁 Image path: {image_path}")
+        print(f"👤 User ID: {user.get('id')}")
+        
         db = get_user_database()
         vocab_id = db.add_vocabulary(word_original, word_translated, language_translated, category, image_path)
         
         if vocab_id == 'duplicate':
+            print(f"⚠️ Duplicate word detected: {word_original}")
             warning_message(f"'{word_original}' → '{word_translated}' is already in your vocabulary!")
             return 'duplicate'
         elif vocab_id:
+            print(f"✅ Successfully saved to Supabase with ID: {vocab_id}")
+            
+            # Verify the save by checking if we can retrieve it
+            verification = verify_last_save_operation()
+            if isinstance(verification, dict):
+                print(f"✅ Verification successful: {verification['word']}")
+            else:
+                print(f"⚠️ Verification failed: {verification}")
+            
             try:
                 gamification.check_achievements(
                     "word_learned",
@@ -1241,13 +1255,17 @@ def add_vocabulary_direct(word_original, word_translated, language_translated, c
                     category=category,
                     language=language_translated
                 )
-            except Exception:
-                pass  # Don't let gamification errors affect vocabulary saving
+            except Exception as e:
+                print(f"⚠️ Gamification error (non-critical): {e}")
+            
             return vocab_id
         else:
+            print(f"❌ Save failed - no vocab_id returned")
             error_message("Unable to save vocabulary. Please try again.")
             return None
+            
     except Exception as e:
+        print(f"❌ Save error: {e}")
         error_message("There was a problem saving your vocabulary. Please check your connection and try again.")
         return None
 
@@ -2114,6 +2132,103 @@ def get_signed_image_url(storage_path, expires_in=3600):
         print(f"❌ Error getting signed URL: {e}")
         return None
 
+def debug_supabase_connection():
+    """Debug function to verify Supabase connection and data."""
+    try:
+        import requests
+        
+        user = get_authenticated_user()
+        if not user:
+            return "❌ No authenticated user"
+        
+        db = get_user_database()
+        headers = db.get_headers()
+        user_id = db.get_user_id()
+        
+        # Test 1: Check if we can connect to Supabase
+        test_url = f'{db.supabase_url}/rest/v1/'
+        test_response = requests.get(test_url, headers=headers, timeout=10)
+        
+        connection_status = "✅ Connected" if test_response.status_code == 200 else f"❌ Connection failed: {test_response.status_code}"
+        
+        # Test 2: Get vocabulary count directly from Supabase
+        vocab_url = f'{db.supabase_url}/rest/v1/vocabulary?user_id=eq.{user_id}&select=count'
+        vocab_response = requests.get(vocab_url, headers=headers, timeout=10)
+        
+        if vocab_response.status_code == 200:
+            vocab_count = len(vocab_response.json())
+        else:
+            vocab_count = f"Error: {vocab_response.status_code}"
+        
+        # Test 3: Get latest vocabulary entries
+        latest_url = f'{db.supabase_url}/rest/v1/vocabulary?user_id=eq.{user_id}&order=date_added.desc&limit=5'
+        latest_response = requests.get(latest_url, headers=headers, timeout=10)
+        
+        latest_words = []
+        if latest_response.status_code == 200:
+            latest_data = latest_response.json()
+            latest_words = [f"{item['word_original']} → {item['word_translated']}" for item in latest_data]
+        
+        # Test 4: Test image storage
+        storage_url = f'{db.supabase_url}/storage/v1/object/list/vocabulary-images'
+        storage_response = requests.post(
+            storage_url,
+            headers=headers,
+            json={'prefix': user_id},
+            timeout=10
+        )
+        
+        image_count = 0
+        if storage_response.status_code == 200:
+            image_count = len(storage_response.json())
+        
+        return {
+            'connection': connection_status,
+            'user_id': user_id,
+            'vocab_count': vocab_count,
+            'latest_words': latest_words,
+            'image_count': image_count,
+            'auth_token_exists': bool(user.get('auth_token'))
+        }
+        
+    except Exception as e:
+        return f"❌ Debug error: {e}"
+
+def verify_last_save_operation():
+    """Verify the last vocabulary save operation."""
+    try:
+        user = get_authenticated_user()
+        if not user:
+            return "No user authenticated"
+        
+        db = get_user_database()
+        headers = db.get_headers()
+        user_id = db.get_user_id()
+        
+        # Get the most recent vocabulary entry
+        url = f'{db.supabase_url}/rest/v1/vocabulary?user_id=eq.{user_id}&order=date_added.desc&limit=1'
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data:
+                latest = data[0]
+                return {
+                    'word': f"{latest['word_original']} → {latest['word_translated']}",
+                    'language': latest['language_translated'],
+                    'category': latest.get('category', 'No category'),
+                    'date_added': latest['date_added'],
+                    'has_image': bool(latest.get('image_path')),
+                    'image_path': latest.get('image_path', 'No image')
+                }
+            else:
+                return "No vocabulary found in database"
+        else:
+            return f"Database query failed: {response.status_code}"
+            
+    except Exception as e:
+        return f"Verification error: {e}"
+    
 def debug_storage_status():
     """Debug function to check Supabase Storage status."""
     try:
@@ -4205,4 +4320,42 @@ else:
     st.sidebar.warning("No active session")
     st.sidebar.markdown("*Start a session in Camera Mode to track progress*")
 
+
+# Add Supabase debugging section to sidebar
+with st.sidebar.expander("🔍 Database Debug"):
+    if st.button("Check Supabase Connection"):
+        debug_result = debug_supabase_connection()
+        if isinstance(debug_result, dict):
+            st.write("**Connection Status:**", debug_result['connection'])
+            st.write("**User ID:**", debug_result['user_id'])
+            st.write("**Vocabulary Count:**", debug_result['vocab_count'])
+            st.write("**Auth Token:**", "✅" if debug_result['auth_token_exists'] else "❌")
+            st.write("**Images in Storage:**", debug_result['image_count'])
+            
+            if debug_result['latest_words']:
+                st.write("**Latest Words:**")
+                for word in debug_result['latest_words']:
+                    st.write(f"- {word}")
+        else:
+            st.write(debug_result)
+    
+    if st.button("Verify Last Save"):
+        verify_result = verify_last_save_operation()
+        if isinstance(verify_result, dict):
+            st.write("**Last Saved Word:**")
+            st.write(f"Word: {verify_result['word']}")
+            st.write(f"Language: {verify_result['language']}")
+            st.write(f"Category: {verify_result['category']}")
+            st.write(f"Date: {verify_result['date_added']}")
+            st.write(f"Has Image: {'✅' if verify_result['has_image'] else '❌'}")
+            if verify_result['has_image']:
+                st.write(f"Image Path: {verify_result['image_path']}")
+        else:
+            st.write(verify_result)
+    
+    if st.button("Force Refresh Data"):
+        # Clear cached data and reload
+        if 'supabase_db' in st.session_state:
+            del st.session_state.supabase_db
+        st.rerun()
 add_footer()
