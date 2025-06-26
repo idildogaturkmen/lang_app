@@ -22,7 +22,6 @@ from deep_translator import GoogleTranslator
 from database import LanguageLearningDB
 import json
 
-# First, display Python version for
 st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
@@ -566,13 +565,16 @@ def load_user_data_from_supabase():
         return False
 
 def detect_objects_google_vision(image, confidence_threshold=0.5):
-    """Google Cloud Vision-based object detection."""
+    """Google Cloud Vision-based object detection - Fixed to use Streamlit secrets."""
     try:
         from google.cloud import vision
         import io
         import json
         import tempfile
         import streamlit as st
+        import numpy as np
+        
+        print(f"🔍 Starting object detection with confidence {confidence_threshold}")
         
         # Fix RGBA to JPEG conversion for object detection
         processed_image = image
@@ -582,6 +584,7 @@ def detect_objects_google_vision(image, confidence_threshold=0.5):
                 image = image.convert('RGBA')
             rgb_image.paste(image, mask=image.split()[-1] if image.mode in ('RGBA', 'LA') else None)
             processed_image = rgb_image
+            print(f"🔧 Converted {image.mode} to RGB")
         
         # Get credentials from Streamlit secrets (same as text detection)
         if "gcp_service_account" in st.secrets:
@@ -596,43 +599,61 @@ def detect_objects_google_vision(image, confidence_threshold=0.5):
             # Set the environment variable to point to the temp file
             import os
             os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = temp_cred_file
+            print("✅ Credentials configured from Streamlit secrets")
+        else:
+            print("❌ No gcp_service_account in secrets")
+            return [], np.array(image)
         
         # Initialize the client
         client = vision.ImageAnnotatorClient()
+        print("✅ Vision client initialized")
         
         # Convert PIL image to bytes
         img_byte_arr = io.BytesIO()
         processed_image.save(img_byte_arr, format='JPEG', quality=90)
         img_byte_arr = img_byte_arr.getvalue()
+        print(f"✅ Image converted to bytes: {len(img_byte_arr)} bytes")
         
         # Create Vision API image object
         vision_image = vision.Image(content=img_byte_arr)
         
         # Perform object localization
-        objects = client.object_localization(image=vision_image).localized_object_annotations
+        print("📡 Calling Google Vision object_localization...")
+        response = client.object_localization(image=vision_image)
+        objects = response.localized_object_annotations
+        print(f"📡 API returned {len(objects)} raw objects")
         
         # Clean up temp file if created
         if "gcp_service_account" in st.secrets and 'temp_cred_file' in locals():
             try:
                 import os
                 os.unlink(temp_cred_file)
+                print("🧹 Cleaned up temp credentials file")
             except:
                 pass
         
+        # Check for API errors
+        if response.error.message:
+            print(f"❌ Google Vision API error: {response.error.message}")
+            return [], np.array(image)
+        
         if not objects:
-            print("No objects detected in image")
+            print("⚠️ No objects detected by Google Vision API")
             return [], np.array(image)
         
         # Convert to our detection format
         detections = []
-        img_array = np.array(image)
+        img_array = np.array(processed_image)
         height, width = img_array.shape[:2]
+        print(f"🖼️ Processing image size: {width}x{height}")
         
-        for obj in objects:
+        for i, obj in enumerate(objects):
             # Get confidence score
             confidence = obj.score
+            print(f"🔍 Object {i+1}: {obj.name} (confidence: {confidence:.2f})")
             
             if confidence < confidence_threshold:
+                print(f"   ⏭️ Skipped - below threshold {confidence_threshold}")
                 continue
             
             # Get object name and clean it
@@ -640,6 +661,7 @@ def detect_objects_google_vision(image, confidence_threshold=0.5):
             
             # Map Google Vision labels to our categories
             mapped_label = map_google_vision_label(label)
+            print(f"   📝 Mapped: {label} → {mapped_label}")
             
             # Get bounding box (normalized coordinates)
             vertices = obj.bounding_poly.normalized_vertices
@@ -659,68 +681,23 @@ def detect_objects_google_vision(image, confidence_threshold=0.5):
                 'bbox': [left, top, right, bottom],
                 'original_label': label  # Keep original for reference
             })
+            print(f"   ✅ Added detection: {mapped_label}")
         
-        print(f"✅ Google Vision detected {len(detections)} objects")
+        print(f"🎯 Final detections: {len(detections)} objects above threshold")
         
         # Draw detections on image
         result_image = draw_detections(img_array, detections)
         
         return detections, result_image
         
-    except ImportError:
-        print("❌ Google Cloud Vision library not installed")
+    except ImportError as e:
+        print(f"❌ Import error: {e}")
         return [], np.array(image)
     except Exception as e:
         print(f"❌ Google Vision detection error: {e}")
+        import traceback
+        print(f"📋 Full traceback: {traceback.format_exc()}")
         return [], np.array(image)
-
-def debug_object_detection(image, confidence_threshold=0.5):
-    """Debug object detection to see where it's failing."""
-    try:
-        import streamlit as st
-        import numpy as np
-        
-        st.write("🔍 **Object Detection Debug:**")
-        st.write(f"✅ Image received: {image is not None}")
-        
-        if image:
-            st.write(f"✅ Image size: {image.size}")
-            st.write(f"✅ Image mode: {image.mode}")
-            st.write(f"✅ Confidence threshold: {confidence_threshold}")
-        
-        # Test if Google Cloud Vision function exists
-        try:
-            from main import detect_objects_google_vision
-            st.write("✅ detect_objects_google_vision function found")
-        except ImportError as e:
-            st.write(f"❌ Function import error: {e}")
-            return
-        
-        # Test the actual detection
-        st.write("📡 Calling detect_objects_google_vision...")
-        
-        try:
-            detections, result_image = detect_objects_google_vision(image, confidence_threshold)
-            
-            st.write(f"✅ Function completed successfully")
-            st.write(f"📊 Detections returned: {len(detections) if detections else 0}")
-            st.write(f"🖼️ Result image shape: {np.array(result_image).shape if result_image is not None else 'None'}")
-            
-            if detections:
-                st.write("🎯 **Detection details:**")
-                for i, detection in enumerate(detections):
-                    st.write(f"  {i+1}. {detection}")
-            else:
-                st.write("❌ No detections returned")
-                
-        except Exception as e:
-            st.write(f"❌ Detection function error: {e}")
-            import traceback
-            st.write(f"📋 Full traceback: {traceback.format_exc()}")
-            
-    except Exception as e:
-        st.write(f"❌ Debug error: {e}")
-
 
 def map_google_vision_label(vision_label):
     """Map Google Vision labels to our existing label system."""
@@ -3524,10 +3501,8 @@ if app_mode == "Camera Mode":
                     
     # Process image if available
     if image is not None:
-        st.write("🔍 DEBUG: Image received, processing...")  # ADD THIS LINE
         # Process based on detection type
         if detection_type == "Objects":
-            st.write("🔍 DEBUG: Object detection selected")  # ADD THIS LINE
 
             # Use a placeholder for the spinner that we can clear later
             spinner_placeholder = st.empty()
@@ -3539,13 +3514,10 @@ if app_mode == "Camera Mode":
             separator_placeholder.markdown('<div class="result-separator"></div>', unsafe_allow_html=True)
             
             try:
-                st.write("🔍 DEBUG: About to call detect_objects_google_vision")  # ADD THIS LINE
                 # Use Google Cloud Vision directly on original image
                 detections, result_image = detect_objects_google_vision(
                     image, confidence_threshold
                 )
-
-                st.write(f"🔍 DEBUG: Detection completed. Found {len(detections) if detections else 0} objects")  # ADD THIS LINE
                 
             except Exception as e:
                 st.write(f"🔍 DEBUG: Exception caught: {e}")  # ADD THIS LINE
@@ -3560,7 +3532,6 @@ if app_mode == "Camera Mode":
         
             # Display results
             if detections:
-                st.write("🔍 DEBUG: Displaying detection results")  # ADD THIS LINE
                 style_section_title("✨ Detected Objects")
                 
                 # Display image with detection boxes
@@ -4768,9 +4739,4 @@ except Exception as e:
 vocabulary = get_all_vocabulary_direct()
 actual_word_count = len(vocabulary) if vocabulary else 0
 
-# Debug object detection (temporary)
-if image is not None:
-    if st.button("🔍 Debug Object Detection"):
-        debug_object_detection(image, confidence_threshold)
-        
 add_footer()
