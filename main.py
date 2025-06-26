@@ -674,72 +674,54 @@ def detect_objects_google_vision(image, confidence_threshold=0.5):
         print(f"❌ Google Vision detection error: {e}")
         return [], np.array(image)
 
-def debug_session_creation():
-    """Debug session creation to see what's failing."""
+def debug_object_detection(image, confidence_threshold=0.5):
+    """Debug object detection to see where it's failing."""
     try:
         import streamlit as st
-        import requests
-        from datetime import datetime
+        import numpy as np
         
-        st.write("🔍 **Session Creation Debug:**")
+        st.write("🔍 **Object Detection Debug:**")
+        st.write(f"✅ Image received: {image is not None}")
         
-        user = get_authenticated_user()
-        if not user:
-            st.write("❌ No authenticated user")
+        if image:
+            st.write(f"✅ Image size: {image.size}")
+            st.write(f"✅ Image mode: {image.mode}")
+            st.write(f"✅ Confidence threshold: {confidence_threshold}")
+        
+        # Test if Google Cloud Vision function exists
+        try:
+            from main import detect_objects_google_vision
+            st.write("✅ detect_objects_google_vision function found")
+        except ImportError as e:
+            st.write(f"❌ Function import error: {e}")
             return
-            
-        st.write(f"✅ User ID: {user.get('id')}")
         
-        db = get_user_database()
-        user_id = db.get_user_id()
-        headers = db.get_headers()
-        
-        st.write(f"✅ Database user ID: {user_id}")
-        st.write(f"✅ Headers prepared: {bool(headers)}")
-        
-        # Test the actual session creation request
-        data = {
-            'user_id': user_id,
-            'start_time': datetime.now().isoformat(),
-            'words_studied': 0,
-            'words_learned': 0
-        }
-        
-        st.write("📡 Attempting to create session...")
-        st.write(f"Data being sent: {data}")
+        # Test the actual detection
+        st.write("📡 Calling detect_objects_google_vision...")
         
         try:
-            response = requests.post(
-                f'{db.supabase_url}/rest/v1/sessions',
-                headers=headers,
-                json=data,
-                timeout=30
-            )
+            detections, result_image = detect_objects_google_vision(image, confidence_threshold)
             
-            st.write(f"📡 Response status: {response.status_code}")
-            st.write(f"📡 Response headers: {dict(response.headers)}")
-            st.write(f"📡 Response text: {response.text}")
+            st.write(f"✅ Function completed successfully")
+            st.write(f"📊 Detections returned: {len(detections) if detections else 0}")
+            st.write(f"🖼️ Result image shape: {np.array(result_image).shape if result_image is not None else 'None'}")
             
-            if response.status_code in [200, 201]:
-                result = response.json()
-                st.write(f"✅ Success! Result: {result}")
-                if result and len(result) > 0:
-                    session_id = result[0].get('id')
-                    st.write(f"🎯 Session ID: {session_id}")
-                else:
-                    st.write("❌ Empty result array")
+            if detections:
+                st.write("🎯 **Detection details:**")
+                for i, detection in enumerate(detections):
+                    st.write(f"  {i+1}. {detection}")
             else:
-                st.write(f"❌ Request failed with status {response.status_code}")
+                st.write("❌ No detections returned")
                 
         except Exception as e:
-            st.write(f"❌ Request error: {e}")
+            st.write(f"❌ Detection function error: {e}")
+            import traceback
+            st.write(f"📋 Full traceback: {traceback.format_exc()}")
             
     except Exception as e:
         st.write(f"❌ Debug error: {e}")
 
-if st.button("🔍 Debug Session Creation"):
-    debug_session_creation()
-    
+
 def map_google_vision_label(vision_label):
     """Map Google Vision labels to our existing label system."""
     # Mapping from Google Vision labels to our expected labels
@@ -3542,8 +3524,11 @@ if app_mode == "Camera Mode":
                     
     # Process image if available
     if image is not None:
+        st.write("🔍 DEBUG: Image received, processing...")  # ADD THIS LINE
         # Process based on detection type
         if detection_type == "Objects":
+            st.write("🔍 DEBUG: Object detection selected")  # ADD THIS LINE
+
             # Use a placeholder for the spinner that we can clear later
             spinner_placeholder = st.empty()
             with spinner_placeholder.container():
@@ -3554,12 +3539,16 @@ if app_mode == "Camera Mode":
             separator_placeholder.markdown('<div class="result-separator"></div>', unsafe_allow_html=True)
             
             try:
+                st.write("🔍 DEBUG: About to call detect_objects_google_vision")  # ADD THIS LINE
                 # Use Google Cloud Vision directly on original image
                 detections, result_image = detect_objects_google_vision(
                     image, confidence_threshold
                 )
+
+                st.write(f"🔍 DEBUG: Detection completed. Found {len(detections) if detections else 0} objects")  # ADD THIS LINE
                 
             except Exception as e:
+                st.write(f"🔍 DEBUG: Exception caught: {e}")  # ADD THIS LINE
                 error_message(f"Detection error: {str(e)}")
                 # Return empty results on error
                 detections, result_image = [], np.array(image)
@@ -3567,9 +3556,11 @@ if app_mode == "Camera Mode":
             # Clear the spinner and separator completely
             spinner_placeholder.empty()
             separator_placeholder.empty()
+            st.write(f"🔍 DEBUG: About to check if detections exist: {bool(detections)}")  # ADD THIS LINE
         
             # Display results
             if detections:
+                st.write("🔍 DEBUG: Displaying detection results")  # ADD THIS LINE
                 style_section_title("✨ Detected Objects")
                 
                 # Display image with detection boxes
@@ -4777,4 +4768,9 @@ except Exception as e:
 vocabulary = get_all_vocabulary_direct()
 actual_word_count = len(vocabulary) if vocabulary else 0
 
+# Debug object detection (temporary)
+if image is not None:
+    if st.button("🔍 Debug Object Detection"):
+        debug_object_detection(image, confidence_threshold)
+        
 add_footer()
