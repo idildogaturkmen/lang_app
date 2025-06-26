@@ -3773,8 +3773,8 @@ if app_mode == "Camera Mode":
                                     # Try to save image (allow this to fail without stopping vocabulary save)
                                     image_path = None
                                     try:
-                                        # FIXED: Complete the save_image function call
-                                        image_path = save_image(uploaded_image, label, detection.get('bbox'))
+                                        # CORRECTED: Use 'image' variable (not 'uploaded_image')
+                                        image_path = save_image(image, label, detection.get('bbox'))
                                         if image_path:
                                             print(f"✅ Image saved: {image_path}")
                                         else:
@@ -4841,5 +4841,5 @@ if st.sidebar.button("🔧 Test Database"):
         st.sidebar.write(f"📚 Vocab Save: {test_result}")
     else:
         st.sidebar.write("❌ No authentication")
-        
+
 add_footer()
