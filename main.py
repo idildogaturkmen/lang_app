@@ -568,32 +568,60 @@ def load_user_data_from_supabase():
 def detect_objects_google_vision(image, confidence_threshold=0.5):
     """Google Cloud Vision-based object detection."""
     try:
-        import os
         from google.cloud import vision
-        from google.oauth2 import service_account
         import io
+        import json
+        import tempfile
+        import streamlit as st
         
-        # Get API key from environment
-        api_key = os.getenv('GOOGLE_CLOUD_VISION_API_KEY')
-        if not api_key:
-            print("❌ Google Cloud Vision API key not found")
-            return [], np.array(image)
+        # Fix RGBA to JPEG conversion for object detection
+        processed_image = image
+        if image.mode in ('RGBA', 'LA', 'P'):
+            rgb_image = Image.new('RGB', image.size, (255, 255, 255))
+            if image.mode == 'P':
+                image = image.convert('RGBA')
+            rgb_image.paste(image, mask=image.split()[-1] if image.mode in ('RGBA', 'LA') else None)
+            processed_image = rgb_image
         
-        # Initialize the client with API key
-        client = vision.ImageAnnotatorClient(
-            client_options={"api_key": api_key}
-        )
+        # Get credentials from Streamlit secrets (same as text detection)
+        if "gcp_service_account" in st.secrets:
+            # Create credentials from Streamlit secrets
+            credentials_info = dict(st.secrets["gcp_service_account"])
+            
+            # Create a temporary file with the credentials
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                json.dump(credentials_info, f)
+                temp_cred_file = f.name
+            
+            # Set the environment variable to point to the temp file
+            import os
+            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = temp_cred_file
+        
+        # Initialize the client
+        client = vision.ImageAnnotatorClient()
         
         # Convert PIL image to bytes
         img_byte_arr = io.BytesIO()
-        image.save(img_byte_arr, format='JPEG', quality=90)
-        img_byte_arr.seek(0)
+        processed_image.save(img_byte_arr, format='JPEG', quality=90)
+        img_byte_arr = img_byte_arr.getvalue()
         
         # Create Vision API image object
-        vision_image = vision.Image(content=img_byte_arr.getvalue())
+        vision_image = vision.Image(content=img_byte_arr)
         
         # Perform object localization
         objects = client.object_localization(image=vision_image).localized_object_annotations
+        
+        # Clean up temp file if created
+        if "gcp_service_account" in st.secrets and 'temp_cred_file' in locals():
+            try:
+                import os
+                os.unlink(temp_cred_file)
+            except:
+                pass
+        
+        if not objects:
+            print("No objects detected in image")
+            return [], np.array(image)
         
         # Convert to our detection format
         detections = []
@@ -646,6 +674,38 @@ def detect_objects_google_vision(image, confidence_threshold=0.5):
         print(f"❌ Google Vision detection error: {e}")
         return [], np.array(image)
 
+def debug_google_credentials():
+    """Debug function to check Google Cloud credentials."""
+    try:
+        import streamlit as st
+        
+        st.write("🔍 **Google Cloud Credentials Debug:**")
+        
+        # Check if secrets exist
+        if hasattr(st, 'secrets'):
+            st.write("✅ Streamlit secrets available")
+            
+            if "gcp_service_account" in st.secrets:
+                st.write("✅ gcp_service_account found in secrets")
+                
+                # Check specific fields (don't display sensitive data)
+                creds = st.secrets["gcp_service_account"]
+                st.write(f"- Type: {creds.get('type', 'MISSING')}")
+                st.write(f"- Project ID: {creds.get('project_id', 'MISSING')}")
+                st.write(f"- Client Email: {creds.get('client_email', 'MISSING')}")
+                st.write(f"- Has Private Key: {'✅' if creds.get('private_key') else '❌'}")
+            else:
+                st.write("❌ gcp_service_account NOT found in secrets")
+                st.write("Available secrets:", list(st.secrets.keys()))
+        else:
+            st.write("❌ No Streamlit secrets available")
+            
+    except Exception as e:
+        st.write(f"❌ Error checking credentials: {e}")
+
+if st.button("🔍 Debug Google Credentials"):
+    debug_google_credentials()
+    
 def map_google_vision_label(vision_label):
     """Map Google Vision labels to our existing label system."""
     # Mapping from Google Vision labels to our expected labels
