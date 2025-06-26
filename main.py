@@ -432,6 +432,62 @@ def require_authentication():
     
     return user
 
+def debug_authentication():
+    """Debug version to see what we're receiving."""
+    st.title("🔍 Authentication Debug")
+    
+    # Get query parameters
+    try:
+        query_params = st.experimental_get_query_params()
+        st.write("**All Query Parameters:**", query_params)
+        
+        # Check each parameter
+        auth_token = query_params.get('auth_token')
+        user_email = query_params.get('user_email')
+        user_id = query_params.get('user_id')
+        auth_provider = query_params.get('auth_provider')
+        
+        st.write("**Individual Parameters:**")
+        st.write(f"- auth_token: {auth_token}")
+        st.write(f"- user_email: {user_email}")  
+        st.write(f"- user_id: {user_id}")
+        st.write(f"- auth_provider: {auth_provider}")
+        
+        if auth_token and user_email and user_id:
+            st.success("✅ All required parameters present!")
+            
+            # Extract from lists if needed
+            token = auth_token[0] if isinstance(auth_token, list) else auth_token
+            email = user_email[0] if isinstance(user_email, list) else user_email
+            uid = user_id[0] if isinstance(user_id, list) else user_id
+            
+            st.write("**Processed Values:**")
+            st.write(f"- Token (first 20 chars): {token[:20]}...")
+            st.write(f"- Email: {email}")
+            st.write(f"- User ID: {uid}")
+            
+            return {
+                'id': uid,
+                'email': email,
+                'auth_token': token,
+                'provider': 'supabase'
+            }
+        else:
+            st.error("❌ Missing required parameters")
+            return None
+            
+    except Exception as e:
+        st.error(f"❌ Error: {e}")
+        return None
+    
+user = debug_authentication()
+
+if user:
+    st.success(f"🎉 Successfully authenticated: {user['email']}")
+    st.write("You can now proceed with the app!")
+else:
+    st.error("Authentication failed - check the debug info above")
+
 def sync_user_data_to_supabase():
     """Comprehensive function to sync all user data to Supabase."""
     try:
