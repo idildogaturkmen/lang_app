@@ -428,10 +428,9 @@ def require_authentication():
 user = get_authenticated_user()
 
 if user:
-    st.success(f"🎉 Successfully authenticated: {user['email']}")
-    st.write("You can now proceed with the app!")
+    st.success(f"Successfully authenticated: {user['email']}")
 else:
-    st.error("Authentication failed - check the debug info above")
+    st.error("Authentication failed")
 
 def sync_user_data_to_supabase():
     """Comprehensive function to sync all user data to Supabase."""
