@@ -351,51 +351,75 @@ def get_authenticated_user():
     """Get authenticated user from URL parameters or session state."""
     # First try to get from URL parameters (for iframe embedding)
     if 'user' not in st.session_state:
-        # Check if we have auth parameters in URL
-        query_params = st.query_params
-        
-        auth_token = query_params.get('auth_token')
-        user_email = query_params.get('user_email') 
-        user_id = query_params.get('user_id')
-        
-        if auth_token and user_email and user_id:
-            # Create user object from URL parameters
-            st.session_state.user = {
-                'id': user_id[0] if isinstance(user_id, list) else user_id,
-                'email': user_email[0] if isinstance(user_email, list) else user_email,
-                'auth_token': auth_token[0] if isinstance(auth_token, list) else auth_token
-            }
-            print(f"✅ Authenticated user from URL: {st.session_state.user['email']}")
+        try:
+            # Use experimental_get_query_params for Streamlit 1.29.0
+            query_params = st.experimental_get_query_params()
+            
+            print(f"🔍 Auth params - Token: {'auth_token' in query_params}, Provider: {query_params.get('auth_provider')}, Email: {query_params.get('user_email')}, ID: {query_params.get('user_id')}")
+            
+            auth_token = query_params.get('auth_token')
+            user_email = query_params.get('user_email') 
+            user_id = query_params.get('user_id')
+            auth_provider = query_params.get('auth_provider')
+            
+            if auth_token and user_email and user_id:
+                # Extract values from lists (query params come as lists)
+                token = auth_token[0] if isinstance(auth_token, list) else auth_token
+                email = user_email[0] if isinstance(user_email, list) else user_email
+                uid = user_id[0] if isinstance(user_id, list) else user_id
+                provider = auth_provider[0] if isinstance(auth_provider, list) else auth_provider
+                
+                # Create user object from URL parameters
+                st.session_state.user = {
+                    'id': uid,
+                    'email': email,
+                    'auth_token': token,
+                    'provider': provider or 'supabase'
+                }
+                print(f"✅ Authenticated user from URL: {st.session_state.user['email']}")
+                return st.session_state.user
+            else:
+                print("❌ Authentication failed - missing params")
+                return None
+                
+        except Exception as e:
+            print(f"❌ Error getting query params: {e}")
+            return None
     
     return st.session_state.get('user')
 
 def require_authentication():
-    """Require user authentication to access the app."""
+    """Require user authentication before proceeding."""
     user = get_authenticated_user()
     
     if not user:
-        st.error("🔒 Authentication Required")
-        st.info("Please log in through the main website to access Vocam.")
-        st.markdown("**[← Login Here](https://vocam.app/web)**")
+        st.error("🔐 Authentication Required")
+        st.markdown("""
+        **Please access this app through the proper authentication flow.**
         
-        # Show a simple demo mode option
-        st.markdown("---")
-        st.markdown("### Demo Mode")
-        if st.button("Continue as Demo User"):
-            # Set demo user data
-            demo_user = {
-                'id': 'demo_user_999',
-                'username': 'demo',
-                'displayName': 'Demo User',
-                'email': 'demo@vocam.app',
-                'timestamp': datetime.now().timestamp() * 1000
-            }
-            st.session_state.authenticated_user = demo_user
-            st.rerun()
+        If you're seeing this page, please:
+        1. Go back to [vocam.app/web](https://vocam.app/web)
+        2. Sign in with your account
+        3. You'll be automatically redirected here
+        
+        If you don't have an account, you can create one at the link above.
+        """)
+        
+        # Add a direct link button
+        st.markdown("""
+        <div style="text-align: center; margin: 2rem 0;">
+            <a href="https://vocam.app/web" 
+               style="background: #1679AB; color: white; padding: 12px 24px; 
+                      border-radius: 8px; text-decoration: none; font-weight: 600;">
+                🚀 Go to Vocam Login
+            </a>
+        </div>
+        """, unsafe_allow_html=True)
         
         st.stop()
     
     return user
+
 
 def sync_user_data_to_supabase():
     """Comprehensive function to sync all user data to Supabase."""
