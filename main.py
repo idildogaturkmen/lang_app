@@ -1254,40 +1254,86 @@ def check_pronunciation_dependencies():
     return dependencies
 
 
-def draw_detections(image_np, detections):
-    """Draw bounding boxes and labels on the image."""
-    result_image = image_np.copy()
-    
-    for detection in detections:
-        bbox = detection['bbox']
-        left, top, right, bottom = [int(x) for x in bbox]
-        label = detection['label']
-        confidence = detection['confidence']
+def draw_detections(img_array, detections):
+    """Draw bounding boxes and labels on the image with proper error handling."""
+    try:
+        import cv2
+        import numpy as np
         
-        # Use different colors for different object types
-        color = get_detection_color(label)
+        result_image = img_array.copy()
         
-        # Draw bounding box
-        cv2.rectangle(result_image, (left, top), (right, bottom), color, 3)
+        for detection in detections:
+            bbox = detection['bbox']
+            left, top, right, bottom = [int(x) for x in bbox]
+            label = detection['label']
+            confidence = detection['confidence']
+            
+            # Use different colors for different object types
+            color = get_detection_color(label)
+            
+            # Draw bounding box
+            cv2.rectangle(result_image, (left, top), (right, bottom), color, 3)
+            
+            # Prepare label text
+            label_text = f"{label} {confidence:.2f}"
+            
+            # Get text size for background
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 0.7
+            thickness = 2
+            (text_width, text_height), baseline = cv2.getTextSize(label_text, font, font_scale, thickness)
+            
+            # Draw background for text
+            cv2.rectangle(result_image, 
+                         (left, top - text_height - 10), 
+                         (left + text_width, top), 
+                         color, -1)
+            
+            # Draw text (white color for visibility)
+            cv2.putText(result_image, label_text,
+                       (left, top - 5),
+                       font, font_scale, (255, 255, 255), thickness)
         
-        # Prepare label text
-        label_text = f"{label} {confidence:.2f}"
-        label_size, _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+        return result_image
         
-        # Draw background for text
-        cv2.rectangle(result_image, 
-                     (left, top - label_size[1] - 10), 
-                     (left + label_size[0], top), 
-                     color, -1)
-        
-        # Draw text (white or black depending on background)
-        text_color = (255, 255, 255) if sum(color) < 400 else (0, 0, 0)
-        cv2.putText(result_image, label_text,
-                   (left, top - 5),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, text_color, 2)
-    
-    return result_image
+    except ImportError:
+        print("❌ OpenCV not available for drawing boxes")
+        return img_array
+    except Exception as e:
+        print(f"❌ Error drawing detections: {e}")
+        return img_array
 
+def get_detection_color(label):
+    """Get a consistent color for each object type."""
+    # Color mapping for different object categories (BGR format for OpenCV)
+    color_map = {
+        # Electronics - Blue shades
+        'cell phone': (255, 100, 100),
+        'laptop': (255, 150, 100),
+        'tv': (255, 200, 100),
+        'mouse': (200, 255, 100),
+        'keyboard': (150, 255, 100),
+        'remote': (100, 255, 100),
+        
+        # People - Green shades
+        'person': (100, 255, 150),
+        
+        # Furniture - Purple shades
+        'chair': (150, 100, 255),
+        'couch': (200, 100, 255),
+        'bed': (255, 100, 255),
+        
+        # Food - Orange/Red shades
+        'bottle': (100, 150, 255),
+        'cup': (100, 200, 255),
+        'bowl': (100, 255, 255),
+        'glasses': (255, 255, 100),
+        
+        # Default color
+        'default': (0, 255, 0)
+    }
+    
+    return color_map.get(label, color_map['default'])
 
 def calculate_iou(box1, box2):
     """Calculate Intersection over Union (IoU) of two bounding boxes."""
@@ -2803,6 +2849,52 @@ def get_signed_image_url(storage_path, expires_in=3600):
         print(f"❌ Error getting signed URL: {e}")
         return None
 
+def debug_database_connection():
+    """Debug database connection and saving functionality."""
+    try:
+        import streamlit as st
+        import requests
+        
+        st.write("🔍 **Database Connection Debug:**")
+        
+        user = get_authenticated_user()
+        if not user:
+            st.write("❌ No authenticated user")
+            return
+            
+        st.write(f"✅ User ID: {user.get('id')}")
+        
+        try:
+            db = get_user_database()
+            st.write("✅ Database instance created")
+            
+            user_id = db.get_user_id()
+            headers = db.get_headers()
+            
+            st.write(f"✅ Database user ID: {user_id}")
+            st.write(f"✅ Headers prepared: {bool(headers)}")
+            
+            # Test basic connection
+            test_url = f'{db.supabase_url}/rest/v1/vocabulary?user_id=eq.{user_id}&limit=1'
+            response = requests.get(test_url, headers=headers, timeout=10)
+            
+            st.write(f"📡 Test query status: {response.status_code}")
+            
+            if response.status_code == 200:
+                st.write("✅ Database connection working")
+                st.write(f"📊 Response: {response.json()}")
+            else:
+                st.write(f"❌ Database connection failed: {response.text}")
+                
+        except Exception as e:
+            st.write(f"❌ Database error: {e}")
+            
+    except Exception as e:
+        st.write(f"❌ Debug error: {e}")
+
+if st.button("🔍 Debug Database Connection"):
+    debug_database_connection()
+    
 def debug_supabase_connection():
     """Debug function to verify Supabase connection and data."""
     try:
