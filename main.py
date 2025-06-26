@@ -348,43 +348,33 @@ def get_url_params():
             return {}
 
 def get_authenticated_user():
-    """Get authenticated user from URL parameters or session state."""
-    # First try to get from URL parameters (for iframe embedding)
+    """Get authenticated user from localStorage or session state."""
     if 'user' not in st.session_state:
-        try:
-            # Use experimental_get_query_params for Streamlit 1.29.0
-            query_params = st.experimental_get_query_params()
+        # Add JavaScript to read from localStorage
+        auth_check = st.components.v1.html("""
+        <script>
+        const authToken = localStorage.getItem('vocam_auth_token');
+        const userEmail = localStorage.getItem('vocam_user_email');
+        const userId = localStorage.getItem('vocam_user_id');
+        
+        if (authToken && userEmail && userId) {
+            window.parent.postMessage({
+                type: 'auth_data',
+                auth_token: authToken,
+                user_email: userEmail,
+                user_id: userId
+            }, '*');
             
-            print(f"🔍 Auth params - Token: {'auth_token' in query_params}, Provider: {query_params.get('auth_provider')}, Email: {query_params.get('user_email')}, ID: {query_params.get('user_id')}")
-            
-            auth_token = query_params.get('auth_token')
-            user_email = query_params.get('user_email') 
-            user_id = query_params.get('user_id')
-            auth_provider = query_params.get('auth_provider')
-            
-            if auth_token and user_email and user_id:
-                # Extract values from lists (query params come as lists)
-                token = auth_token[0] if isinstance(auth_token, list) else auth_token
-                email = user_email[0] if isinstance(user_email, list) else user_email
-                uid = user_id[0] if isinstance(user_id, list) else user_id
-                provider = auth_provider[0] if isinstance(auth_provider, list) else auth_provider
-                
-                # Create user object from URL parameters
-                st.session_state.user = {
-                    'id': uid,
-                    'email': email,
-                    'auth_token': token,
-                    'provider': provider or 'supabase'
-                }
-                print(f"✅ Authenticated user from URL: {st.session_state.user['email']}")
-                return st.session_state.user
-            else:
-                print("❌ Authentication failed - missing params")
-                return None
-                
-        except Exception as e:
-            print(f"❌ Error getting query params: {e}")
-            return None
+            // Clear localStorage after use
+            localStorage.removeItem('vocam_auth_token');
+            localStorage.removeItem('vocam_user_email');
+            localStorage.removeItem('vocam_user_id');
+            localStorage.removeItem('vocam_auth_provider');
+        }
+        </script>
+        """, height=0)
+        
+        return None
     
     return st.session_state.get('user')
 
