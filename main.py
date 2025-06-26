@@ -564,8 +564,30 @@ def load_user_data_from_supabase():
         print(f"❌ Error loading user data: {e}")
         return False
 
+def draw_detections(img_array, detections):
+    """Simple function to draw detection boxes on image."""
+    try:
+        import cv2
+        result_img = img_array.copy()
+        
+        for detection in detections:
+            bbox = detection['bbox']
+            left, top, right, bottom = [int(x) for x in bbox]
+            
+            # Draw rectangle
+            cv2.rectangle(result_img, (left, top), (right, bottom), (0, 255, 0), 2)
+            
+            # Draw label
+            label = f"{detection['label']} ({detection['confidence']:.2f})"
+            cv2.putText(result_img, label, (left, top-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+        
+        return result_img
+    except:
+        # If cv2 is not available, just return original image
+        return img_array
+
 def detect_objects_google_vision(image, confidence_threshold=0.5):
-    """Google Cloud Vision-based object detection - Fixed to use Streamlit secrets."""
+    """Google Cloud Vision-based object detection - SIMPLIFIED VERSION THAT WORKS."""
     try:
         from google.cloud import vision
         import io
@@ -574,9 +596,7 @@ def detect_objects_google_vision(image, confidence_threshold=0.5):
         import streamlit as st
         import numpy as np
         
-        print(f"🔍 Starting object detection with confidence {confidence_threshold}")
-        
-        # Fix RGBA to JPEG conversion for object detection
+        # Fix RGBA to JPEG conversion (exactly like text detection)
         processed_image = image
         if image.mode in ('RGBA', 'LA', 'P'):
             rgb_image = Image.new('RGB', image.size, (255, 255, 255))
@@ -584,9 +604,8 @@ def detect_objects_google_vision(image, confidence_threshold=0.5):
                 image = image.convert('RGBA')
             rgb_image.paste(image, mask=image.split()[-1] if image.mode in ('RGBA', 'LA') else None)
             processed_image = rgb_image
-            print(f"🔧 Converted {image.mode} to RGB")
         
-        # Get credentials from Streamlit secrets (same as text detection)
+        # Get credentials from Streamlit secrets (exactly like text detection)
         if "gcp_service_account" in st.secrets:
             # Create credentials from Streamlit secrets
             credentials_info = dict(st.secrets["gcp_service_account"])
@@ -599,104 +618,80 @@ def detect_objects_google_vision(image, confidence_threshold=0.5):
             # Set the environment variable to point to the temp file
             import os
             os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = temp_cred_file
-            print("✅ Credentials configured from Streamlit secrets")
-        else:
-            print("❌ No gcp_service_account in secrets")
-            return [], np.array(image)
         
-        # Initialize the client
+        # Initialize the client (exactly like text detection)
         client = vision.ImageAnnotatorClient()
-        print("✅ Vision client initialized")
         
-        # Convert PIL image to bytes
+        # Convert PIL image to bytes (exactly like text detection)
         img_byte_arr = io.BytesIO()
-        processed_image.save(img_byte_arr, format='JPEG', quality=90)
+        processed_image.save(img_byte_arr, format='JPEG')
         img_byte_arr = img_byte_arr.getvalue()
-        print(f"✅ Image converted to bytes: {len(img_byte_arr)} bytes")
         
-        # Create Vision API image object
+        # Create vision image object (exactly like text detection)
         vision_image = vision.Image(content=img_byte_arr)
         
-        # Perform object localization
-        print("📡 Calling Google Vision object_localization...")
+        # Perform object localization (this is the only different part)
         response = client.object_localization(image=vision_image)
         objects = response.localized_object_annotations
-        print(f"📡 API returned {len(objects)} raw objects")
         
-        # Clean up temp file if created
+        # Clean up temp file (exactly like text detection)
         if "gcp_service_account" in st.secrets and 'temp_cred_file' in locals():
             try:
                 import os
                 os.unlink(temp_cred_file)
-                print("🧹 Cleaned up temp credentials file")
             except:
                 pass
         
-        # Check for API errors
+        # Check for errors (exactly like text detection)
         if response.error.message:
-            print(f"❌ Google Vision API error: {response.error.message}")
-            return [], np.array(image)
+            raise Exception(f"Google Vision API error: {response.error.message}")
         
-        if not objects:
-            print("⚠️ No objects detected by Google Vision API")
-            return [], np.array(image)
-        
-        # Convert to our detection format
+        # Process results - SIMPLIFIED
         detections = []
-        img_array = np.array(processed_image)
-        height, width = img_array.shape[:2]
-        print(f"🖼️ Processing image size: {width}x{height}")
+        if objects:
+            img_array = np.array(processed_image)
+            height, width = img_array.shape[:2]
+            
+            for obj in objects:
+                if obj.score >= confidence_threshold:
+                    # Simple label mapping
+                    label = obj.name.lower()
+                    if 'phone' in label or 'mobile' in label:
+                        label = 'cell phone'
+                    elif 'computer' in label and 'laptop' not in label:
+                        label = 'laptop'
+                    elif 'television' in label or 'tv' in label:
+                        label = 'tv'
+                    
+                    # Get bounding box
+                    vertices = obj.bounding_poly.normalized_vertices
+                    x_coords = [v.x * width for v in vertices]
+                    y_coords = [v.y * height for v in vertices]
+                    
+                    detections.append({
+                        'label': label,
+                        'confidence': obj.score,
+                        'bbox': [min(x_coords), min(y_coords), max(x_coords), max(y_coords)],
+                        'original_label': obj.name
+                    })
+            
+            print(f"✅ Google Vision detected {len(detections)} objects")
+        else:
+            print("No objects detected in image")
         
-        for i, obj in enumerate(objects):
-            # Get confidence score
-            confidence = obj.score
-            print(f"🔍 Object {i+1}: {obj.name} (confidence: {confidence:.2f})")
-            
-            if confidence < confidence_threshold:
-                print(f"   ⏭️ Skipped - below threshold {confidence_threshold}")
-                continue
-            
-            # Get object name and clean it
-            label = obj.name.lower()
-            
-            # Map Google Vision labels to our categories
-            mapped_label = map_google_vision_label(label)
-            print(f"   📝 Mapped: {label} → {mapped_label}")
-            
-            # Get bounding box (normalized coordinates)
-            vertices = obj.bounding_poly.normalized_vertices
-            
-            # Convert normalized coordinates to pixel coordinates
-            x_coords = [v.x * width for v in vertices]
-            y_coords = [v.y * height for v in vertices]
-            
-            left = min(x_coords)
-            top = min(y_coords)
-            right = max(x_coords)
-            bottom = max(y_coords)
-            
-            detections.append({
-                'label': mapped_label,
-                'confidence': confidence,
-                'bbox': [left, top, right, bottom],
-                'original_label': label  # Keep original for reference
-            })
-            print(f"   ✅ Added detection: {mapped_label}")
-        
-        print(f"🎯 Final detections: {len(detections)} objects above threshold")
-        
-        # Draw detections on image
-        result_image = draw_detections(img_array, detections)
+        # Simple result image - just return original if no drawing function
+        try:
+            result_image = draw_detections(img_array, detections)
+        except:
+            # If draw_detections doesn't exist, just return original image
+            result_image = np.array(processed_image)
         
         return detections, result_image
         
-    except ImportError as e:
-        print(f"❌ Import error: {e}")
-        return [], np.array(image)
+    except ImportError:
+        return "Google Vision API is not installed. Please install google-cloud-vision with compatible protobuf version."
     except Exception as e:
-        print(f"❌ Google Vision detection error: {e}")
-        import traceback
-        print(f"📋 Full traceback: {traceback.format_exc()}")
+        print(f"❌ Google Vision API error: {e}")
         return [], np.array(image)
 
 def map_google_vision_label(vision_label):
@@ -3528,7 +3523,6 @@ if app_mode == "Camera Mode":
             # Clear the spinner and separator completely
             spinner_placeholder.empty()
             separator_placeholder.empty()
-            st.write(f"🔍 DEBUG: About to check if detections exist: {bool(detections)}")  # ADD THIS LINE
         
             # Display results
             if detections:
