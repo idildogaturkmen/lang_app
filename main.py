@@ -1446,63 +1446,6 @@ def detect_objects(image, confidence_threshold=0.5, iou_threshold=0.45):
     """Main detection function - Google Cloud Vision only."""
     return detect_objects_google_vision(image, confidence_threshold)
 
-
-# Function to enhance image quality
-def enhance_image(image, enhance_type="auto"):
-    """Enhance the image to improve object detection."""
-    try:
-        # Convert PIL image to numpy array
-        img_array = np.array(image)
-        
-        if enhance_type == "auto" or enhance_type == "brightness":
-            # Auto-adjust brightness
-            gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
-            mean_brightness = np.mean(gray)
-            
-            if mean_brightness < 100:  # Image is too dark
-                # Increase brightness
-                hsv = cv2.cvtColor(img_array, cv2.COLOR_RGB2HSV)
-                h, s, v = cv2.split(hsv)
-                
-                # Calculate how much to increase brightness (more for darker images)
-                brightness_factor = max(1.0, (130 - mean_brightness) / 80)
-                v = cv2.add(v, np.array([brightness_factor * 30.0], dtype=np.uint8))
-                
-                final_hsv = cv2.merge((h, s, v))
-                img_array = cv2.cvtColor(final_hsv, cv2.COLOR_HSV2RGB)
-            
-            elif mean_brightness > 200:  # Image is too bright
-                # Decrease brightness
-                hsv = cv2.cvtColor(img_array, cv2.COLOR_RGB2HSV)
-                h, s, v = cv2.split(hsv)
-                
-                # Reduce brightness
-                v = cv2.subtract(v, np.array([30], dtype=np.uint8))
-                
-                final_hsv = cv2.merge((h, s, v))
-                img_array = cv2.cvtColor(final_hsv, cv2.COLOR_HSV2RGB)
-        
-        if enhance_type == "auto" or enhance_type == "contrast":
-            # Enhance contrast
-            lab = cv2.cvtColor(img_array, cv2.COLOR_RGB2LAB)
-            l, a, b = cv2.split(lab)
-            
-            # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization)
-            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-            cl = clahe.apply(l)
-            
-            # Merge the CLAHE enhanced L-channel with the a and b channels
-            enhanced_lab = cv2.merge((cl, a, b))
-            img_array = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2RGB)
-        
-        # Convert back to PIL image
-        enhanced_image = Image.fromarray(img_array)
-        return enhanced_image
-    
-    except Exception as e:
-        error_message(f"Image enhancement error: {e}")
-        return image  # Return original image on error
-
 # Function to detect text in image (OCR)
 def detect_text_in_image(image):
     """Detect text in image using Google Vision API only."""
@@ -3502,8 +3445,6 @@ if app_mode == "Camera Mode":
         # Set iou_threshold for optimal detection (balance between precision and maximum detection)
         iou_threshold = 0.45  # Using a lower threshold to detect more objects while maintaining precision
         
-        # Auto-enhancement is always applied
-        enhancement_type = "auto"
                     
     # Process image if available
     if image is not None:
@@ -3519,14 +3460,9 @@ if app_mode == "Camera Mode":
             separator_placeholder.markdown('<div class="result-separator"></div>', unsafe_allow_html=True)
             
             try:
-                # Always apply enhancement for object detection
-                enhanced_image = enhance_image(image, "auto")
-                if enhanced_image is None:
-                    raise Exception("Image enhancement failed")
-                
-                # Use Google Cloud Vision
+                # Use Google Cloud Vision directly on original image
                 detections, result_image = detect_objects_google_vision(
-                    enhanced_image, confidence_threshold
+                    image, confidence_threshold
                 )
                 
             except Exception as e:
@@ -4746,15 +4682,5 @@ except Exception as e:
 # Get actual vocabulary count for display
 vocabulary = get_all_vocabulary_direct()
 actual_word_count = len(vocabulary) if vocabulary else 0
-
-# Always show as active if user has vocabulary
-if actual_word_count > 0:
-    st.sidebar.success(f"Session active")
-    st.sidebar.info(f"Words studied: {actual_word_count}")
-    st.sidebar.info(f"Words learned: {actual_word_count}")
-else:
-    st.sidebar.warning("No vocabulary yet")
-    st.sidebar.markdown("*Start learning in Camera Mode*")
-
 
 add_footer()
