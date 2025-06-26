@@ -23,6 +23,7 @@ from database import LanguageLearningDB
 import json
 
 st.set_page_config(
+    page_title="Vocam",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -77,7 +78,14 @@ class SupabaseDB:
     def __init__(self):
         self.supabase_url = "https://csszlzpsfwmsezursivk.supabase.co"
         self.supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNzc3psenBzZndtc2V6dXJzaXZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA1Mjg1MjEsImV4cCI6MjA2NjEwNDUyMX0.gIi0Q_pifYpXeM1r8kWlgTO1LD8bc91lQ3suH8OWDKI"
-        
+
+        try:
+            from supabase import create_client
+            self.supabase = create_client(self.supabase_url, self.supabase_key)
+        except ImportError:
+            print("⚠️ Supabase client not available, using requests only")
+            self.supabase = None
+
     def get_user_id(self):
         """Get current user ID from authentication."""
         user = get_authenticated_user()
@@ -2256,49 +2264,65 @@ class FreeTranslationService:
         self.last_request_time = 0
         self.rate_limit_delay = 1.0  # seconds between requests
         
-    def translate_text(text, target_language):
-        """Translate text to target language with fallback."""
+    def translate_text(self, text, target_language, source_language='en'):
+        """
+        Translate text using multiple free services with fallbacks
+        """
+        # Check cache first
+        cache_key = f"{text}_{source_language}_{target_language}"
+        if cache_key in self.translation_cache:
+            return self.translation_cache[cache_key]
+        
+        # Rate limiting
+        current_time = time.time()
+        if current_time - self.last_request_time < self.rate_limit_delay:
+            time.sleep(self.rate_limit_delay - (current_time - self.last_request_time))
+        
+        translation = None
+        
+        # Method 1: Deep Translator (Free Google Translate web interface)
         try:
-            from deep_translator import GoogleTranslator
-            
-            # Language code mapping
-            lang_mapping = {
-                'es': 'spanish',
-                'fr': 'french', 
-                'de': 'german',
-                'it': 'italian',
-                'pt': 'portuguese',
-                'ru': 'russian',
-                'ja': 'japanese',
-                'zh-CN': 'chinese'
-            }
-            
-            target_lang = lang_mapping.get(target_language, target_language)
-            
-            translator = GoogleTranslator(source='english', target=target_lang)
-            translated = translator.translate(text)
-            
-            if translated and translated.lower() != text.lower():
-                return translated
-            else:
-                # Fallback translations for common words
-                fallback_translations = {
-                    'es': {
-                        'person': 'persona',
-                        'cell phone': 'teléfono móvil', 
-                        'glasses': 'gafas',
-                        'bottle': 'botella',
-                        'cup': 'taza',
-                        'laptop': 'portátil'
-                    }
-                }
-                
-                fallback = fallback_translations.get(target_language, {})
-                return fallback.get(text.lower(), f"{text} (traducción)")
-                
+            translator = GoogleTranslator(source=source_language, target=target_language)
+            translation = translator.translate(text)
+            if translation and translation != text:
+                self.translation_cache[cache_key] = translation
+                self.last_request_time = time.time()
+                return translation
         except Exception as e:
-            print(f"❌ Translation error: {e}")
-            return f"{text} (translation failed)"
+            print(f"Deep Translator failed: {e}")
+        
+        # Method 2: MyMemory Translation API (Free tier: 10,000 chars/day)
+        try:
+            translation = self._translate_with_mymemory(text, source_language, target_language)
+            if translation:
+                self.translation_cache[cache_key] = translation
+                self.last_request_time = time.time()
+                return translation
+        except Exception as e:
+            print(f"MyMemory failed: {e}")
+        
+        # Method 3: LibreTranslate (if you have a server)
+        try:
+            translation = self._translate_with_libretranslate(text, source_language, target_language)
+            if translation:
+                self.translation_cache[cache_key] = translation
+                self.last_request_time = time.time()
+                return translation
+        except Exception as e:
+            print(f"LibreTranslate failed: {e}")
+        
+        # Method 4: Hugging Face models (for specific language pairs)
+        try:
+            translation = self._translate_with_huggingface(text, source_language, target_language)
+            if translation:
+                self.translation_cache[cache_key] = translation
+                self.last_request_time = time.time()
+                return translation
+        except Exception as e:
+            print(f"Hugging Face translation failed: {e}")
+        
+        # Fallback: Return formatted message
+        return f"[Translation to {target_language} unavailable]"
     
     def _translate_with_mymemory(self, text, source_lang, target_lang):
         """MyMemory Translation API - Free tier"""
@@ -2846,52 +2870,6 @@ def get_signed_image_url(storage_path, expires_in=3600):
     except Exception as e:
         print(f"❌ Error getting signed URL: {e}")
         return None
-
-def debug_database_connection():
-    """Debug database connection and saving functionality."""
-    try:
-        import streamlit as st
-        import requests
-        
-        st.write("🔍 **Database Connection Debug:**")
-        
-        user = get_authenticated_user()
-        if not user:
-            st.write("❌ No authenticated user")
-            return
-            
-        st.write(f"✅ User ID: {user.get('id')}")
-        
-        try:
-            db = get_user_database()
-            st.write("✅ Database instance created")
-            
-            user_id = db.get_user_id()
-            headers = db.get_headers()
-            
-            st.write(f"✅ Database user ID: {user_id}")
-            st.write(f"✅ Headers prepared: {bool(headers)}")
-            
-            # Test basic connection
-            test_url = f'{db.supabase_url}/rest/v1/vocabulary?user_id=eq.{user_id}&limit=1'
-            response = requests.get(test_url, headers=headers, timeout=10)
-            
-            st.write(f"📡 Test query status: {response.status_code}")
-            
-            if response.status_code == 200:
-                st.write("✅ Database connection working")
-                st.write(f"📊 Response: {response.json()}")
-            else:
-                st.write(f"❌ Database connection failed: {response.text}")
-                
-        except Exception as e:
-            st.write(f"❌ Database error: {e}")
-            
-    except Exception as e:
-        st.write(f"❌ Debug error: {e}")
-
-if st.button("🔍 Debug Database Connection"):
-    debug_database_connection()
     
 def debug_supabase_connection():
     """Debug function to verify Supabase connection and data."""
