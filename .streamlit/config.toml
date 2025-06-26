@@ -2,12 +2,9 @@
 headless = true
 enableCORS = false
 enableXsrfProtection = false
-maxUploadSize = 200
-port = 10000
-address = "0.0.0.0"
 
 [browser]
-gatherUsageStats = false
+gatherUsageStats = true
 
 [runner]
 fastReruns = true
