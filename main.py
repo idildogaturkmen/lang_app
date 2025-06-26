@@ -3373,6 +3373,10 @@ else:
     current_index = 0
     st.session_state.app_mode = app_mode_options[0]
 
+st.sidebar.markdown("---")  # Add a separator line
+st.sidebar.markdown("# Vocam")  # Add the title
+st.sidebar.markdown("---")  # Add another separator
+
 # Create selectbox with key to track changes
 new_app_mode = st.sidebar.selectbox(
     "Choose a mode",
@@ -4828,18 +4832,5 @@ except Exception as e:
 # Get actual vocabulary count for display
 vocabulary = get_all_vocabulary_direct()
 actual_word_count = len(vocabulary) if vocabulary else 0
-
-# Add this in your sidebar for testing
-if st.sidebar.button("🔧 Test Database"):
-    user = get_authenticated_user()
-    if user:
-        st.sidebar.write(f"✅ User: {user['email']}")
-        st.sidebar.write(f"🔑 Token: {'Yes' if user.get('auth_token') else 'No'}")
-        
-        # Test vocabulary save
-        test_result = add_vocabulary_direct("test_word", "palabra_prueba", "es", "test")
-        st.sidebar.write(f"📚 Vocab Save: {test_result}")
-    else:
-        st.sidebar.write("❌ No authentication")
 
 add_footer()
