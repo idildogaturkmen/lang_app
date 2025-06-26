@@ -564,85 +564,113 @@ def load_user_data_from_supabase():
         print(f"❌ Error loading user data: {e}")
         return False
 
+
 def detect_objects_google_vision(image, confidence_threshold=0.5):
-    """Google Cloud Vision-based object detection."""
+    """Google Cloud Vision-based object detection - SIMPLIFIED VERSION THAT WORKS."""
     try:
-        import os
         from google.cloud import vision
-        from google.oauth2 import service_account
         import io
+        import json
+        import tempfile
+        import streamlit as st
+        import numpy as np
         
-        # Get API key from environment
-        api_key = os.getenv('GOOGLE_CLOUD_VISION_API_KEY')
-        if not api_key:
-            print("❌ Google Cloud Vision API key not found")
-            return [], np.array(image)
+        # Fix RGBA to JPEG conversion (exactly like text detection)
+        processed_image = image
+        if image.mode in ('RGBA', 'LA', 'P'):
+            rgb_image = Image.new('RGB', image.size, (255, 255, 255))
+            if image.mode == 'P':
+                image = image.convert('RGBA')
+            rgb_image.paste(image, mask=image.split()[-1] if image.mode in ('RGBA', 'LA') else None)
+            processed_image = rgb_image
         
-        # Initialize the client with API key
-        client = vision.ImageAnnotatorClient(
-            client_options={"api_key": api_key}
-        )
+        # Get credentials from Streamlit secrets (exactly like text detection)
+        if "gcp_service_account" in st.secrets:
+            # Create credentials from Streamlit secrets
+            credentials_info = dict(st.secrets["gcp_service_account"])
+            
+            # Create a temporary file with the credentials
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                json.dump(credentials_info, f)
+                temp_cred_file = f.name
+            
+            # Set the environment variable to point to the temp file
+            import os
+            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = temp_cred_file
         
-        # Convert PIL image to bytes
+        # Initialize the client (exactly like text detection)
+        client = vision.ImageAnnotatorClient()
+        
+        # Convert PIL image to bytes (exactly like text detection)
         img_byte_arr = io.BytesIO()
-        image.save(img_byte_arr, format='JPEG', quality=90)
-        img_byte_arr.seek(0)
+        processed_image.save(img_byte_arr, format='JPEG')
+        img_byte_arr = img_byte_arr.getvalue()
         
-        # Create Vision API image object
-        vision_image = vision.Image(content=img_byte_arr.getvalue())
+        # Create vision image object (exactly like text detection)
+        vision_image = vision.Image(content=img_byte_arr)
         
-        # Perform object localization
-        objects = client.object_localization(image=vision_image).localized_object_annotations
+        # Perform object localization (this is the only different part)
+        response = client.object_localization(image=vision_image)
+        objects = response.localized_object_annotations
         
-        # Convert to our detection format
+        # Clean up temp file (exactly like text detection)
+        if "gcp_service_account" in st.secrets and 'temp_cred_file' in locals():
+            try:
+                import os
+                os.unlink(temp_cred_file)
+            except:
+                pass
+        
+        # Check for errors (exactly like text detection)
+        if response.error.message:
+            raise Exception(f"Google Vision API error: {response.error.message}")
+        
+        # Process results - SIMPLIFIED
         detections = []
-        img_array = np.array(image)
-        height, width = img_array.shape[:2]
+        if objects:
+            img_array = np.array(processed_image)
+            height, width = img_array.shape[:2]
+            
+            for obj in objects:
+                if obj.score >= confidence_threshold:
+                    # Simple label mapping
+                    label = obj.name.lower()
+                    if 'phone' in label or 'mobile' in label:
+                        label = 'cell phone'
+                    elif 'computer' in label and 'laptop' not in label:
+                        label = 'laptop'
+                    elif 'television' in label or 'tv' in label:
+                        label = 'tv'
+                    
+                    # Get bounding box
+                    vertices = obj.bounding_poly.normalized_vertices
+                    x_coords = [v.x * width for v in vertices]
+                    y_coords = [v.y * height for v in vertices]
+                    
+                    detections.append({
+                        'label': label,
+                        'confidence': obj.score,
+                        'bbox': [min(x_coords), min(y_coords), max(x_coords), max(y_coords)],
+                        'original_label': obj.name
+                    })
+            
+            print(f"✅ Google Vision detected {len(detections)} objects")
+        else:
+            print("No objects detected in image")
         
-        for obj in objects:
-            # Get confidence score
-            confidence = obj.score
-            
-            if confidence < confidence_threshold:
-                continue
-            
-            # Get object name and clean it
-            label = obj.name.lower()
-            
-            # Map Google Vision labels to our categories
-            mapped_label = map_google_vision_label(label)
-            
-            # Get bounding box (normalized coordinates)
-            vertices = obj.bounding_poly.normalized_vertices
-            
-            # Convert normalized coordinates to pixel coordinates
-            x_coords = [v.x * width for v in vertices]
-            y_coords = [v.y * height for v in vertices]
-            
-            left = min(x_coords)
-            top = min(y_coords)
-            right = max(x_coords)
-            bottom = max(y_coords)
-            
-            detections.append({
-                'label': mapped_label,
-                'confidence': confidence,
-                'bbox': [left, top, right, bottom],
-                'original_label': label  # Keep original for reference
-            })
-        
-        print(f"✅ Google Vision detected {len(detections)} objects")
-        
-        # Draw detections on image
-        result_image = draw_detections(img_array, detections)
+        # Simple result image - just return original if no drawing function
+        try:
+            result_image = draw_detections(img_array, detections)
+        except:
+            # If draw_detections doesn't exist, just return original image
+            result_image = np.array(processed_image)
         
         return detections, result_image
         
     except ImportError:
-        print("❌ Google Cloud Vision library not installed")
-        return [], np.array(image)
+        return "Google Vision API is not installed. Please install google-cloud-vision with compatible protobuf version."
     except Exception as e:
-        print(f"❌ Google Vision detection error: {e}")
+        print(f"❌ Google Vision API error: {e}")
         return [], np.array(image)
 
 def map_google_vision_label(vision_label):
@@ -1206,85 +1234,117 @@ def check_pronunciation_dependencies():
 
 
 def draw_detections(img_array, detections):
-    """Draw bounding boxes and labels on the image with proper error handling."""
+    """Draw bounding boxes and labels on image - FIXED VERSION."""
     try:
-        import cv2
         import numpy as np
+        
+        # Try importing OpenCV
+        try:
+            import cv2
+            has_cv2 = True
+        except ImportError:
+            has_cv2 = False
+            print("❌ OpenCV not available, using PIL for drawing")
         
         result_image = img_array.copy()
         
-        for detection in detections:
-            bbox = detection['bbox']
-            left, top, right, bottom = [int(x) for x in bbox]
-            label = detection['label']
-            confidence = detection['confidence']
+        if has_cv2:
+            # Use OpenCV for drawing
+            for detection in detections:
+                bbox = detection['bbox']
+                left, top, right, bottom = [int(x) for x in bbox]
+                label = detection['label']
+                confidence = detection['confidence']
+                
+                # Get color for this detection
+                color = get_detection_color(label)
+                
+                # Draw bounding box
+                cv2.rectangle(result_image, (left, top), (right, bottom), color, 3)
+                
+                # Prepare label text
+                label_text = f"{label} {confidence:.2f}"
+                
+                # Get text size
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                font_scale = 0.7
+                thickness = 2
+                (text_width, text_height), _ = cv2.getTextSize(label_text, font, font_scale, thickness)
+                
+                # Draw background rectangle for text
+                cv2.rectangle(result_image, 
+                             (left, top - text_height - 10), 
+                             (left + text_width, top), 
+                             color, -1)
+                
+                # Draw text
+                cv2.putText(result_image, label_text,
+                           (left, top - 5),
+                           font, font_scale, (255, 255, 255), thickness)
+                
+                print(f"✅ Drew box for {label} at ({left}, {top}, {right}, {bottom})")
+        else:
+            # Use PIL as fallback
+            from PIL import Image, ImageDraw, ImageFont
             
-            # Use different colors for different object types
-            color = get_detection_color(label)
+            # Convert numpy array to PIL Image
+            pil_image = Image.fromarray(result_image)
+            draw = ImageDraw.Draw(pil_image)
             
-            # Draw bounding box
-            cv2.rectangle(result_image, (left, top), (right, bottom), color, 3)
+            for detection in detections:
+                bbox = detection['bbox']
+                left, top, right, bottom = [int(x) for x in bbox]
+                label = detection['label']
+                confidence = detection['confidence']
+                
+                # Get color (PIL uses RGB)
+                color = get_detection_color_rgb(label)
+                
+                # Draw rectangle
+                draw.rectangle([(left, top), (right, bottom)], outline=color, width=3)
+                
+                # Draw text
+                label_text = f"{label} {confidence:.2f}"
+                draw.text((left, top - 20), label_text, fill=color)
+                
+                print(f"✅ Drew PIL box for {label}")
             
-            # Prepare label text
-            label_text = f"{label} {confidence:.2f}"
-            
-            # Get text size for background
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            font_scale = 0.7
-            thickness = 2
-            (text_width, text_height), baseline = cv2.getTextSize(label_text, font, font_scale, thickness)
-            
-            # Draw background for text
-            cv2.rectangle(result_image, 
-                         (left, top - text_height - 10), 
-                         (left + text_width, top), 
-                         color, -1)
-            
-            # Draw text (white color for visibility)
-            cv2.putText(result_image, label_text,
-                       (left, top - 5),
-                       font, font_scale, (255, 255, 255), thickness)
+            # Convert back to numpy array
+            result_image = np.array(pil_image)
         
         return result_image
         
-    except ImportError:
-        print("❌ OpenCV not available for drawing boxes")
-        return img_array
     except Exception as e:
         print(f"❌ Error drawing detections: {e}")
+        import traceback
+        print(f"📋 Drawing traceback: {traceback.format_exc()}")
         return img_array
 
 def get_detection_color(label):
-    """Get a consistent color for each object type."""
-    # Color mapping for different object categories (BGR format for OpenCV)
-    color_map = {
-        # Electronics - Blue shades
-        'cell phone': (255, 100, 100),
-        'laptop': (255, 150, 100),
-        'tv': (255, 200, 100),
-        'mouse': (200, 255, 100),
-        'keyboard': (150, 255, 100),
-        'remote': (100, 255, 100),
-        
-        # People - Green shades
-        'person': (100, 255, 150),
-        
-        # Furniture - Purple shades
-        'chair': (150, 100, 255),
-        'couch': (200, 100, 255),
-        'bed': (255, 100, 255),
-        
-        # Food - Orange/Red shades
-        'bottle': (100, 150, 255),
-        'cup': (100, 200, 255),
-        'bowl': (100, 255, 255),
-        'glasses': (255, 255, 100),
-        
-        # Default color
-        'default': (0, 255, 0)
+    """Get color for OpenCV (BGR format)."""
+    colors = {
+        'cell phone': (0, 255, 0),      # Green
+        'person': (255, 0, 0),          # Blue  
+        'glasses': (0, 0, 255),         # Red
+        'laptop': (255, 255, 0),        # Cyan
+        'bottle': (255, 0, 255),        # Magenta
+        'cup': (0, 255, 255),           # Yellow
+        'default': (0, 255, 0)          # Green
     }
-    
-    return color_map.get(label, color_map['default'])
+    return colors.get(label, colors['default'])
+
+def get_detection_color_rgb(label):
+    """Get color for PIL (RGB format)."""
+    colors = {
+        'cell phone': (0, 255, 0),      # Green
+        'person': (0, 0, 255),          # Blue  
+        'glasses': (255, 0, 0),         # Red
+        'laptop': (0, 255, 255),        # Cyan
+        'bottle': (255, 0, 255),        # Magenta
+        'cup': (255, 255, 0),           # Yellow
+        'default': (0, 255, 0)          # Green
+    }
+    return colors.get(label, colors['default'])
 
 def calculate_iou(box1, box2):
     """Calculate Intersection over Union (IoU) of two bounding boxes."""
@@ -1303,39 +1363,6 @@ def calculate_iou(box1, box2):
     union = area1 + area2 - intersection
     
     return intersection / union if union > 0 else 0.0
-
-def get_detection_color(label):
-    """Get a consistent color for each object type."""
-    # Color mapping for different object categories
-    color_map = {
-        # Electronics - Blue shades
-        'cell phone': (255, 100, 100),
-        'laptop': (255, 150, 100),
-        'tv': (255, 200, 100),
-        'mouse': (200, 255, 100),
-        'keyboard': (150, 255, 100),
-        'remote': (100, 255, 100),
-        
-        # People - Green shades
-        'person': (100, 255, 150),
-        
-        # Furniture - Purple shades
-        'chair': (150, 100, 255),
-        'couch': (200, 100, 255),
-        'bed': (255, 100, 255),
-        
-        # Food - Orange/Red shades
-        'bottle': (100, 150, 255),
-        'cup': (100, 200, 255),
-        'bowl': (100, 255, 255),
-        
-        # Default color
-        'default': (0, 255, 0)
-    }
-    
-    return color_map.get(label, color_map['default'])
-
-
 
 def show_detection_settings():
     """Show detection settings in the sidebar."""
@@ -2229,65 +2256,49 @@ class FreeTranslationService:
         self.last_request_time = 0
         self.rate_limit_delay = 1.0  # seconds between requests
         
-    def translate_text(self, text, target_language, source_language='en'):
-        """
-        Translate text using multiple free services with fallbacks
-        """
-        # Check cache first
-        cache_key = f"{text}_{source_language}_{target_language}"
-        if cache_key in self.translation_cache:
-            return self.translation_cache[cache_key]
-        
-        # Rate limiting
-        current_time = time.time()
-        if current_time - self.last_request_time < self.rate_limit_delay:
-            time.sleep(self.rate_limit_delay - (current_time - self.last_request_time))
-        
-        translation = None
-        
-        # Method 1: Deep Translator (Free Google Translate web interface)
+    def translate_text(text, target_language):
+        """Translate text to target language with fallback."""
         try:
-            translator = GoogleTranslator(source=source_language, target=target_language)
-            translation = translator.translate(text)
-            if translation and translation != text:
-                self.translation_cache[cache_key] = translation
-                self.last_request_time = time.time()
-                return translation
+            from deep_translator import GoogleTranslator
+            
+            # Language code mapping
+            lang_mapping = {
+                'es': 'spanish',
+                'fr': 'french', 
+                'de': 'german',
+                'it': 'italian',
+                'pt': 'portuguese',
+                'ru': 'russian',
+                'ja': 'japanese',
+                'zh-CN': 'chinese'
+            }
+            
+            target_lang = lang_mapping.get(target_language, target_language)
+            
+            translator = GoogleTranslator(source='english', target=target_lang)
+            translated = translator.translate(text)
+            
+            if translated and translated.lower() != text.lower():
+                return translated
+            else:
+                # Fallback translations for common words
+                fallback_translations = {
+                    'es': {
+                        'person': 'persona',
+                        'cell phone': 'teléfono móvil', 
+                        'glasses': 'gafas',
+                        'bottle': 'botella',
+                        'cup': 'taza',
+                        'laptop': 'portátil'
+                    }
+                }
+                
+                fallback = fallback_translations.get(target_language, {})
+                return fallback.get(text.lower(), f"{text} (traducción)")
+                
         except Exception as e:
-            print(f"Deep Translator failed: {e}")
-        
-        # Method 2: MyMemory Translation API (Free tier: 10,000 chars/day)
-        try:
-            translation = self._translate_with_mymemory(text, source_language, target_language)
-            if translation:
-                self.translation_cache[cache_key] = translation
-                self.last_request_time = time.time()
-                return translation
-        except Exception as e:
-            print(f"MyMemory failed: {e}")
-        
-        # Method 3: LibreTranslate (if you have a server)
-        try:
-            translation = self._translate_with_libretranslate(text, source_language, target_language)
-            if translation:
-                self.translation_cache[cache_key] = translation
-                self.last_request_time = time.time()
-                return translation
-        except Exception as e:
-            print(f"LibreTranslate failed: {e}")
-        
-        # Method 4: Hugging Face models (for specific language pairs)
-        try:
-            translation = self._translate_with_huggingface(text, source_language, target_language)
-            if translation:
-                self.translation_cache[cache_key] = translation
-                self.last_request_time = time.time()
-                return translation
-        except Exception as e:
-            print(f"Hugging Face translation failed: {e}")
-        
-        # Fallback: Return formatted message
-        return f"[Translation to {target_language} unavailable]"
+            print(f"❌ Translation error: {e}")
+            return f"{text} (translation failed)"
     
     def _translate_with_mymemory(self, text, source_lang, target_lang):
         """MyMemory Translation API - Free tier"""
@@ -2460,6 +2471,42 @@ def manage_session(action):
     except Exception as e:
         error_message(f"Session management error: {str(e)}")
         return False
+    
+def save_vocabulary_item(word_original, word_translated, language_translated, category=None, image_path=None):
+    """Save vocabulary item with better error handling and logging."""
+    user = get_authenticated_user()
+    if not user:
+        print("❌ No authenticated user for vocabulary save")
+        return None
+    
+    try:
+        print(f"🔄 Attempting to save: '{word_original}' → '{word_translated}' ({language_translated})")
+        print(f"📁 Image path: {image_path}")
+        print(f"📂 Category: {category}")
+        print(f"👤 User ID: {user.get('id')}")
+        
+        # Get database instance
+        db = get_user_database()
+        
+        # Try to save vocabulary
+        vocab_id = db.add_vocabulary(word_original, word_translated, language_translated, category, image_path)
+        
+        if vocab_id == 'duplicate':
+            print(f"⚠️ Duplicate word detected: {word_original}")
+            warning_message(f"'{word_original}' → '{word_translated}' is already in your vocabulary!")
+            return 'duplicate'
+        elif vocab_id:
+            print(f"✅ Successfully saved to database with ID: {vocab_id}")
+            return vocab_id
+        else:
+            print(f"❌ Save failed - no vocab_id returned")
+            return None
+            
+    except Exception as e:
+        print(f"❌ Save error: {e}")
+        import traceback
+        print(f"📋 Full traceback: {traceback.format_exc()}")
+        return None
     
 def save_image_to_supabase(image, label, detection_bbox=None):
     """Save image to private Supabase Storage with proper authentication."""
@@ -2845,7 +2892,7 @@ def debug_database_connection():
 
 if st.button("🔍 Debug Database Connection"):
     debug_database_connection()
-
+    
 def debug_supabase_connection():
     """Debug function to verify Supabase connection and data."""
     try:
