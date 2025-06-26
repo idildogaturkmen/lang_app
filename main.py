@@ -1448,9 +1448,9 @@ def detect_text_in_image(image):
     try:
         from google.cloud import vision
         import io
-        import os
         import json
         import tempfile
+        import streamlit as st
         
         # Fix RGBA to JPEG conversion for text detection
         processed_image = image
@@ -1461,12 +1461,18 @@ def detect_text_in_image(image):
             rgb_image.paste(image, mask=image.split()[-1] if image.mode in ('RGBA', 'LA') else None)
             processed_image = rgb_image
         
-        # Handle credentials for cloud deployment
-        credentials_json = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS_JSON')
-        if credentials_json:
+        # Get credentials from Streamlit secrets
+        if "gcp_service_account" in st.secrets:
+            # Create credentials from Streamlit secrets
+            credentials_info = dict(st.secrets["gcp_service_account"])
+            
+            # Create a temporary file with the credentials
             with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-                f.write(credentials_json)
+                json.dump(credentials_info, f)
                 temp_cred_file = f.name
+            
+            # Set the environment variable to point to the temp file
+            import os
             os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = temp_cred_file
         
         # Initialize the client
@@ -1485,8 +1491,9 @@ def detect_text_in_image(image):
         texts = response.text_annotations
         
         # Clean up temp file if created
-        if credentials_json and 'temp_cred_file' in locals():
+        if "gcp_service_account" in st.secrets and 'temp_cred_file' in locals():
             try:
+                import os
                 os.unlink(temp_cred_file)
             except:
                 pass

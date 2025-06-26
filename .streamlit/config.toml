@@ -2,7 +2,7 @@
 headless = true
 enableCORS = false
 enableXsrfProtection = false
-maxUploadSize = 50  # Increased from 200 (which was likely causing issues)
+maxUploadSize = 200
 port = 10000
 address = "0.0.0.0"
 
