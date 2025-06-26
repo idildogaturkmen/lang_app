@@ -22,6 +22,12 @@ from deep_translator import GoogleTranslator
 from database import LanguageLearningDB
 import json
 
+# First, display Python version for
+st.set_page_config(
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
 def setup_iframe_embedding():
     """Setup proper iframe embedding configuration."""
     # Inject JavaScript to handle iframe communication
@@ -1001,11 +1007,7 @@ def get_user_database():
         print("✅ Supabase database connection initialized")
     return st.session_state.supabase_db
 
-# First, display Python version for
-st.set_page_config(
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+
 
 # Import the UI enhancement module
 from vocam_ui import (
