@@ -357,11 +357,7 @@ def get_authenticated_user():
     """Get authenticated user from URL parameters or session state."""
     if 'user' not in st.session_state:
         try:
-            # Use experimental_get_query_params for Streamlit 1.29.0
             query_params = st.experimental_get_query_params()
-            
-            # Debug: Print what we're getting
-            st.write("🔍 Debug - Query params received:", query_params)  # Remove this after testing
             
             auth_token = query_params.get('auth_token')
             user_email = query_params.get('user_email') 
@@ -382,16 +378,11 @@ def get_authenticated_user():
                     'auth_token': token,
                     'provider': provider
                 }
-                print(f"✅ Authenticated user from URL: {email}")
                 return st.session_state.user
             else:
-                print("❌ Authentication failed - missing params")
-                print(f"Token: {bool(auth_token)}, Email: {bool(user_email)}, ID: {bool(user_id)}")
                 return None
                 
         except Exception as e:
-            print(f"❌ Error getting query params: {e}")
-            st.write(f"❌ Auth error: {e}")  # Remove this after testing
             return None
     
     return st.session_state.get('user')
@@ -402,11 +393,6 @@ def require_authentication():
     
     if not user:
         st.error("🔐 Authentication Required")
-        
-        # Show debug info temporarily
-        query_params = st.experimental_get_query_params()
-        st.write("Debug - All URL params:", query_params)  # Remove this after testing
-        
         st.markdown("""
         **Please access this app through the proper authentication flow.**
         
