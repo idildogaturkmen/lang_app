@@ -75,8 +75,6 @@ setup_iframe_embedding()
 
 
 class SupabaseDB:
-    """Enhanced SupabaseDB class with better error handling."""
-    
     def __init__(self):
         self.supabase_url = "https://csszlzpsfwmsezursivk.supabase.co"
         self.supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNzc3psenBzZndtc2V6dXJzaXZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA1Mjg1MjEsImV4cCI6MjA2NjEwNDUyMX0.gIi0Q_pifYpXeM1r8kWlgTO1LD8bc91lQ3suH8OWDKI"
@@ -108,10 +106,8 @@ class SupabaseDB:
         
         if auth_token:
             headers['Authorization'] = f'Bearer {auth_token}'
-            print(f"🔑 Using user auth token: {auth_token[:20]}...")
         else:
             headers['Authorization'] = f'Bearer {self.supabase_key}'
-            print("🔑 Using service key (fallback)")
         
         return headers
     
@@ -126,15 +122,8 @@ class SupabaseDB:
             
             headers = self.get_headers()
             
-            # Encode the parameters properly for URL
-            import urllib.parse
-            
-            word_original_encoded = urllib.parse.quote(word_original)
-            word_translated_encoded = urllib.parse.quote(word_translated)
-            language_encoded = urllib.parse.quote(language_translated)
-            
             # Query to check if word already exists for this user
-            url = f'{self.supabase_url}/rest/v1/vocabulary?user_id=eq.{user_id}&word_original=eq.{word_original_encoded}&word_translated=eq.{word_translated_encoded}&language_translated=eq.{language_encoded}'
+            url = f'{self.supabase_url}/rest/v1/vocabulary?user_id=eq.{user_id}&word_original=eq.{word_original}&word_translated=eq.{word_translated}&language_translated=eq.{language_translated}'
             
             response = requests.get(url, headers=headers, timeout=30)
             
@@ -208,6 +197,166 @@ class SupabaseDB:
             import traceback
             print(f"📋 Full traceback: {traceback.format_exc()}")
             return None
+    
+    def get_all_vocabulary(self):
+        """Get all vocabulary for current user."""
+        user_id = self.get_user_id()
+        if not user_id:
+            return []
+            
+        try:
+            import requests
+            
+            headers = self.get_headers()
+            url = f'{self.supabase_url}/rest/v1/vocabulary?user_id=eq.{user_id}&order=date_added.desc'
+            
+            response = requests.get(url, headers=headers, timeout=30)
+            
+            if response.status_code == 200:
+                return response.json()
+            return []
+                
+        except Exception as e:
+            print(f"Error getting vocabulary: {e}")
+            return []
+    
+    def start_session(self):
+        """Start a new learning session."""
+        user_id = self.get_user_id()
+        if not user_id:
+            return None
+            
+        try:
+            import requests
+            from datetime import datetime
+            
+            headers = self.get_headers()
+            
+            data = {
+                'user_id': user_id,
+                'start_time': datetime.now().isoformat(),
+                'words_studied': 0,
+                'words_learned': 0
+            }
+            
+            response = requests.post(
+                f'{self.supabase_url}/rest/v1/sessions',
+                headers=headers,
+                json=data,
+                timeout=30
+            )
+            
+            if response.status_code in [200, 201]:
+                result = response.json()
+                if result and len(result) > 0:
+                    return result[0].get('id')
+            return None
+                
+        except Exception as e:
+            print(f"Error starting session: {e}")
+            return None
+    
+    def end_session(self, session_id, words_studied, words_learned):
+        """End a learning session."""
+        if not session_id:
+            return False
+            
+        try:
+            import requests
+            from datetime import datetime
+            
+            headers = self.get_headers()
+            
+            data = {
+                'end_time': datetime.now().isoformat(),
+                'words_studied': words_studied,
+                'words_learned': words_learned
+            }
+            
+            response = requests.patch(
+                f'{self.supabase_url}/rest/v1/sessions?id=eq.{session_id}',
+                headers=headers,
+                json=data,
+                timeout=30
+            )
+            
+            return response.status_code in [200, 204]
+                
+        except Exception as e:
+            print(f"Error ending session: {e}")
+            return False
+        
+    def get_user_streak_data(self):
+        """Get user's streak data from Supabase."""
+        user_id = self.get_user_id()
+        if not user_id:
+            return None
+            
+        try:
+            import requests
+            
+            headers = self.get_headers()
+            url = f'{self.supabase_url}/rest/v1/user_streaks?user_id=eq.{user_id}'
+            
+            response = requests.get(url, headers=headers, timeout=30)
+            
+            if response.status_code == 200:
+                result = response.json()
+                return result[0] if result else None
+            return None
+                
+        except Exception as e:
+            print(f"Error getting streak data: {e}")
+            return None
+
+    def update_user_streak_data(self, streak_days, last_active_date, streak_savers=0):
+        """Update user's streak data in Supabase."""
+        user_id = self.get_user_id()
+        if not user_id:
+            return False
+            
+        try:
+            import requests
+            from datetime import datetime
+            
+            headers = self.get_headers()
+            
+            # Convert date to string if needed
+            if hasattr(last_active_date, 'isoformat'):
+                date_str = last_active_date.isoformat()
+            else:
+                date_str = str(last_active_date)
+            
+            data = {
+                'user_id': user_id,
+                'streak_days': streak_days,
+                'last_active_date': date_str,
+                'streak_savers': streak_savers,
+                'updated_at': datetime.now().isoformat()
+            }
+            
+            # Try to update first, then insert if not exists
+            update_url = f'{self.supabase_url}/rest/v1/user_streaks?user_id=eq.{user_id}'
+            update_response = requests.patch(update_url, headers=headers, json=data, timeout=30)
+            
+            if update_response.status_code in [200, 204]:
+                print(f"✅ Streak updated: {streak_days} days")
+                return True
+            
+            # If update failed, try insert (user doesn't exist yet)
+            insert_url = f'{self.supabase_url}/rest/v1/user_streaks'
+            insert_response = requests.post(insert_url, headers=headers, json=data, timeout=30)
+            
+            if insert_response.status_code in [200, 201]:
+                print(f"✅ Streak created: {streak_days} days")
+                return True
+            else:
+                print(f"❌ Failed to save streak: {insert_response.status_code} - {insert_response.text}")
+                return False
+                
+        except Exception as e:
+            print(f"Error updating streak data: {e}")
+            return False
 
         
 # Authentication Functions for Supabase
@@ -1334,507 +1483,44 @@ QUESTION_TYPES = [
 ]
 
 
-def run_database_migration():
-    """Run database migration to fix existing issues and setup proper structure."""
-    
-    def setup_supabase_database():
-        """Setup Supabase database with proper structure and RLS policies."""
-        
-        # SQL commands to run in Supabase SQL Editor
-        migration_sql = """
-        -- ====================================
-        -- COMPREHENSIVE DATABASE MIGRATION
-        -- ====================================
-        
-        -- 1. ENSURE ALL TABLES EXIST WITH CORRECT STRUCTURE
-        -- ====================================
-        
-        -- Create vocabulary table if not exists (with proper structure)
-        CREATE TABLE IF NOT EXISTS public.vocabulary (
-            id uuid NOT NULL DEFAULT gen_random_uuid(),
-            user_id text NOT NULL,
-            word_original text NOT NULL,
-            word_translated text NOT NULL,
-            language_translated text NOT NULL,
-            category text,
-            image_path text,
-            source text DEFAULT 'manual'::text,
-            date_added timestamp with time zone DEFAULT now(),
-            created_at timestamp with time zone DEFAULT now(),
-            updated_at timestamp with time zone DEFAULT now(),
-            CONSTRAINT vocabulary_pkey PRIMARY KEY (id)
-        );
-        
-        -- Create user_game_state table if not exists
-        CREATE TABLE IF NOT EXISTS public.user_game_state (
-            id uuid NOT NULL DEFAULT gen_random_uuid(),
-            user_id text NOT NULL UNIQUE,
-            words_learned integer DEFAULT 0,
-            total_words_learned integer DEFAULT 0,
-            level integer DEFAULT 1,
-            points integer DEFAULT 0,
-            streak_days integer DEFAULT 0,
-            last_active_date date,
-            streak_savers integer DEFAULT 0,
-            achievements jsonb DEFAULT '{}'::jsonb,
-            badges jsonb DEFAULT '{}'::jsonb,
-            daily_challenges jsonb DEFAULT '[]'::jsonb,
-            word_of_the_day jsonb DEFAULT 'null'::jsonb,
-            category_progress jsonb DEFAULT '{}'::jsonb,
-            vocabulary_tree jsonb DEFAULT '{}'::jsonb,
-            created_at timestamp with time zone DEFAULT now(),
-            updated_at timestamp with time zone DEFAULT now(),
-            CONSTRAINT user_game_state_pkey PRIMARY KEY (id)
-        );
-        
-        -- Create user_progress table if not exists
-        CREATE TABLE IF NOT EXISTS public.user_progress (
-            id uuid NOT NULL DEFAULT gen_random_uuid(),
-            user_id text NOT NULL,
-            vocabulary_id uuid NOT NULL,
-            review_count integer DEFAULT 0,
-            correct_count integer DEFAULT 0,
-            proficiency_level integer DEFAULT 0,
-            last_reviewed timestamp with time zone,
-            created_at timestamp with time zone DEFAULT now(),
-            updated_at timestamp with time zone DEFAULT now(),
-            CONSTRAINT user_progress_pkey PRIMARY KEY (id),
-            CONSTRAINT user_progress_vocabulary_id_fkey FOREIGN KEY (vocabulary_id) REFERENCES public.vocabulary(id)
-        );
-        
-        -- Create sessions table if not exists
-        CREATE TABLE IF NOT EXISTS public.sessions (
-            id uuid NOT NULL DEFAULT gen_random_uuid(),
-            user_id text NOT NULL,
-            start_time timestamp with time zone DEFAULT now(),
-            end_time timestamp with time zone,
-            words_studied integer DEFAULT 0,
-            words_learned integer DEFAULT 0,
-            created_at timestamp with time zone DEFAULT now(),
-            CONSTRAINT sessions_pkey PRIMARY KEY (id)
-        );
-        
-        -- Create user_streaks table if not exists
-        CREATE TABLE IF NOT EXISTS public.user_streaks (
-            id uuid NOT NULL DEFAULT gen_random_uuid(),
-            user_id text NOT NULL UNIQUE,
-            streak_days integer DEFAULT 0,
-            last_active_date date DEFAULT CURRENT_DATE,
-            streak_savers integer DEFAULT 0,
-            created_at timestamp with time zone DEFAULT now(),
-            updated_at timestamp with time zone DEFAULT now(),
-            CONSTRAINT user_streaks_pkey PRIMARY KEY (id)
-        );
-        
-        -- 2. CREATE STORAGE BUCKET
-        -- ====================================
-        
-        -- Create vocabulary-images bucket
-        INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-        VALUES (
-            'vocabulary-images', 
-            'vocabulary-images', 
-            false, 
-            52428800, -- 50MB limit
-            ARRAY['image/jpeg', 'image/png', 'image/webp', 'image/gif']
-        ) ON CONFLICT (id) DO NOTHING;
-        
-        -- 3. ENABLE RLS ON ALL TABLES
-        -- ====================================
-        
-        ALTER TABLE public.vocabulary ENABLE ROW LEVEL SECURITY;
-        ALTER TABLE public.user_game_state ENABLE ROW LEVEL SECURITY;
-        ALTER TABLE public.user_progress ENABLE ROW LEVEL SECURITY;
-        ALTER TABLE public.sessions ENABLE ROW LEVEL SECURITY;
-        ALTER TABLE public.user_streaks ENABLE ROW LEVEL SECURITY;
-        -- NOTE: storage.objects RLS must be enabled through Supabase Dashboard
-        
-        -- 4. DROP EXISTING POLICIES (to avoid conflicts)
-        -- ====================================
-        
-        -- Drop vocabulary policies
-        DROP POLICY IF EXISTS "Users can insert their own vocabulary" ON public.vocabulary;
-        DROP POLICY IF EXISTS "Users can read their own vocabulary" ON public.vocabulary;
-        DROP POLICY IF EXISTS "Users can update their own vocabulary" ON public.vocabulary;
-        DROP POLICY IF EXISTS "Users can delete their own vocabulary" ON public.vocabulary;
-        
-        -- Drop user_game_state policies
-        DROP POLICY IF EXISTS "Users can manage their own game state" ON public.user_game_state;
-        DROP POLICY IF EXISTS "Users can insert their own game state" ON public.user_game_state;
-        DROP POLICY IF EXISTS "Users can read their own game state" ON public.user_game_state;
-        DROP POLICY IF EXISTS "Users can update their own game state" ON public.user_game_state;
-        
-        -- Drop user_progress policies
-        DROP POLICY IF EXISTS "Users can manage their own progress" ON public.user_progress;
-        
-        -- Drop sessions policies
-        DROP POLICY IF EXISTS "Users can manage their own sessions" ON public.sessions;
-        
-        -- Drop user_streaks policies
-        DROP POLICY IF EXISTS "Users can manage their own streaks" ON public.user_streaks;
-        
-        -- NOTE: Storage policies must be configured through Supabase Dashboard
-        
-        -- 5. CREATE NEW COMPREHENSIVE POLICIES
-        -- ====================================
-        
-        -- Vocabulary table policies
-        CREATE POLICY "Users can insert their own vocabulary" 
-        ON public.vocabulary FOR INSERT 
-        WITH CHECK (auth.uid()::text = user_id);
-        
-        CREATE POLICY "Users can read their own vocabulary" 
-        ON public.vocabulary FOR SELECT 
-        USING (auth.uid()::text = user_id);
-        
-        CREATE POLICY "Users can update their own vocabulary" 
-        ON public.vocabulary FOR UPDATE 
-        USING (auth.uid()::text = user_id) 
-        WITH CHECK (auth.uid()::text = user_id);
-        
-        CREATE POLICY "Users can delete their own vocabulary" 
-        ON public.vocabulary FOR DELETE 
-        USING (auth.uid()::text = user_id);
-        
-        -- User game state policies
-        CREATE POLICY "Users can insert their own game state" 
-        ON public.user_game_state FOR INSERT 
-        WITH CHECK (auth.uid()::text = user_id);
-        
-        CREATE POLICY "Users can read their own game state" 
-        ON public.user_game_state FOR SELECT 
-        USING (auth.uid()::text = user_id);
-        
-        CREATE POLICY "Users can update their own game state" 
-        ON public.user_game_state FOR UPDATE 
-        USING (auth.uid()::text = user_id) 
-        WITH CHECK (auth.uid()::text = user_id);
-        
-        -- User progress policies
-        CREATE POLICY "Users can manage their own progress" 
-        ON public.user_progress FOR ALL 
-        USING (auth.uid()::text = user_id) 
-        WITH CHECK (auth.uid()::text = user_id);
-        
-        -- Sessions policies
-        CREATE POLICY "Users can manage their own sessions" 
-        ON public.sessions FOR ALL 
-        USING (auth.uid()::text = user_id) 
-        WITH CHECK (auth.uid()::text = user_id);
-        
-        -- User streaks policies
-        CREATE POLICY "Users can manage their own streaks" 
-        ON public.user_streaks FOR ALL 
-        USING (auth.uid()::text = user_id) 
-        WITH CHECK (auth.uid()::text = user_id);
-        
-        -- NOTE: Storage policies must be configured through Supabase Dashboard
-        -- See the storage setup guide for detailed instructions
-        
-        -- 6. GRANT PERMISSIONS
-        -- ====================================
-        
-        -- Grant necessary permissions to authenticated users
-        GRANT USAGE ON SCHEMA public TO authenticated;
-        GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated;
-        GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO authenticated;
-        
-        -- NOTE: Storage permissions must be configured through Supabase Dashboard
-        -- See the separate storage setup guide for detailed instructions
-        
-        -- 7. CREATE HELPER FUNCTIONS
-        -- ====================================
-        
-        -- Function to check current user
-        CREATE OR REPLACE FUNCTION public.get_current_user_id()
-        RETURNS text AS $$
-        BEGIN
-            RETURN auth.uid()::text;
-        END;
-        $$ LANGUAGE plpgsql SECURITY DEFINER;
-        
-        -- Function to verify RLS setup
-        CREATE OR REPLACE FUNCTION public.verify_rls_setup()
-        RETURNS json AS $
-        DECLARE
-            result json;
-        BEGIN
-            SELECT json_build_object(
-                'tables_with_rls', (
-                    SELECT count(*) 
-                    FROM pg_tables t 
-                    JOIN pg_class c ON c.relname = t.tablename 
-                    WHERE t.schemaname = 'public' 
-                    AND c.relrowsecurity = true
-                ),
-                'policies_count', (
-                    SELECT count(*) 
-                    FROM pg_policies 
-                    WHERE schemaname = 'public'
-                ),
-                'current_user', auth.uid()::text,
-                'note', 'Storage policies must be configured via Dashboard'
-            ) INTO result;
-            
-            RETURN result;
-        END;
-        $ LANGUAGE plpgsql SECURITY DEFINER;
-        """
-        
-        return migration_sql
-    
-    # Generate the SQL script
-    sql_script = setup_supabase_database()
-    
-    print("=" * 60)
-    print("🛠️  DATABASE MIGRATION SCRIPT")
-    print("=" * 60)
-    print("\n📋 Please copy and paste the following SQL script into your Supabase SQL Editor:")
-    print("\n" + sql_script)
-    print("\n" + "=" * 60)
-    print("📌 After running the SQL script, call verify_database_setup() to test")
-    print("=" * 60)
-    
-    return sql_script
-
-
-def verify_database_setup():
-    """Verify that the database setup is working correctly."""
-    try:
-        user = get_authenticated_user()
-        if not user:
-            return "❌ No authenticated user - please log in first"
-        
-        db = get_user_database()
-        headers = db.get_headers()
-        user_id = db.get_user_id()
-        
-        import requests
-        
-        print(f"🔍 Testing database setup for user: {user_id}")
-        
-        # Test 1: Check RLS verification function
-        try:
-            verify_url = f'{db.supabase_url}/rest/v1/rpc/verify_rls_setup'
-            verify_response = requests.post(verify_url, headers=headers, timeout=10)
-            
-            if verify_response.status_code == 200:
-                rls_info = verify_response.json()
-                print(f"✅ RLS Setup: {rls_info}")
-            else:
-                print(f"⚠️ RLS verification function not available")
-        except Exception as e:
-            print(f"⚠️ RLS verification failed: {e}")
-        
-        # Test 2: Test vocabulary table access
-        vocab_url = f'{db.supabase_url}/rest/v1/vocabulary?user_id=eq.{user_id}&limit=1'
-        vocab_response = requests.get(vocab_url, headers=headers, timeout=10)
-        
-        vocab_status = "✅ SUCCESS" if vocab_response.status_code == 200 else f"❌ FAILED ({vocab_response.status_code})"
-        print(f"📚 Vocabulary table access: {vocab_status}")
-        
-        if vocab_response.status_code != 200:
-            print(f"   Error: {vocab_response.text}")
-        
-        # Test 3: Test vocabulary insertion
-        try:
-            test_vocab = {
-                'user_id': user_id,
-                'word_original': 'test_word_migration',
-                'word_translated': 'test_translation',
-                'language_translated': 'es',
-                'category': 'test',
-                'source': 'migration_test'
-            }
-            
-            insert_response = requests.post(
-                f'{db.supabase_url}/rest/v1/vocabulary',
-                headers=headers,
-                json=test_vocab,
-                timeout=10
-            )
-            
-            if insert_response.status_code in [200, 201]:
-                print("✅ Vocabulary insertion: SUCCESS")
-                # Clean up test data
-                result = insert_response.json()
-                if result:
-                    test_id = result[0].get('id')
-                    requests.delete(
-                        f'{db.supabase_url}/rest/v1/vocabulary?id=eq.{test_id}',
-                        headers=headers
-                    )
-            else:
-                print(f"❌ Vocabulary insertion: FAILED ({insert_response.status_code})")
-                print(f"   Error: {insert_response.text}")
-                
-        except Exception as e:
-            print(f"❌ Vocabulary insertion test failed: {e}")
-        
-        # Test 4: Test storage access
-        storage_url = f'{db.supabase_url}/storage/v1/object/list/vocabulary-images'
-        storage_response = requests.post(
-            storage_url,
-            headers=headers,
-            json={'prefix': f'{user_id}/'},
-            timeout=10
-        )
-        
-        storage_status = "✅ SUCCESS" if storage_response.status_code == 200 else f"❌ FAILED ({storage_response.status_code})"
-        print(f"🖼️  Storage access: {storage_status}")
-        
-        if storage_response.status_code != 200:
-            print(f"   Error: {storage_response.text}")
-        
-        # Test 5: Test user_game_state table
-        game_state_url = f'{db.supabase_url}/rest/v1/user_game_state?user_id=eq.{user_id}'
-        game_state_response = requests.get(game_state_url, headers=headers, timeout=10)
-        
-        game_state_status = "✅ SUCCESS" if game_state_response.status_code == 200 else f"❌ FAILED ({game_state_response.status_code})"
-        print(f"🎮 Game state access: {game_state_status}")
-        
-        # Overall assessment
-        if (vocab_response.status_code == 200 and 
-            storage_response.status_code == 200 and 
-            game_state_response.status_code == 200):
-            print("\n🎉 DATABASE SETUP VERIFICATION: SUCCESS!")
-            print("Your database is properly configured and ready to use.")
-            return True
-        else:
-            print("\n⚠️  DATABASE SETUP VERIFICATION: ISSUES FOUND")
-            print("Please run the migration SQL script in Supabase SQL Editor.")
-            return False
-            
-    except Exception as e:
-        print(f"❌ Verification failed: {e}")
-        return False
-
-
-def fix_existing_vocabulary_data():
-    """Fix any existing vocabulary data that might have issues."""
-    try:
-        user = get_authenticated_user()
-        if not user:
-            return "❌ No authenticated user"
-        
-        db = get_user_database()
-        user_id = db.get_user_id()
-        
-        import requests
-        
-        # Get all vocabulary entries
-        vocab_url = f'{db.supabase_url}/rest/v1/vocabulary?user_id=eq.{user_id}'
-        headers = db.get_headers()
-        
-        response = requests.get(vocab_url, headers=headers, timeout=30)
-        
-        if response.status_code == 200:
-            vocabulary = response.json()
-            
-            if not vocabulary:
-                print("📚 No vocabulary data found")
-                return True
-            
-            print(f"📚 Found {len(vocabulary)} vocabulary entries")
-            
-            # Check for any data integrity issues
-            issues_found = 0
-            fixed_count = 0
-            
-            for item in vocabulary:
-                # Check for missing fields
-                if not item.get('category'):
-                    # Update with default category
-                    update_data = {'category': 'other'}
-                    
-                    update_response = requests.patch(
-                        f'{db.supabase_url}/rest/v1/vocabulary?id=eq.{item["id"]}',
-                        headers=headers,
-                        json=update_data
-                    )
-                    
-                    if update_response.status_code in [200, 204]:
-                        fixed_count += 1
-                    else:
-                        issues_found += 1
-            
-            print(f"✅ Fixed {fixed_count} vocabulary entries")
-            if issues_found > 0:
-                print(f"⚠️ {issues_found} issues could not be automatically fixed")
-            
-            return True
-            
-        else:
-            print(f"❌ Could not retrieve vocabulary data: {response.status_code}")
-            return False
-            
-    except Exception as e:
-        print(f"❌ Error fixing vocabulary data: {e}")
-        return False
-
-
-# Quick setup function to run all migration steps
-def run_complete_database_setup():
-    """Run complete database setup and verification."""
-    print("\n🚀 STARTING COMPLETE DATABASE SETUP")
-    print("=" * 50)
-    
-    # Step 1: Generate migration script
-    print("\n📋 Step 1: Generating migration SQL script...")
-    sql_script = run_database_migration()
-    
-    # Step 2: Instructions for user
-    print("\n📝 Step 2: MANUAL ACTION REQUIRED")
-    print("Please copy the SQL script above and run it in your Supabase SQL Editor.")
-    print("Then come back and run verify_database_setup() to test everything.")
-    
-    return sql_script
-
-# Run this to get the SQL migration script
-sql_script = run_database_migration()
-
-# After running the SQL in Supabase, verify everything works
-verification_result = verify_database_setup()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def get_object_category(label):
-    """Categorize detected objects."""
-    categories = {
-        'electronics': ['phone', 'cell phone', 'mobile phone', 'computer', 'laptop', 'tablet', 'camera', 'television', 'tv', 'monitor'],
-        'clothing': ['shirt', 'pants', 'dress', 'jacket', 'coat', 'hat', 'shoes', 'socks', 'underwear'],
-        'furniture': ['chair', 'table', 'bed', 'sofa', 'couch', 'desk', 'shelf', 'cabinet'],
-        'transportation': ['car', 'bus', 'train', 'bicycle', 'motorcycle', 'truck', 'airplane', 'boat'],
-        'food': ['apple', 'banana', 'bread', 'pizza', 'sandwich', 'cake', 'coffee', 'tea'],
-        'animals': ['dog', 'cat', 'bird', 'horse', 'cow', 'sheep', 'fish'],
-        'household': ['cup', 'plate', 'bowl', 'spoon', 'fork', 'knife', 'bottle', 'glass'],
-        'jewelry': ['ring', 'necklace', 'bracelet', 'watch', 'earrings'],
-        'eyewear': ['glasses', 'sunglasses', 'contact lens'],
-        'sports': ['ball', 'bat', 'racket', 'glove', 'helmet'],
-        'tools': ['hammer', 'screwdriver', 'wrench', 'drill'],
-        'nature': ['tree', 'flower', 'grass', 'rock', 'water'],
-        'body': ['hand', 'face', 'eye', 'nose', 'mouth', 'ear', 'hair', 'person']
-    }
+    """Get the category for a detected object label - updated for Google Vision."""
+    label = label.lower()
     
-    label_lower = label.lower()
-    for category, items in categories.items():
-        if any(item in label_lower for item in items):
-            return category
+    # Electronics
+    if any(term in label for term in ['phone', 'cell phone', 'mobile', 'laptop', 'computer', 'tv', 'television', 'mouse', 'keyboard', 'remote']):
+        return "electronics"
     
-    return 'other'
+    # Food & Drinks  
+    elif any(term in label for term in ['bottle', 'cup', 'glass', 'food', 'fruit', 'apple', 'banana', 'orange', 'sandwich', 'pizza']):
+        return "food"
+    
+    # Furniture
+    elif any(term in label for term in ['chair', 'couch', 'sofa', 'table', 'desk', 'bed', 'toilet']):
+        return "furniture"
+    
+    # Vehicles
+    elif any(term in label for term in ['car', 'bicycle', 'motorcycle', 'bus', 'truck', 'airplane']):
+        return "vehicles"
+    
+    # Animals
+    elif any(term in label for term in ['dog', 'cat', 'bird', 'horse', 'animal']):
+        return "animals"
+    
+    # Personal items
+    elif any(term in label for term in ['bag', 'backpack', 'suitcase', 'umbrella', 'tie']):
+        return "personal"
+    
+    # Sports
+    elif any(term in label for term in ['ball', 'sports', 'football', 'basketball', 'tennis']):
+        return "sports"
+    
+    # Household
+    elif any(term in label for term in ['book', 'clock', 'vase', 'plant', 'knife', 'fork', 'spoon', 'bowl']):
+        return "household"
+    
+    else:
+        return "other"
 
 
 def get_image_hash(image):
@@ -2251,24 +1937,23 @@ def display_vocabulary_image(image_path, word_original):
         return False
     
 def add_vocabulary_direct(word_original, word_translated, language_translated, category=None, image_path=None):
-    """Save vocabulary with improved error handling and proper variable scoping."""
+    """Add vocabulary using Supabase - Production version with enhanced logging."""
     user = get_authenticated_user()
+
+    if vocab_id:
+        # Sync user data after successful vocabulary addition
+        sync_user_data_to_supabase()
+
     if not user:
-        print("❌ No authenticated user for vocabulary save")
+        error_message("Please log in to save vocabulary.")
         return None
     
-    vocab_id = None  # Initialize vocab_id to prevent "referenced before assignment" errors
-    
     try:
-        print(f"🔄 Attempting to save: '{word_original}' → '{word_translated}' ({language_translated})")
+        print(f"🔄 Attempting to save: {word_original} → {word_translated}")
         print(f"📁 Image path: {image_path}")
-        print(f"📂 Category: {category}")
         print(f"👤 User ID: {user.get('id')}")
         
-        # Get database instance
         db = get_user_database()
-        
-        # Try to save vocabulary
         vocab_id = db.add_vocabulary(word_original, word_translated, language_translated, category, image_path)
         
         if vocab_id == 'duplicate':
@@ -2276,7 +1961,25 @@ def add_vocabulary_direct(word_original, word_translated, language_translated, c
             warning_message(f"'{word_original}' → '{word_translated}' is already in your vocabulary!")
             return 'duplicate'
         elif vocab_id:
-            print(f"✅ Successfully saved to database with ID: {vocab_id}")
+            print(f"✅ Successfully saved to Supabase with ID: {vocab_id}")
+            
+            # Verify the save by checking if we can retrieve it
+            verification = verify_last_save_operation()
+            if isinstance(verification, dict):
+                print(f"✅ Verification successful: {verification['word']}")
+            else:
+                print(f"⚠️ Verification failed: {verification}")
+            
+            try:
+                gamification.check_achievements(
+                    "word_learned",
+                    word=word_original,
+                    category=category,
+                    language=language_translated
+                )
+            except Exception as e:
+                print(f"⚠️ Gamification error (non-critical): {e}")
+            
             return vocab_id
         else:
             print(f"❌ Save failed - no vocab_id returned")
@@ -2285,10 +1988,9 @@ def add_vocabulary_direct(word_original, word_translated, language_translated, c
             
     except Exception as e:
         print(f"❌ Save error: {e}")
-        import traceback
-        print(f"📋 Full traceback: {traceback.format_exc()}")
         error_message("There was a problem saving your vocabulary. Please check your connection and try again.")
         return None
+    
 
     
 def create_session_direct():
@@ -2945,47 +2647,6 @@ def save_image_to_supabase(image, label, detection_bbox=None):
         import traceback
         print(f"📋 Full traceback: {traceback.format_exc()}")
         return None
-
-def test_database_connection():
-    """Test database connection and permissions."""
-    try:
-        user = get_authenticated_user()
-        if not user:
-            return "❌ No authenticated user"
-        
-        db = get_user_database()
-        
-        # Test 1: Check connection
-        headers = db.get_headers()
-        user_id = db.get_user_id()
-        
-        import requests
-        
-        # Test vocabulary table access
-        vocab_url = f'{db.supabase_url}/rest/v1/vocabulary?user_id=eq.{user_id}&limit=1'
-        vocab_response = requests.get(vocab_url, headers=headers, timeout=10)
-        
-        # Test storage access
-        storage_url = f'{db.supabase_url}/storage/v1/object/list/vocabulary-images'
-        storage_response = requests.post(
-            storage_url,
-            headers=headers,
-            json={'prefix': f'{user_id}/'},
-            timeout=10
-        )
-        
-        results = {
-            'user_id': user_id,
-            'vocabulary_access': f"{vocab_response.status_code} - {'✅ OK' if vocab_response.status_code == 200 else '❌ FAILED'}",
-            'storage_access': f"{storage_response.status_code} - {'✅ OK' if storage_response.status_code == 200 else '❌ FAILED'}",
-            'vocab_response': vocab_response.text[:200] if vocab_response.status_code != 200 else "OK",
-            'storage_response': storage_response.text[:200] if storage_response.status_code != 200 else "OK"
-        }
-        
-        return results
-        
-    except Exception as e:
-        return f"❌ Connection test failed: {e}"
     
 def test_supabase_storage_permissions():
     """Test Supabase Storage permissions and setup - FIXED VERSION."""
@@ -3220,26 +2881,7 @@ def get_signed_image_url(storage_path, expires_in=3600):
     except Exception as e:
         print(f"❌ Error getting signed URL: {e}")
         return None
-
-def debug_authentication():
-    """Debug function to check authentication status."""
-    user = get_authenticated_user()
     
-    if not user:
-        return {
-            'status': '❌ No Authentication',
-            'message': 'No authenticated user found'
-        }
-    
-    return {
-        'status': '✅ Authenticated',
-        'user_id': user.get('id'),
-        'email': user.get('email'),
-        'has_token': bool(user.get('auth_token')),
-        'token_length': len(user.get('auth_token', '')) if user.get('auth_token') else 0
-    }
-
-
 def debug_supabase_connection():
     """Debug function to verify Supabase connection and data."""
     try:
@@ -3640,96 +3282,6 @@ def sync_user_data_to_supabase():
     except Exception as e:
         print(f"❌ Sync error: {e}")
         return False
-
-def process_and_save_vocabulary_items(detected_objects, image, translation_service):
-    """Process detected objects and save them with improved error handling."""
-    saved_count = 0
-    failed_count = 0
-    saved_items = []
-    failed_items = []
-    
-    for detection in detected_objects:
-        label = detection['name']
-        vocab_id = None  # Initialize for each iteration
-        
-        try:
-            print(f"🔄 Processing {label}...")
-            
-            # Translate the label
-            translated_label = translation_service.translate_text(
-                label, 
-                st.session_state.target_language
-            )
-            
-            if not translated_label or translated_label == label:
-                print(f"⚠️ Translation failed or unchanged for {label}")
-                translated_label = label  # Use original if translation fails
-            
-            # Try to save image first
-            image_path = None
-            try:
-                image_path = save_image_to_supabase(image, label, detection.get('bbox'))
-                if image_path:
-                    print(f"✅ Image saved: {image_path}")
-                else:
-                    print(f"⚠️ Image save failed for {label}, continuing without image")
-            except Exception as img_error:
-                print(f"⚠️ Image save error for {label}: {img_error}, continuing without image")
-                image_path = None
-            
-            # Get object category
-            category = get_object_category(label)
-            
-            # Save vocabulary (with or without image)
-            vocab_id = add_vocabulary_direct(
-                word_original=label,
-                word_translated=translated_label,
-                language_translated=st.session_state.target_language,
-                category=category,
-                image_path=image_path
-            )
-            
-            if vocab_id and vocab_id != 'duplicate':
-                saved_count += 1
-                saved_items.append(f"{label} → {translated_label}")
-                # Update session stats
-                st.session_state.words_studied += 1
-                st.session_state.words_learned += 1
-                print(f"✅ Vocabulary saved: {label}")
-                
-                # Sync data after each successful save
-                try:
-                    sync_user_data_to_supabase()
-                except Exception as sync_error:
-                    print(f"⚠️ Data sync failed (non-critical): {sync_error}")
-                    
-            elif vocab_id == 'duplicate':
-                print(f"⚠️ Duplicate word skipped: {label}")
-                # Don't count duplicates as failures
-            else:
-                failed_count += 1
-                failed_items.append(label)
-                print(f"❌ Vocabulary save failed: {label}")
-                
-        except Exception as e:
-            failed_count += 1
-            failed_items.append(label)
-            print(f"❌ Error processing {label}: {e}")
-            import traceback
-            print(f"📋 Traceback: {traceback.format_exc()}")
-    
-    # Display results
-    if saved_count > 0:
-        success_message(f"Successfully saved {saved_count} words to vocabulary!")
-        for item in saved_items:
-            st.success(f"✅ {item}")
-    
-    if failed_count > 0:
-        warning_message(f"Failed to save {failed_count} words")
-        for item in failed_items:
-            st.error(f"❌ {item}")
-    
-    return saved_count, failed_count
 
 def load_user_data_from_supabase():
     """Load user data from Supabase on startup."""
