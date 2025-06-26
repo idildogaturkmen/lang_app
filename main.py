@@ -674,37 +674,71 @@ def detect_objects_google_vision(image, confidence_threshold=0.5):
         print(f"❌ Google Vision detection error: {e}")
         return [], np.array(image)
 
-def debug_google_credentials():
-    """Debug function to check Google Cloud credentials."""
+def debug_session_creation():
+    """Debug session creation to see what's failing."""
     try:
         import streamlit as st
+        import requests
+        from datetime import datetime
         
-        st.write("🔍 **Google Cloud Credentials Debug:**")
+        st.write("🔍 **Session Creation Debug:**")
         
-        # Check if secrets exist
-        if hasattr(st, 'secrets'):
-            st.write("✅ Streamlit secrets available")
+        user = get_authenticated_user()
+        if not user:
+            st.write("❌ No authenticated user")
+            return
             
-            if "gcp_service_account" in st.secrets:
-                st.write("✅ gcp_service_account found in secrets")
-                
-                # Check specific fields (don't display sensitive data)
-                creds = st.secrets["gcp_service_account"]
-                st.write(f"- Type: {creds.get('type', 'MISSING')}")
-                st.write(f"- Project ID: {creds.get('project_id', 'MISSING')}")
-                st.write(f"- Client Email: {creds.get('client_email', 'MISSING')}")
-                st.write(f"- Has Private Key: {'✅' if creds.get('private_key') else '❌'}")
+        st.write(f"✅ User ID: {user.get('id')}")
+        
+        db = get_user_database()
+        user_id = db.get_user_id()
+        headers = db.get_headers()
+        
+        st.write(f"✅ Database user ID: {user_id}")
+        st.write(f"✅ Headers prepared: {bool(headers)}")
+        
+        # Test the actual session creation request
+        data = {
+            'user_id': user_id,
+            'start_time': datetime.now().isoformat(),
+            'words_studied': 0,
+            'words_learned': 0
+        }
+        
+        st.write("📡 Attempting to create session...")
+        st.write(f"Data being sent: {data}")
+        
+        try:
+            response = requests.post(
+                f'{db.supabase_url}/rest/v1/sessions',
+                headers=headers,
+                json=data,
+                timeout=30
+            )
+            
+            st.write(f"📡 Response status: {response.status_code}")
+            st.write(f"📡 Response headers: {dict(response.headers)}")
+            st.write(f"📡 Response text: {response.text}")
+            
+            if response.status_code in [200, 201]:
+                result = response.json()
+                st.write(f"✅ Success! Result: {result}")
+                if result and len(result) > 0:
+                    session_id = result[0].get('id')
+                    st.write(f"🎯 Session ID: {session_id}")
+                else:
+                    st.write("❌ Empty result array")
             else:
-                st.write("❌ gcp_service_account NOT found in secrets")
-                st.write("Available secrets:", list(st.secrets.keys()))
-        else:
-            st.write("❌ No Streamlit secrets available")
+                st.write(f"❌ Request failed with status {response.status_code}")
+                
+        except Exception as e:
+            st.write(f"❌ Request error: {e}")
             
     except Exception as e:
-        st.write(f"❌ Error checking credentials: {e}")
+        st.write(f"❌ Debug error: {e}")
 
-if st.button("🔍 Debug Google Credentials"):
-    debug_google_credentials()
+if st.button("🔍 Debug Session Creation"):
+    debug_session_creation()
     
 def map_google_vision_label(vision_label):
     """Map Google Vision labels to our existing label system."""
