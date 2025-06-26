@@ -354,33 +354,45 @@ def get_url_params():
             return {}
 
 def get_authenticated_user():
-    """Get authenticated user from localStorage or session state."""
+    """Get authenticated user from URL parameters or session state."""
     if 'user' not in st.session_state:
-        # Add JavaScript to read from localStorage
-        auth_check = st.components.v1.html("""
-        <script>
-        const authToken = localStorage.getItem('vocam_auth_token');
-        const userEmail = localStorage.getItem('vocam_user_email');
-        const userId = localStorage.getItem('vocam_user_id');
-        
-        if (authToken && userEmail && userId) {
-            window.parent.postMessage({
-                type: 'auth_data',
-                auth_token: authToken,
-                user_email: userEmail,
-                user_id: userId
-            }, '*');
+        try:
+            # Use experimental_get_query_params for Streamlit 1.29.0
+            query_params = st.experimental_get_query_params()
             
-            // Clear localStorage after use
-            localStorage.removeItem('vocam_auth_token');
-            localStorage.removeItem('vocam_user_email');
-            localStorage.removeItem('vocam_user_id');
-            localStorage.removeItem('vocam_auth_provider');
-        }
-        </script>
-        """, height=0)
-        
-        return None
+            # Debug: Print what we're getting
+            st.write("🔍 Debug - Query params received:", query_params)  # Remove this after testing
+            
+            auth_token = query_params.get('auth_token')
+            user_email = query_params.get('user_email') 
+            user_id = query_params.get('user_id')
+            auth_provider = query_params.get('auth_provider')
+            
+            if auth_token and user_email and user_id:
+                # Extract values from lists (query params come as lists)
+                token = auth_token[0] if isinstance(auth_token, list) else auth_token
+                email = user_email[0] if isinstance(user_email, list) else user_email
+                uid = user_id[0] if isinstance(user_id, list) else user_id
+                provider = auth_provider[0] if isinstance(auth_provider, list) and auth_provider else 'supabase'
+                
+                # Create user object from URL parameters
+                st.session_state.user = {
+                    'id': uid,
+                    'email': email,
+                    'auth_token': token,
+                    'provider': provider
+                }
+                print(f"✅ Authenticated user from URL: {email}")
+                return st.session_state.user
+            else:
+                print("❌ Authentication failed - missing params")
+                print(f"Token: {bool(auth_token)}, Email: {bool(user_email)}, ID: {bool(user_id)}")
+                return None
+                
+        except Exception as e:
+            print(f"❌ Error getting query params: {e}")
+            st.write(f"❌ Auth error: {e}")  # Remove this after testing
+            return None
     
     return st.session_state.get('user')
 
@@ -390,6 +402,11 @@ def require_authentication():
     
     if not user:
         st.error("🔐 Authentication Required")
+        
+        # Show debug info temporarily
+        query_params = st.experimental_get_query_params()
+        st.write("Debug - All URL params:", query_params)  # Remove this after testing
+        
         st.markdown("""
         **Please access this app through the proper authentication flow.**
         
@@ -401,7 +418,6 @@ def require_authentication():
         If you don't have an account, you can create one at the link above.
         """)
         
-        # Add a direct link button
         st.markdown("""
         <div style="text-align: center; margin: 2rem 0;">
             <a href="https://vocam.app/web" 
@@ -415,7 +431,6 @@ def require_authentication():
         st.stop()
     
     return user
-
 
 def sync_user_data_to_supabase():
     """Comprehensive function to sync all user data to Supabase."""
