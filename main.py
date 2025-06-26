@@ -21,12 +21,315 @@ import requests
 from deep_translator import GoogleTranslator
 from database import LanguageLearningDB
 import json
+from supabase_db_fixed import SupabaseDB
+from auth_functions import (
+    get_authenticated_user, 
+    require_authentication,
+    get_supabase_user_id,
+    initialize_user_session
+)
+
+
 
 st.set_page_config(
     page_title="Vocam",
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+
+user = require_authentication()
+initialize_user_session()
+
+def load_user_data_from_supabase():
+    """Load all user data from Supabase on app startup."""
+    try:
+        user = get_authenticated_user()
+        if not user:
+            return False
+        
+        user_id = user.get('id')
+        if not user_id:
+            return False
+        
+        # First, get actual vocabulary count
+        vocabulary = get_all_vocabulary_direct()
+        actual_word_count = len(vocabulary) if vocabulary else 0
+        
+        # Load from Supabase
+        db = get_user_database()
+        response = db.supabase.table('user_game_state').select('*').eq('user_id', user_id).execute()
+        
+        if response.data and len(response.data) > 0:
+            user_data = response.data[0]
+            
+            # Load data but prioritize actual vocabulary count
+            st.session_state.words_learned = actual_word_count
+            st.session_state.total_words_learned = actual_word_count
+            st.session_state.level = max(user_data.get('level', 1), max(1, actual_word_count // 10 + 1))
+            st.session_state.points = max(user_data.get('points', 0), actual_word_count * 10)
+            st.session_state.streak_days = user_data.get('streak_days', 0)
+            st.session_state.last_active_date = user_data.get('last_active_date')
+            st.session_state.streak_savers = user_data.get('streak_savers', 0)
+            
+            # Load JSON data safely
+            try:
+                st.session_state.achievements = json.loads(user_data.get('achievements', '{}'))
+                st.session_state.badges = json.loads(user_data.get('badges', '{}'))
+                st.session_state.daily_challenges = json.loads(user_data.get('daily_challenges', '[]'))
+                st.session_state.word_of_the_day = json.loads(user_data.get('word_of_the_day', 'null'))
+                st.session_state.category_progress = json.loads(user_data.get('category_progress', '{}'))
+                st.session_state.vocabulary_tree = json.loads(user_data.get('vocabulary_tree', '{}'))
+            except:
+                # If JSON parsing fails, use defaults
+                st.session_state.achievements = {}
+                st.session_state.badges = {}
+                st.session_state.daily_challenges = []
+                st.session_state.word_of_the_day = None
+                st.session_state.category_progress = {}
+                st.session_state.vocabulary_tree = {'size': actual_word_count, 'level': st.session_state.level}
+            
+            print(f"✅ User data loaded: {actual_word_count} words, Level {st.session_state.level}, {st.session_state.points} points")
+            return True
+        else:
+            # Initialize with actual vocabulary count
+            st.session_state.words_learned = actual_word_count
+            st.session_state.total_words_learned = actual_word_count
+            st.session_state.level = max(1, actual_word_count // 10 + 1)
+            st.session_state.points = actual_word_count * 10
+            st.session_state.streak_days = 0
+            st.session_state.last_active_date = None
+            st.session_state.streak_savers = 0
+            st.session_state.achievements = {}
+            st.session_state.badges = {}
+            st.session_state.daily_challenges = []
+            st.session_state.word_of_the_day = None
+            st.session_state.category_progress = {}
+            st.session_state.vocabulary_tree = {'size': actual_word_count, 'level': st.session_state.level}
+            
+            # Save initial data
+            sync_user_data_to_supabase()
+            print(f"🆕 Initialized user data with {actual_word_count} existing words")
+            return True
+            
+    except Exception as e:
+        print(f"❌ Error loading user data: {e}")
+        return False
+    
+# Load user data on first run
+if 'data_loaded' not in st.session_state:
+    load_user_data_from_supabase()
+    st.session_state.data_loaded = True
+
+
+def check_and_update_user_streak():
+    """Check and update user's daily streak with Supabase storage."""
+    try:
+        from auth_functions import get_authenticated_user
+        user = get_authenticated_user()
+        if not user:
+            print("❌ No authenticated user for streak check")
+            return
+        
+        db = get_user_database()
+        if not db:
+            print("❌ No database connection for streak check")
+            return
+        
+        # Get current streak data
+        streak_data = db.get_user_streak_data()
+        
+        today = date.today()
+        
+        if streak_data:
+            last_active = streak_data.get('last_active_date')
+            if isinstance(last_active, str):
+                last_active = datetime.strptime(last_active, '%Y-%m-%d').date()
+            
+            current_streak = streak_data.get('streak_days', 0)
+            streak_savers = streak_data.get('streak_savers', 0)
+            
+            # Calculate streak
+            if last_active == today:
+                # Already active today, no change
+                st.session_state.streak_days = current_streak
+                st.session_state.last_active_date = today
+                st.session_state.streak_savers = streak_savers
+            elif last_active == today - pd.Timedelta(days=1):
+                # Continue streak
+                new_streak = current_streak + 1
+                st.session_state.streak_days = new_streak
+                st.session_state.last_active_date = today
+                st.session_state.streak_savers = streak_savers
+                
+                # Update in database
+                db.update_user_streak(new_streak, today, streak_savers)
+                print(f"✅ Streak continued: {new_streak} days")
+            else:
+                # Streak broken, reset to 1
+                st.session_state.streak_days = 1
+                st.session_state.last_active_date = today
+                st.session_state.streak_savers = streak_savers
+                
+                # Update in database
+                db.update_user_streak(1, today, streak_savers)
+                print(f"🔥 New streak started: 1 day")
+        else:
+            # New user, start streak
+            st.session_state.streak_days = 1
+            st.session_state.last_active_date = today
+            st.session_state.streak_savers = 0
+            
+            # Create in database
+            db.update_user_streak(1, today, 0)
+            print(f"🎉 First streak started: 1 day")
+            
+    except Exception as e:
+        print(f"❌ Error in streak check: {e}")
+        # Initialize with safe defaults
+        st.session_state.streak_days = 1
+        st.session_state.last_active_date = date.today()
+        st.session_state.streak_savers = 0
+
+# CHECK AND UPDATE STREAK - Add this new section
+try:
+    check_and_update_user_streak()
+except Exception as e:
+    print(f"⚠️ Streak check error (non-critical): {e}")
+
+def get_user_database():
+    """Get Supabase database instance with proper initialization."""
+    if 'supabase_db' not in st.session_state:
+        try:
+            # Import the fixed SupabaseDB class
+            from supabase_db_fixed import SupabaseDB  # Use the fixed version
+            st.session_state.supabase_db = SupabaseDB()
+            print("✅ Supabase database connection initialized")
+        except Exception as e:
+            print(f"❌ Failed to initialize Supabase database: {e}")
+            return None
+    return st.session_state.supabase_db
+
+# Check and update streak
+check_and_update_user_streak()
+
+
+def get_all_vocabulary_direct():
+    """Get all vocabulary for the authenticated user."""
+    try:
+        from auth_functions import get_authenticated_user
+        user = get_authenticated_user()
+        if not user:
+            print("❌ No authenticated user for vocabulary retrieval")
+            return []
+        
+        db = get_user_database()
+        if not db:
+            print("❌ No database connection for vocabulary retrieval")
+            return []
+        
+        vocabulary = db.get_all_vocabulary()
+        
+        # Convert to the format expected by the app
+        formatted_vocab = []
+        for item in vocabulary:
+            # Handle user_progress data (it comes as a list from the join)
+            progress = item.get('user_progress', [])
+            progress_data = progress[0] if progress and len(progress) > 0 else {}
+            
+            formatted_item = {
+                'id': item['id'],
+                'word_original': item['word_original'],
+                'word_translated': item['word_translated'],
+                'language_translated': item['language_translated'],
+                'category': item.get('category'),
+                'image_path': item.get('image_path'),
+                'date_added': item['date_added'],
+                'source': item.get('source', 'manual'),
+                'proficiency_level': progress_data.get('proficiency_level', 0),
+                'review_count': progress_data.get('review_count', 0),
+                'correct_count': progress_data.get('correct_count', 0),
+                'last_reviewed': progress_data.get('last_reviewed')
+            }
+            formatted_vocab.append(formatted_item)
+        
+        print(f"📊 Retrieved {len(formatted_vocab)} vocabulary items for user")
+        return formatted_vocab
+        
+    except Exception as e:
+        print(f"❌ Error getting vocabulary: {e}")
+        return []
+    
+
+def sync_user_data_to_supabase():
+    """Comprehensive function to sync all user data to Supabase."""
+    try:
+        user = get_authenticated_user()
+        if not user:
+            print("❌ No authenticated user for data sync")
+            return False
+        
+        user_id = user.get('id')
+        if not user_id:
+            print("❌ No user ID for data sync")
+            return False
+        
+        # Get actual vocabulary count from Supabase
+        vocabulary = get_all_vocabulary_direct()
+        actual_word_count = len(vocabulary) if vocabulary else 0
+        
+        # Calculate level and points based on actual vocabulary
+        calculated_level = max(1, actual_word_count // 10 + 1)
+        calculated_points = actual_word_count * 10
+        
+        # Update session state with actual data
+        st.session_state.words_learned = actual_word_count
+        st.session_state.total_words_learned = actual_word_count
+        st.session_state.level = calculated_level
+        st.session_state.points = calculated_points
+        
+        # Prepare comprehensive user data
+        user_data = {
+            'user_id': user_id,
+            'words_learned': actual_word_count,
+            'total_words_learned': actual_word_count,
+            'level': calculated_level,
+            'points': calculated_points,
+            'streak_days': st.session_state.get('streak_days', 0),
+            'last_active_date': str(date.today()),
+            'streak_savers': st.session_state.get('streak_savers', 0),
+            'achievements': json.dumps(st.session_state.get('achievements', {})),
+            'badges': json.dumps(st.session_state.get('badges', {})),
+            'daily_challenges': json.dumps(st.session_state.get('daily_challenges', [])),
+            'word_of_the_day': json.dumps(st.session_state.get('word_of_the_day')),
+            'category_progress': json.dumps(st.session_state.get('category_progress', {})),
+            'vocabulary_tree': json.dumps({'size': actual_word_count, 'level': calculated_level}),
+            'updated_at': datetime.now().isoformat()
+        }
+        
+        # Save to Supabase user_game_state table
+        db = get_user_database()
+        response = db.supabase.table('user_game_state').upsert(
+            user_data,
+            on_conflict='user_id'
+        ).execute()
+        
+        if response.data:
+            print(f"✅ User data synced to Supabase: {actual_word_count} words, Level {calculated_level}, {calculated_points} points")
+            return True
+        else:
+            print(f"❌ Failed to sync user data: {response}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Error syncing user data: {e}")
+        return False
+    
+# Sync data periodically
+current_word_count = len(get_all_vocabulary_direct()) if get_all_vocabulary_direct() else 0
+if current_word_count != st.session_state.get('last_sync_count', 0):
+    sync_user_data_to_supabase()
+    st.session_state.last_sync_count = current_word_count
 
 def setup_iframe_embedding():
     """Setup proper iframe embedding configuration."""
@@ -72,273 +375,6 @@ def setup_iframe_embedding():
 
 # Call this function early in your app
 setup_iframe_embedding()
-
-
-class SupabaseDB:
-    def __init__(self):
-        self.supabase_url = "https://csszlzpsfwmsezursivk.supabase.co"
-        self.supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNzc3psenBzZndtc2V6dXJzaXZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA1Mjg1MjEsImV4cCI6MjA2NjEwNDUyMX0.gIi0Q_pifYpXeM1r8kWlgTO1LD8bc91lQ3suH8OWDKI"
-
-        try:
-            from supabase import create_client
-            self.supabase = create_client(self.supabase_url, self.supabase_key)
-        except ImportError:
-            print("⚠️ Supabase client not available, using requests only")
-            self.supabase = None
-
-    def get_user_id(self):
-        """Get current user ID from authentication."""
-        user = get_authenticated_user()
-        if user:
-            return str(user.get('id'))
-        return None
-    
-    def get_headers(self):
-        """Get headers with proper authentication."""
-        user = get_authenticated_user()
-        auth_token = user.get('auth_token') if user else None
-        
-        headers = {
-            'apikey': self.supabase_key,
-            'Content-Type': 'application/json',
-            'Prefer': 'return=representation'
-        }
-        
-        if auth_token:
-            headers['Authorization'] = f'Bearer {auth_token}'
-        else:
-            headers['Authorization'] = f'Bearer {self.supabase_key}'
-        
-        return headers
-    
-    def check_word_exists(self, word_original, word_translated, language_translated):
-        """Check if a word already exists in the user's vocabulary."""
-        user_id = self.get_user_id()
-        if not user_id:
-            return False
-            
-        try:
-            import requests
-            
-            headers = self.get_headers()
-            
-            # Query to check if word already exists for this user
-            url = f'{self.supabase_url}/rest/v1/vocabulary?user_id=eq.{user_id}&word_original=eq.{word_original}&word_translated=eq.{word_translated}&language_translated=eq.{language_translated}'
-            
-            response = requests.get(url, headers=headers, timeout=30)
-            
-            if response.status_code == 200:
-                result = response.json()
-                return len(result) > 0  # Returns True if word exists
-            return False
-                
-        except Exception as e:
-            print(f"Error checking for existing word: {e}")
-            return False
-    
-    def add_vocabulary(self, word_original, word_translated, language_translated, category=None, image_path=None):
-        """Add vocabulary to Supabase - with duplicate prevention."""
-        user_id = self.get_user_id()
-        if not user_id:
-            return None
-        
-        # Check if word already exists
-        if self.check_word_exists(word_original, word_translated, language_translated):
-            print(f"⚠️ Word '{word_original}' -> '{word_translated}' already exists in vocabulary")
-            return 'duplicate'  # Return special value to indicate duplicate
-            
-        try:
-            import requests
-            
-            headers = self.get_headers()
-            
-            data = {
-                'user_id': user_id,
-                'word_original': word_original,
-                'word_translated': word_translated,
-                'language_translated': language_translated,
-                'category': category or 'other',
-                'image_path': image_path,
-                'source': f'user_{user_id}'
-            }
-            
-            response = requests.post(
-                f'{self.supabase_url}/rest/v1/vocabulary',
-                headers=headers,
-                json=data,
-                timeout=30
-            )
-            
-            if response.status_code in [200, 201]:
-                result = response.json()
-                if result and len(result) > 0:
-                    return result[0].get('id')
-            return None
-                
-        except Exception as e:
-            print(f"Error adding vocabulary: {e}")
-            return None
-    
-    def get_all_vocabulary(self):
-        """Get all vocabulary for current user."""
-        user_id = self.get_user_id()
-        if not user_id:
-            return []
-            
-        try:
-            import requests
-            
-            headers = self.get_headers()
-            url = f'{self.supabase_url}/rest/v1/vocabulary?user_id=eq.{user_id}&order=date_added.desc'
-            
-            response = requests.get(url, headers=headers, timeout=30)
-            
-            if response.status_code == 200:
-                return response.json()
-            return []
-                
-        except Exception as e:
-            print(f"Error getting vocabulary: {e}")
-            return []
-    
-    def start_session(self):
-        """Start a new learning session."""
-        user_id = self.get_user_id()
-        if not user_id:
-            return None
-            
-        try:
-            import requests
-            from datetime import datetime
-            
-            headers = self.get_headers()
-            
-            data = {
-                'user_id': user_id,
-                'start_time': datetime.now().isoformat(),
-                'words_studied': 0,
-                'words_learned': 0
-            }
-            
-            response = requests.post(
-                f'{self.supabase_url}/rest/v1/sessions',
-                headers=headers,
-                json=data,
-                timeout=30
-            )
-            
-            if response.status_code in [200, 201]:
-                result = response.json()
-                if result and len(result) > 0:
-                    return result[0].get('id')
-            return None
-                
-        except Exception as e:
-            print(f"Error starting session: {e}")
-            return None
-    
-    def end_session(self, session_id, words_studied, words_learned):
-        """End a learning session."""
-        if not session_id:
-            return False
-            
-        try:
-            import requests
-            from datetime import datetime
-            
-            headers = self.get_headers()
-            
-            data = {
-                'end_time': datetime.now().isoformat(),
-                'words_studied': words_studied,
-                'words_learned': words_learned
-            }
-            
-            response = requests.patch(
-                f'{self.supabase_url}/rest/v1/sessions?id=eq.{session_id}',
-                headers=headers,
-                json=data,
-                timeout=30
-            )
-            
-            return response.status_code in [200, 204]
-                
-        except Exception as e:
-            print(f"Error ending session: {e}")
-            return False
-        
-    def get_user_streak_data(self):
-        """Get user's streak data from Supabase."""
-        user_id = self.get_user_id()
-        if not user_id:
-            return None
-            
-        try:
-            import requests
-            
-            headers = self.get_headers()
-            url = f'{self.supabase_url}/rest/v1/user_streaks?user_id=eq.{user_id}'
-            
-            response = requests.get(url, headers=headers, timeout=30)
-            
-            if response.status_code == 200:
-                result = response.json()
-                return result[0] if result else None
-            return None
-                
-        except Exception as e:
-            print(f"Error getting streak data: {e}")
-            return None
-
-    def update_user_streak_data(self, streak_days, last_active_date, streak_savers=0):
-        """Update user's streak data in Supabase."""
-        user_id = self.get_user_id()
-        if not user_id:
-            return False
-            
-        try:
-            import requests
-            from datetime import datetime
-            
-            headers = self.get_headers()
-            
-            # Convert date to string if needed
-            if hasattr(last_active_date, 'isoformat'):
-                date_str = last_active_date.isoformat()
-            else:
-                date_str = str(last_active_date)
-            
-            data = {
-                'user_id': user_id,
-                'streak_days': streak_days,
-                'last_active_date': date_str,
-                'streak_savers': streak_savers,
-                'updated_at': datetime.now().isoformat()
-            }
-            
-            # Try to update first, then insert if not exists
-            update_url = f'{self.supabase_url}/rest/v1/user_streaks?user_id=eq.{user_id}'
-            update_response = requests.patch(update_url, headers=headers, json=data, timeout=30)
-            
-            if update_response.status_code in [200, 204]:
-                print(f"✅ Streak updated: {streak_days} days")
-                return True
-            
-            # If update failed, try insert (user doesn't exist yet)
-            insert_url = f'{self.supabase_url}/rest/v1/user_streaks'
-            insert_response = requests.post(insert_url, headers=headers, json=data, timeout=30)
-            
-            if insert_response.status_code in [200, 201]:
-                print(f"✅ Streak created: {streak_days} days")
-                return True
-            else:
-                print(f"❌ Failed to save streak: {insert_response.status_code} - {insert_response.text}")
-                return False
-                
-        except Exception as e:
-            print(f"Error updating streak data: {e}")
-            return False
-
         
 # Authentication Functions for Supabase
 def get_url_params():
@@ -432,144 +468,6 @@ if user:
 else:
     st.error("Authentication failed")
 
-def sync_user_data_to_supabase():
-    """Comprehensive function to sync all user data to Supabase."""
-    try:
-        user = get_authenticated_user()
-        if not user:
-            print("❌ No authenticated user for data sync")
-            return False
-        
-        user_id = user.get('id')
-        if not user_id:
-            print("❌ No user ID for data sync")
-            return False
-        
-        # Get actual vocabulary count from Supabase
-        vocabulary = get_all_vocabulary_direct()
-        actual_word_count = len(vocabulary) if vocabulary else 0
-        
-        # Calculate level and points based on actual vocabulary
-        calculated_level = max(1, actual_word_count // 10 + 1)
-        calculated_points = actual_word_count * 10
-        
-        # Update session state with actual data
-        st.session_state.words_learned = actual_word_count
-        st.session_state.total_words_learned = actual_word_count
-        st.session_state.level = calculated_level
-        st.session_state.points = calculated_points
-        
-        # Prepare comprehensive user data
-        user_data = {
-            'user_id': user_id,
-            'words_learned': actual_word_count,
-            'total_words_learned': actual_word_count,
-            'level': calculated_level,
-            'points': calculated_points,
-            'streak_days': st.session_state.get('streak_days', 0),
-            'last_active_date': str(date.today()),
-            'streak_savers': st.session_state.get('streak_savers', 0),
-            'achievements': json.dumps(st.session_state.get('achievements', {})),
-            'badges': json.dumps(st.session_state.get('badges', {})),
-            'daily_challenges': json.dumps(st.session_state.get('daily_challenges', [])),
-            'word_of_the_day': json.dumps(st.session_state.get('word_of_the_day')),
-            'category_progress': json.dumps(st.session_state.get('category_progress', {})),
-            'vocabulary_tree': json.dumps({'size': actual_word_count, 'level': calculated_level}),
-            'updated_at': datetime.now().isoformat()
-        }
-        
-        # Save to Supabase user_game_state table
-        db = get_user_database()
-        response = db.supabase.table('user_game_state').upsert(
-            user_data,
-            on_conflict='user_id'
-        ).execute()
-        
-        if response.data:
-            print(f"✅ User data synced to Supabase: {actual_word_count} words, Level {calculated_level}, {calculated_points} points")
-            return True
-        else:
-            print(f"❌ Failed to sync user data: {response}")
-            return False
-            
-    except Exception as e:
-        print(f"❌ Error syncing user data: {e}")
-        return False
-
-def load_user_data_from_supabase():
-    """Load all user data from Supabase on app startup."""
-    try:
-        user = get_authenticated_user()
-        if not user:
-            return False
-        
-        user_id = user.get('id')
-        if not user_id:
-            return False
-        
-        # First, get actual vocabulary count
-        vocabulary = get_all_vocabulary_direct()
-        actual_word_count = len(vocabulary) if vocabulary else 0
-        
-        # Load from Supabase
-        db = get_user_database()
-        response = db.supabase.table('user_game_state').select('*').eq('user_id', user_id).execute()
-        
-        if response.data and len(response.data) > 0:
-            user_data = response.data[0]
-            
-            # Load data but prioritize actual vocabulary count
-            st.session_state.words_learned = actual_word_count
-            st.session_state.total_words_learned = actual_word_count
-            st.session_state.level = max(user_data.get('level', 1), max(1, actual_word_count // 10 + 1))
-            st.session_state.points = max(user_data.get('points', 0), actual_word_count * 10)
-            st.session_state.streak_days = user_data.get('streak_days', 0)
-            st.session_state.last_active_date = user_data.get('last_active_date')
-            st.session_state.streak_savers = user_data.get('streak_savers', 0)
-            
-            # Load JSON data safely
-            try:
-                st.session_state.achievements = json.loads(user_data.get('achievements', '{}'))
-                st.session_state.badges = json.loads(user_data.get('badges', '{}'))
-                st.session_state.daily_challenges = json.loads(user_data.get('daily_challenges', '[]'))
-                st.session_state.word_of_the_day = json.loads(user_data.get('word_of_the_day', 'null'))
-                st.session_state.category_progress = json.loads(user_data.get('category_progress', '{}'))
-                st.session_state.vocabulary_tree = json.loads(user_data.get('vocabulary_tree', '{}'))
-            except:
-                # If JSON parsing fails, use defaults
-                st.session_state.achievements = {}
-                st.session_state.badges = {}
-                st.session_state.daily_challenges = []
-                st.session_state.word_of_the_day = None
-                st.session_state.category_progress = {}
-                st.session_state.vocabulary_tree = {'size': actual_word_count, 'level': st.session_state.level}
-            
-            print(f"✅ User data loaded: {actual_word_count} words, Level {st.session_state.level}, {st.session_state.points} points")
-            return True
-        else:
-            # Initialize with actual vocabulary count
-            st.session_state.words_learned = actual_word_count
-            st.session_state.total_words_learned = actual_word_count
-            st.session_state.level = max(1, actual_word_count // 10 + 1)
-            st.session_state.points = actual_word_count * 10
-            st.session_state.streak_days = 0
-            st.session_state.last_active_date = None
-            st.session_state.streak_savers = 0
-            st.session_state.achievements = {}
-            st.session_state.badges = {}
-            st.session_state.daily_challenges = []
-            st.session_state.word_of_the_day = None
-            st.session_state.category_progress = {}
-            st.session_state.vocabulary_tree = {'size': actual_word_count, 'level': st.session_state.level}
-            
-            # Save initial data
-            sync_user_data_to_supabase()
-            print(f"🆕 Initialized user data with {actual_word_count} existing words")
-            return True
-            
-    except Exception as e:
-        print(f"❌ Error loading user data: {e}")
-        return False
 
 
 def detect_objects_google_vision(image, confidence_threshold=0.5):
@@ -861,50 +759,7 @@ def display_quiz_image(word, caption=""):
     except Exception as e:
         print(f"Error displaying quiz image: {e}")
         return False
-    
 
-def get_all_vocabulary_direct():
-    """Get all vocabulary using Supabase."""
-    user = get_authenticated_user()
-    if not user:
-        print("❌ No authenticated user for vocabulary retrieval")
-        return []
-    
-    try:
-        db = get_user_database()
-        vocabulary = db.get_all_vocabulary()
-        
-        # Convert to the format expected by the app
-        formatted_vocab = []
-        for item in vocabulary:
-            # Flatten user_progress data if it exists
-            progress = item.get('user_progress', [])
-            progress_data = progress[0] if progress else {}
-            
-            formatted_item = {
-                'id': item['id'],
-                'word_original': item['word_original'],
-                'word_translated': item['word_translated'],
-                'language_translated': item['language_translated'],
-                'category': item.get('category'),
-                'image_path': item.get('image_path'),
-                'date_added': item['date_added'],
-                'source': item.get('source'),
-                'proficiency_level': progress_data.get('proficiency_level', 0),
-                'review_count': progress_data.get('review_count', 0),
-                'correct_count': progress_data.get('correct_count', 0),
-                'last_reviewed': progress_data.get('last_reviewed')
-            }
-            formatted_vocab.append(formatted_item)
-        
-        print(f"📊 Retrieved {len(formatted_vocab)} vocabulary items for user")
-        return formatted_vocab
-        
-    except Exception as e:
-        print(f"❌ Error getting vocabulary: {e}")
-        return []
-
-user = require_authentication()
 
 if 'data_loaded' not in st.session_state:
     load_user_data_from_supabase()
@@ -918,138 +773,6 @@ current_word_count = len(get_all_vocabulary_direct()) if get_all_vocabulary_dire
 if current_word_count != st.session_state.last_sync_count:
     sync_user_data_to_supabase()
     st.session_state.last_sync_count = current_word_count
-
-def check_and_update_user_streak():
-    """Check and update user's daily streak with Supabase storage."""
-    try:
-        from datetime import date, datetime, timedelta
-        
-        user = get_authenticated_user()
-        if not user:
-            return
-        
-        db = get_user_database()
-        today = date.today()
-        
-        print(f"🔥 Checking streak for date: {today}")
-        
-        # Get current streak data from Supabase
-        streak_data = db.get_user_streak_data()
-        
-        if not streak_data:
-            # First time user - start streak
-            print("🔥 First time user - starting streak")
-            st.session_state.streak_days = 1
-            st.session_state.last_active_date = today
-            st.session_state.streak_savers = 0
-            
-            # Save to Supabase
-            db.update_user_streak_data(1, today, 0)
-            
-            # Show welcome message
-            st.toast("🔥 Welcome! Your learning streak has started!")
-            return
-        
-        # Parse existing data
-        current_streak = streak_data.get('streak_days', 0)
-        last_active_str = streak_data.get('last_active_date', '')
-        streak_savers = streak_data.get('streak_savers', 0)
-        
-        # Parse last active date
-        try:
-            if 'T' in last_active_str:  # ISO format with time
-                last_active = datetime.fromisoformat(last_active_str.replace('Z', '+00:00')).date()
-            else:  # Date only
-                last_active = datetime.strptime(last_active_str, '%Y-%m-%d').date()
-        except:
-            last_active = today - timedelta(days=2)  # Force streak reset if can't parse
-        
-        print(f"🔥 Current streak: {current_streak}, Last active: {last_active}")
-        
-        # Calculate days since last activity
-        days_passed = (today - last_active).days
-        
-        # Update session state with current values
-        st.session_state.streak_days = current_streak
-        st.session_state.last_active_date = last_active
-        st.session_state.streak_savers = streak_savers
-        
-        # If already active today, no change needed
-        if days_passed == 0:
-            print("🔥 Already active today - no streak change")
-            return
-        
-        # Streak continues (visited yesterday)
-        if days_passed == 1:
-            new_streak = current_streak + 1
-            st.session_state.streak_days = new_streak
-            st.session_state.last_active_date = today
-            
-            print(f"🔥 Streak continued! New streak: {new_streak}")
-            
-            # Save to Supabase
-            db.update_user_streak_data(new_streak, today, streak_savers)
-            
-            # Check for streak milestones
-            if new_streak == 3:
-                st.toast("🔥 3-day streak! You're on fire!")
-            elif new_streak == 7:
-                st.session_state.streak_savers += 1
-                db.update_user_streak_data(new_streak, today, streak_savers + 1)
-                st.toast("🔥 7-day streak! You earned a Streak Saver! 🛟")
-            elif new_streak == 30:
-                st.session_state.streak_savers += 2
-                db.update_user_streak_data(new_streak, today, streak_savers + 2)
-                st.toast("🔥 30-day streak! Amazing dedication! You earned 2 Streak Savers! 🛟")
-            elif new_streak % 7 == 0 and new_streak > 7:  # Every week after first
-                st.toast(f"🔥 {new_streak}-day streak! Keep it up!")
-            
-        # Missed a day but have streak saver
-        elif days_passed == 2 and streak_savers > 0:
-            new_savers = streak_savers - 1
-            st.session_state.streak_savers = new_savers
-            st.session_state.last_active_date = today
-            
-            print(f"🛟 Used streak saver! Remaining: {new_savers}")
-            
-            # Save to Supabase
-            db.update_user_streak_data(current_streak, today, new_savers)
-            
-            st.toast("🛟 Used a Streak Saver to maintain your streak!")
-            
-        # Streak broken
-        else:
-            print(f"💔 Streak broken! Days passed: {days_passed}")
-            
-            st.session_state.streak_days = 1  # Start new streak
-            st.session_state.last_active_date = today
-            
-            # Save to Supabase
-            db.update_user_streak_data(1, today, streak_savers)
-            
-            if current_streak > 1:
-                st.toast(f"💔 Your {current_streak}-day streak ended, but you're starting fresh!")
-            
-    except Exception as e:
-        print(f"❌ Error in streak check: {e}")
-        # Initialize with safe defaults
-        st.session_state.streak_days = 1
-        st.session_state.last_active_date = date.today()
-        st.session_state.streak_savers = 0
-
-# CHECK AND UPDATE STREAK - Add this new section
-try:
-    check_and_update_user_streak()
-except Exception as e:
-    print(f"⚠️ Streak check error (non-critical): {e}")
-
-def get_user_database():
-    """Get Supabase database instance."""
-    if 'supabase_db' not in st.session_state:
-        st.session_state.supabase_db = SupabaseDB()
-        print("✅ Supabase database connection initialized")
-    return st.session_state.supabase_db
-
 
 
 # Import the UI enhancement module
@@ -1972,21 +1695,53 @@ def add_vocabulary_direct(word_original, word_translated, language_translated, c
         error_message("There was a problem saving your vocabulary. Please check your connection and try again.")
         return None
     
-
-    
 def create_session_direct():
-    """Create session using Supabase - Production version."""
-    user = get_authenticated_user()
-    if not user:
-        return None
-    
+    """Create session using Supabase."""
     try:
+        from auth_functions import get_authenticated_user
+        user = get_authenticated_user()
+        if not user:
+            print("❌ No authenticated user for session creation")
+            return None
+        
         db = get_user_database()
+        if not db:
+            print("❌ No database connection for session creation")
+            return None
+        
         session_id = db.start_session()
+        if session_id:
+            st.session_state.current_session_id = session_id
+            print(f"✅ Session created with ID: {session_id}")
+        
         return session_id
+        
     except Exception as e:
-        error_message("Unable to start learning session. Please try again.")
+        print(f"❌ Error creating session: {e}")
         return None
+
+def end_session_direct(session_id, words_studied=0, words_learned=0):
+    """End session using Supabase."""
+    try:
+        if not session_id:
+            return False
+        
+        db = get_user_database()
+        if not db:
+            print("❌ No database connection for ending session")
+            return False
+        
+        success = db.end_session(session_id, words_studied, words_learned)
+        if success:
+            print(f"✅ Session {session_id} ended successfully")
+            if 'current_session_id' in st.session_state:
+                del st.session_state.current_session_id
+        
+        return success
+        
+    except Exception as e:
+        print(f"❌ Error ending session: {e}")
+        return False
 
 # Function to get session statistics
 def get_session_stats_direct(days=30):
@@ -2495,14 +2250,17 @@ def manage_session(action):
         error_message(f"Session management error: {str(e)}")
         return False
     
-def save_vocabulary_item(word_original, word_translated, language_translated, category=None, image_path=None):
-    """Save vocabulary item with better error handling and logging."""
-    user = get_authenticated_user()
-    if not user:
-        print("❌ No authenticated user for vocabulary save")
-        return None
-    
+def save_vocabulary_direct(word_original, word_translated, language_translated, category=None, image_path=None):
+    """Save vocabulary directly to Supabase with proper error handling."""
     try:
+        # Get authenticated user
+        from auth_functions import get_authenticated_user
+        user = get_authenticated_user()
+        if not user:
+            print("❌ No authenticated user for vocabulary save")
+            st.error("🔐 Please log in to save vocabulary")
+            return None
+        
         print(f"🔄 Attempting to save: '{word_original}' → '{word_translated}' ({language_translated})")
         print(f"📁 Image path: {image_path}")
         print(f"📂 Category: {category}")
@@ -2510,25 +2268,67 @@ def save_vocabulary_item(word_original, word_translated, language_translated, ca
         
         # Get database instance
         db = get_user_database()
+        if not db:
+            st.error("❌ Database connection failed")
+            return None
         
-        # Try to save vocabulary
-        vocab_id = db.add_vocabulary(word_original, word_translated, language_translated, category, image_path)
+        # Save vocabulary
+        vocab_id = db.add_vocabulary(
+            word_original=word_original,
+            word_translated=word_translated,
+            language_translated=language_translated,
+            category=category,
+            image_path=image_path,
+            source='camera' if image_path else 'manual'
+        )
         
         if vocab_id == 'duplicate':
             print(f"⚠️ Duplicate word detected: {word_original}")
-            warning_message(f"'{word_original}' → '{word_translated}' is already in your vocabulary!")
+            st.warning(f"'{word_original}' → '{word_translated}' is already in your vocabulary!")
             return 'duplicate'
         elif vocab_id:
             print(f"✅ Successfully saved to database with ID: {vocab_id}")
+            
+            # Update session state counts
+            current_count = st.session_state.get('words_learned', 0)
+            st.session_state.words_learned = current_count + 1
+            st.session_state.total_words_learned = current_count + 1
+            
+            # Update level and points
+            new_level = max(1, st.session_state.words_learned // 10 + 1)
+            new_points = st.session_state.words_learned * 10
+            st.session_state.level = new_level
+            st.session_state.points = new_points
+            
+            # Trigger gamification check
+            try:
+                from gamification import GamificationSystem
+                if 'gamification' not in st.session_state:
+                    st.session_state.gamification = GamificationSystem()
+                
+                st.session_state.gamification.check_achievements(
+                    "word_learned",
+                    word=word_original,
+                    category=category,
+                    language=language_translated
+                )
+            except Exception as e:
+                print(f"⚠️ Gamification error (non-critical): {e}")
+            
+            # Success message
+            st.success(f"✅ Saved: '{word_original}' → '{word_translated}'")
+            
             return vocab_id
         else:
             print(f"❌ Save failed - no vocab_id returned")
+            st.error("❌ Failed to save vocabulary. Please try again.")
             return None
             
     except Exception as e:
         print(f"❌ Save error: {e}")
         import traceback
         print(f"📋 Full traceback: {traceback.format_exc()}")
+        st.error("❌ There was a problem saving your vocabulary. Please check your connection and try again.")
         return None
     
 def save_image_to_supabase(image, label, detection_bbox=None):
@@ -2936,37 +2736,19 @@ def debug_supabase_connection():
         return f"❌ Debug error: {e}"
 
 def verify_last_save_operation():
-    """Verify the last vocabulary save operation."""
+    """Verify that the last vocabulary save operation was successful."""
     try:
-        user = get_authenticated_user()
-        if not user:
-            return "No user authenticated"
-        
-        db = get_user_database()
-        headers = db.get_headers()
-        user_id = db.get_user_id()
-        
-        # Get the most recent vocabulary entry
-        url = f'{db.supabase_url}/rest/v1/vocabulary?user_id=eq.{user_id}&order=date_added.desc&limit=1'
-        response = requests.get(url, headers=headers, timeout=10)
-        
-        if response.status_code == 200:
-            data = response.json()
-            if data:
-                latest = data[0]
-                return {
-                    'word': f"{latest['word_original']} → {latest['word_translated']}",
-                    'language': latest['language_translated'],
-                    'category': latest.get('category', 'No category'),
-                    'date_added': latest['date_added'],
-                    'has_image': bool(latest.get('image_path')),
-                    'image_path': latest.get('image_path', 'No image')
-                }
-            else:
-                return "No vocabulary found in database"
+        vocabulary = get_all_vocabulary_direct()
+        if vocabulary and len(vocabulary) > 0:
+            latest = vocabulary[0]  # Should be ordered by date_added desc
+            return {
+                'success': True,
+                'word': latest['word_original'],
+                'translation': latest['word_translated'],
+                'id': latest['id']
+            }
         else:
-            return f"Database query failed: {response.status_code}"
-            
+            return "No vocabulary found"
     except Exception as e:
         return f"Verification error: {e}"
     
@@ -3214,31 +2996,34 @@ def check_answer(selected_index):
     return is_correct
 
 def sync_user_data_to_supabase():
-    """Sync all user data to Supabase immediately."""
+    """Sync user data to Supabase with comprehensive error handling."""
     try:
+        from auth_functions import get_authenticated_user
         user = get_authenticated_user()
         if not user:
+            print("❌ No authenticated user for data sync")
             return False
         
         user_id = user.get('id')
         if not user_id:
+            print("❌ No user ID for data sync")
             return False
         
-        # Get actual vocabulary count
+        # Get actual vocabulary count from Supabase
         vocabulary = get_all_vocabulary_direct()
         actual_word_count = len(vocabulary) if vocabulary else 0
         
-        # Calculate consistent values
+        # Calculate level and points based on actual vocabulary
         calculated_level = max(1, actual_word_count // 10 + 1)
         calculated_points = actual_word_count * 10
         
-        # Update session state
+        # Update session state with actual data
         st.session_state.words_learned = actual_word_count
         st.session_state.total_words_learned = actual_word_count
         st.session_state.level = calculated_level
         st.session_state.points = calculated_points
         
-        # Prepare data for Supabase
+        # Prepare comprehensive user data
         user_data = {
             'user_id': user_id,
             'words_learned': actual_word_count,
@@ -3250,86 +3035,154 @@ def sync_user_data_to_supabase():
             'streak_savers': st.session_state.get('streak_savers', 0),
             'achievements': json.dumps(st.session_state.get('achievements', {})),
             'badges': json.dumps(st.session_state.get('badges', {})),
+            'daily_challenges': json.dumps(st.session_state.get('daily_challenges', [])),
+            'word_of_the_day': json.dumps(st.session_state.get('word_of_the_day')),
+            'category_progress': json.dumps(st.session_state.get('category_progress', {})),
+            'vocabulary_tree': json.dumps({'size': actual_word_count, 'level': calculated_level}),
             'updated_at': datetime.now().isoformat()
         }
         
-        # Save to Supabase
+        # Save to Supabase user_game_state table
         db = get_user_database()
-        response = db.supabase.table('user_game_state').upsert(
-            user_data,
-            on_conflict='user_id'
-        ).execute()
-        
-        if response.data:
-            print(f"✅ Data synced: {actual_word_count} words, Level {calculated_level}, {calculated_points} points")
-            return True
-        else:
-            print(f"❌ Sync failed: {response}")
+        if not db:
+            print("❌ No database connection for data sync")
             return False
+        
+        if db.supabase:
+            response = db.supabase.table('user_game_state').upsert(
+                user_data,
+                on_conflict='user_id'
+            ).execute()
+            
+            if response.data:
+                print(f"✅ User data synced to Supabase: {actual_word_count} words, Level {calculated_level}, {calculated_points} points")
+                return True
+            else:
+                print(f"❌ Failed to sync user data: {response}")
+                return False
+        else:
+            # Use requests fallback
+            import requests
+            headers = db.get_headers()
+            
+            response = requests.post(
+                f'{db.supabase_url}/rest/v1/user_game_state',
+                headers=headers,
+                json=user_data,
+                timeout=30
+            )
+            
+            if response.status_code in [200, 201]:
+                print(f"✅ User data synced to Supabase: {actual_word_count} words, Level {calculated_level}, {calculated_points} points")
+                return True
+            else:
+                print(f"❌ Failed to sync user data: {response.status_code} - {response.text}")
+                return False
             
     except Exception as e:
-        print(f"❌ Sync error: {e}")
+        print(f"❌ Error syncing user data: {e}")
+        import traceback
+        print(f"📋 Full traceback: {traceback.format_exc()}")
         return False
-
+    
 def load_user_data_from_supabase():
-    """Load user data from Supabase on startup."""
+    """Load all user data from Supabase on app startup."""
     try:
+        from auth_functions import get_authenticated_user
         user = get_authenticated_user()
         if not user:
+            print("❌ No authenticated user for data loading")
             return False
         
         user_id = user.get('id')
         if not user_id:
+            print("❌ No user ID for data loading")
             return False
         
-        # Get actual vocabulary first
+        # First, get actual vocabulary count
         vocabulary = get_all_vocabulary_direct()
         actual_word_count = len(vocabulary) if vocabulary else 0
         
-        # Load saved data from Supabase
+        # Load from Supabase user_game_state
         db = get_user_database()
-        response = db.supabase.table('user_game_state').select('*').eq('user_id', user_id).execute()
+        if not db:
+            print("❌ No database connection for data loading")
+            return False
         
-        if response.data and len(response.data) > 0:
-            user_data = response.data[0]
+        try:
+            if db.supabase:
+                response = db.supabase.table('user_game_state').select('*').eq('user_id', user_id).execute()
+                user_data = response.data[0] if response.data and len(response.data) > 0 else None
+            else:
+                # Use requests fallback
+                import requests
+                headers = db.get_headers()
+                url = f'{db.supabase_url}/rest/v1/user_game_state?user_id=eq.{user_id}'
+                
+                response = requests.get(url, headers=headers, timeout=30)
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    user_data = result[0] if result and len(result) > 0 else None
+                else:
+                    user_data = None
             
-            # Use actual vocabulary count but load other data from Supabase
-            st.session_state.words_learned = actual_word_count
-            st.session_state.total_words_learned = actual_word_count
-            st.session_state.level = max(user_data.get('level', 1), max(1, actual_word_count // 10 + 1))
-            st.session_state.points = max(user_data.get('points', 0), actual_word_count * 10)
-            st.session_state.streak_days = user_data.get('streak_days', 0)
-            st.session_state.last_active_date = user_data.get('last_active_date')
-            st.session_state.streak_savers = user_data.get('streak_savers', 0)
-            
-            # Load JSON data safely
-            try:
-                st.session_state.achievements = json.loads(user_data.get('achievements', '{}'))
-                st.session_state.badges = json.loads(user_data.get('badges', '{}'))
-            except:
+            if user_data:
+                # Load data but prioritize actual vocabulary count
+                st.session_state.words_learned = actual_word_count
+                st.session_state.total_words_learned = actual_word_count
+                st.session_state.level = max(user_data.get('level', 1), max(1, actual_word_count // 10 + 1))
+                st.session_state.points = max(user_data.get('points', 0), actual_word_count * 10)
+                st.session_state.streak_days = user_data.get('streak_days', 0)
+                st.session_state.last_active_date = user_data.get('last_active_date', str(date.today()))
+                st.session_state.streak_savers = user_data.get('streak_savers', 0)
+                
+                # Load JSON data safely
+                try:
+                    st.session_state.achievements = json.loads(user_data.get('achievements', '{}'))
+                    st.session_state.badges = json.loads(user_data.get('badges', '{}'))
+                    st.session_state.daily_challenges = json.loads(user_data.get('daily_challenges', '[]'))
+                    st.session_state.word_of_the_day = json.loads(user_data.get('word_of_the_day', 'null'))
+                    st.session_state.category_progress = json.loads(user_data.get('category_progress', '{}'))
+                    st.session_state.vocabulary_tree = json.loads(user_data.get('vocabulary_tree', '{}'))
+                except json.JSONDecodeError:
+                    # If JSON parsing fails, use defaults
+                    st.session_state.achievements = {}
+                    st.session_state.badges = {}
+                    st.session_state.daily_challenges = []
+                    st.session_state.word_of_the_day = None
+                    st.session_state.category_progress = {}
+                    st.session_state.vocabulary_tree = {'size': actual_word_count, 'level': st.session_state.level}
+                
+                print(f"✅ User data loaded: {actual_word_count} words, Level {st.session_state.level}, {st.session_state.points} points")
+                return True
+            else:
+                # Initialize with actual vocabulary count
+                st.session_state.words_learned = actual_word_count
+                st.session_state.total_words_learned = actual_word_count
+                st.session_state.level = max(1, actual_word_count // 10 + 1)
+                st.session_state.points = actual_word_count * 10
+                st.session_state.streak_days = 0
+                st.session_state.last_active_date = str(date.today())
+                st.session_state.streak_savers = 0
                 st.session_state.achievements = {}
                 st.session_state.badges = {}
-            
-            print(f"✅ Data loaded: {actual_word_count} words, Level {st.session_state.level}")
-            return True
-        else:
-            # Initialize with actual vocabulary count
-            st.session_state.words_learned = actual_word_count
-            st.session_state.total_words_learned = actual_word_count
-            st.session_state.level = max(1, actual_word_count // 10 + 1)
-            st.session_state.points = actual_word_count * 10
-            st.session_state.streak_days = 0
-            st.session_state.achievements = {}
-            st.session_state.badges = {}
-            
-            # Save initial data
-            sync_user_data_to_supabase()
-            print(f"🆕 Initialized with {actual_word_count} words")
-            return True
+                st.session_state.daily_challenges = []
+                st.session_state.word_of_the_day = None
+                st.session_state.category_progress = {}
+                st.session_state.vocabulary_tree = {'size': actual_word_count, 'level': st.session_state.level}
+                
+                print(f"🆕 New user initialized: {actual_word_count} words, Level {st.session_state.level}")
+                return True
+                
+        except Exception as e:
+            print(f"❌ Error loading user data from Supabase: {e}")
+            return False
             
     except Exception as e:
-        print(f"❌ Load error: {e}")
+        print(f"❌ Error in load_user_data_from_supabase: {e}")
         return False
+
 
 # Global counter for truly unique widget IDs
 if 'widget_counter' not in st.session_state:
@@ -4799,5 +4652,9 @@ except Exception as e:
 # Get actual vocabulary count for display
 vocabulary = get_all_vocabulary_direct()
 actual_word_count = len(vocabulary) if vocabulary else 0
+
+if st.checkbox("🔍 Debug Authentication"):
+    from auth_functions import debug_authentication
+    debug_authentication()
 
 add_footer()
