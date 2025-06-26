@@ -1939,14 +1939,12 @@ def display_vocabulary_image(image_path, word_original):
 def add_vocabulary_direct(word_original, word_translated, language_translated, category=None, image_path=None):
     """Add vocabulary using Supabase - Production version with enhanced logging."""
     user = get_authenticated_user()
-
-    if vocab_id:
-        # Sync user data after successful vocabulary addition
-        sync_user_data_to_supabase()
-
+    
     if not user:
         error_message("Please log in to save vocabulary.")
         return None
+    
+    vocab_id = None  # Initialize vocab_id to prevent errors
     
     try:
         print(f"🔄 Attempting to save: {word_original} → {word_translated}")
@@ -1963,12 +1961,21 @@ def add_vocabulary_direct(word_original, word_translated, language_translated, c
         elif vocab_id:
             print(f"✅ Successfully saved to Supabase with ID: {vocab_id}")
             
+            # Sync user data after successful vocabulary addition
+            try:
+                sync_user_data_to_supabase()
+            except Exception as sync_error:
+                print(f"⚠️ Sync failed (non-critical): {sync_error}")
+            
             # Verify the save by checking if we can retrieve it
-            verification = verify_last_save_operation()
-            if isinstance(verification, dict):
-                print(f"✅ Verification successful: {verification['word']}")
-            else:
-                print(f"⚠️ Verification failed: {verification}")
+            try:
+                verification = verify_last_save_operation()
+                if isinstance(verification, dict):
+                    print(f"✅ Verification successful: {verification['word']}")
+                else:
+                    print(f"⚠️ Verification failed: {verification}")
+            except Exception as verify_error:
+                print(f"⚠️ Verification failed: {verify_error}")
             
             try:
                 gamification.check_achievements(
@@ -1988,9 +1995,10 @@ def add_vocabulary_direct(word_original, word_translated, language_translated, c
             
     except Exception as e:
         print(f"❌ Save error: {e}")
+        import traceback
+        print(f"📋 Full traceback: {traceback.format_exc()}")
         error_message("There was a problem saving your vocabulary. Please check your connection and try again.")
         return None
-    
 
     
 def create_session_direct():
@@ -2551,7 +2559,7 @@ def save_vocabulary_item(word_original, word_translated, language_translated, ca
         return None
     
 def save_image_to_supabase(image, label, detection_bbox=None):
-    """Save image to private Supabase Storage with proper authentication and error handling."""
+    """Save image to private Supabase Storage with proper authentication."""
     try:
         import requests
         import io
@@ -2591,18 +2599,27 @@ def save_image_to_supabase(image, label, detection_bbox=None):
             crop_left = max(0, left - padding_x)
             crop_top = max(0, top - padding_y)
             crop_right = min(width, right + padding_x)
-            crop_bottom = min(height, bottom + padding_y)
+            crop_bottom = min(height, bottom + padding_y)  # <-- COMPLETE THIS LINE
             
             # Crop the image with padding
             cropped = img_array[crop_top:crop_bottom, crop_left:crop_right]
             processed_image = PILImage.fromarray(cropped)
             print(f"🎯 Image cropped to: {cropped.shape}")
         
-        # Generate unique filename
+        # Fix RGBA to JPEG conversion
+        if processed_image.mode in ('RGBA', 'LA', 'P'):
+            rgb_image = PILImage.new('RGB', processed_image.size, (255, 255, 255))
+            if processed_image.mode == 'P':
+                processed_image = processed_image.convert('RGBA')
+            rgb_image.paste(processed_image, mask=processed_image.split()[-1] if processed_image.mode in ('RGBA', 'LA') else None)
+            processed_image = rgb_image
+            print(f"🔧 Converted to RGB")
+        
+        # Generate unique filename with user_id prefix for RLS
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         unique_id = str(uuid.uuid4())[:8]
         safe_label = "".join(c for c in label if c.isalnum() or c in (' ', '-', '_')).rstrip()
-        filename = f"{safe_label}_{timestamp}_{unique_id}.jpg"
+        filename = f"{user_id}/{safe_label}_{timestamp}_{unique_id}.jpg"
         
         # Convert image to bytes
         img_byte_arr = io.BytesIO()
@@ -2611,10 +2628,7 @@ def save_image_to_supabase(image, label, detection_bbox=None):
         
         # Upload to Supabase Storage
         supabase_url = "https://csszlzpsfwmsezursivk.supabase.co"
-        
-        # IMPORTANT: The file path must include the user_id as a folder for RLS to work
-        storage_path = f"{user_id}/{filename}"
-        upload_url = f"{supabase_url}/storage/v1/object/vocabulary-images/{storage_path}"
+        upload_url = f"{supabase_url}/storage/v1/object/vocabulary-images/{filename}"
         
         headers = {
             'Authorization': f'Bearer {auth_token}',
@@ -2623,7 +2637,6 @@ def save_image_to_supabase(image, label, detection_bbox=None):
         }
         
         print(f"🔄 Uploading to: {upload_url}")
-        print(f"📋 Headers: {headers}")
         
         response = requests.post(
             upload_url,
@@ -2636,7 +2649,9 @@ def save_image_to_supabase(image, label, detection_bbox=None):
         print(f"📋 Upload response: {response.text}")
         
         if response.status_code in [200, 201]:
-            # Return the storage path for database saving
+            # Return the storage path that will work with RLS policies
+            storage_path = f"vocabulary-images/{filename}"
+            print(f"✅ Image uploaded successfully to: {storage_path}")
             return storage_path
         else:
             print(f"❌ Failed to upload image: {response.status_code} - {response.text}")
@@ -3758,27 +3773,29 @@ if app_mode == "Camera Mode":
                                     # Try to save image (allow this to fail without stopping vocabulary save)
                                     image_path = None
                                     try:
-                                        image_path = save_image(image, label, detection['bbox'])
+                                        # FIXED: Complete the save_image function call
+                                        image_path = save_image(uploaded_image, label, detection.get('bbox'))
                                         if image_path:
                                             print(f"✅ Image saved: {image_path}")
                                         else:
                                             print(f"⚠️ Image save failed for {label}, continuing without image")
                                     except Exception as img_error:
                                         print(f"⚠️ Image save error for {label}: {img_error}, continuing without image")
+                                        image_path = None
                                     
                                     # Get object category
                                     category = get_object_category(label)
                                     
-                                    # Save vocabulary regardless of image save status
+                                    # Save vocabulary (with or without image)
                                     vocab_id = add_vocabulary_direct(
                                         word_original=label,
                                         word_translated=translated_label,
                                         language_translated=st.session_state.target_language,
                                         category=category,
-                                        image_path=image_path  # This can be None
+                                        image_path=image_path
                                     )
                                     
-                                    if vocab_id:
+                                    if vocab_id and vocab_id != 'duplicate':
                                         saved_count += 1
                                         saved_items.append(f"{label} → {translated_label}")
                                         # Update session stats
@@ -3786,18 +3803,18 @@ if app_mode == "Camera Mode":
                                         st.session_state.words_learned += 1
                                         print(f"✅ Vocabulary saved: {label}")
                                         
-                                        # Sync data after each successful save
-                                        try:
-                                            sync_user_data_to_supabase()
-                                        except Exception as sync_error:
-                                            print(f"⚠️ Data sync failed: {sync_error}")
+                                    elif vocab_id == 'duplicate':
+                                        print(f"⚠️ Duplicate word skipped: {label}")
+                                        # Don't count duplicates as failures
                                     else:
                                         failed_items.append(label)
                                         print(f"❌ Vocabulary save failed: {label}")
                                         
                                 except Exception as e:
-                                    print(f"❌ Error saving {label}: {e}")
                                     failed_items.append(label)
+                                    print(f"❌ Error processing {label}: {e}")
+                                    import traceback
+                                    print(f"📋 Traceback: {traceback.format_exc()}")
                             
                             # Display results
                             if saved_count > 0:
@@ -4812,4 +4829,17 @@ except Exception as e:
 vocabulary = get_all_vocabulary_direct()
 actual_word_count = len(vocabulary) if vocabulary else 0
 
+# Add this in your sidebar for testing
+if st.sidebar.button("🔧 Test Database"):
+    user = get_authenticated_user()
+    if user:
+        st.sidebar.write(f"✅ User: {user['email']}")
+        st.sidebar.write(f"🔑 Token: {'Yes' if user.get('auth_token') else 'No'}")
+        
+        # Test vocabulary save
+        test_result = add_vocabulary_direct("test_word", "palabra_prueba", "es", "test")
+        st.sidebar.write(f"📚 Vocab Save: {test_result}")
+    else:
+        st.sidebar.write("❌ No authentication")
+        
 add_footer()
