@@ -2,12 +2,24 @@
 headless = true
 enableCORS = false
 enableXsrfProtection = false
+maxUploadSize = 200
+port = 10000
+address = "0.0.0.0"
+# CRITICAL: Allow iframe embedding
+allowRunOnSave = true
+runOnSave = false
+# Enable embedding in iframes
+enableWebsocketCompression = false
 
 [browser]
-gatherUsageStats = true
+gatherUsageStats = false
+# Prevent automatic server address display
+showErrorDetails = false
 
 [runner]
 fastReruns = true
+# Allow embedding
+enforceSerializableSessionState = false
 
 [theme]
 primaryColor = "#5465FF"
@@ -15,3 +27,8 @@ backgroundColor = "#FFFFFF"
 secondaryBackgroundColor = "#F0F2F6"
 textColor = "#262730"
 font = "sans serif"
+
+# CRITICAL: These settings allow iframe embedding
+[client]
+caching = false
+showErrorDetails = false

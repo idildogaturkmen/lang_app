@@ -22,6 +22,52 @@ from deep_translator import GoogleTranslator
 from database import LanguageLearningDB
 import json
 
+def setup_iframe_embedding():
+    """Setup proper iframe embedding configuration."""
+    # Inject JavaScript to handle iframe communication
+    iframe_js = """
+    <script>
+    // Prevent redirect loops in iframe
+    if (window.location !== window.parent.location) {
+        console.log('🖼️ Running in iframe mode');
+        
+        // Disable automatic redirects that cause loops
+        window.addEventListener('beforeunload', function(e) {
+            e.preventDefault();
+            return '';
+        });
+        
+        // Handle authentication in iframe context
+        if (window.parent) {
+            window.parent.postMessage({
+                type: 'streamlit_ready',
+                source: 'vocam_app'
+            }, '*');
+        }
+    }
+    
+    // Handle authentication parameters from URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const authToken = urlParams.get('auth_token');
+    const userEmail = urlParams.get('user_email');
+    const userId = urlParams.get('user_id');
+    
+    if (authToken && userEmail && userId) {
+        console.log('🔐 Authentication parameters received');
+        // Store in sessionStorage for use by Streamlit
+        sessionStorage.setItem('vocam_auth_token', authToken);
+        sessionStorage.setItem('vocam_user_email', userEmail);
+        sessionStorage.setItem('vocam_user_id', userId);
+    }
+    </script>
+    """
+    
+    st.components.v1.html(iframe_js, height=0)
+
+# Call this function early in your app
+setup_iframe_embedding()
+
+
 class SupabaseDB:
     def __init__(self):
         self.supabase_url = "https://csszlzpsfwmsezursivk.supabase.co"
@@ -302,36 +348,26 @@ def get_url_params():
             return {}
 
 def get_authenticated_user():
-    """Get the current authenticated user from Supabase."""
-    if 'authenticated_user' not in st.session_state:
-        # Get URL parameters
-        params = get_url_params()
+    """Get authenticated user from URL parameters or session state."""
+    # First try to get from URL parameters (for iframe embedding)
+    if 'user' not in st.session_state:
+        # Check if we have auth parameters in URL
+        query_params = st.query_params
         
-        # Check for Supabase authentication parameters
-        auth_token = params.get('auth_token', [None])[0]
-        auth_provider = params.get('auth_provider', [None])[0]
-        user_email = params.get('user_email', [None])[0]
-        user_id = params.get('user_id', [None])[0]
+        auth_token = query_params.get('auth_token')
+        user_email = query_params.get('user_email') 
+        user_id = query_params.get('user_id')
         
-        print(f"🔍 Auth params - Token: {auth_token is not None}, Provider: {auth_provider}, Email: {user_email}, ID: {user_id}")
-        
-        if auth_token and auth_provider == 'supabase' and user_email and user_id:
-            # Create user data from Supabase parameters
-            user_data = {
-                'id': user_id,
-                'email': user_email,
-                'username': user_email.split('@')[0] if user_email else 'user',
-                'displayName': user_email.split('@')[0] if user_email else 'User',
-                'auth_token': auth_token,
-                'timestamp': datetime.now().timestamp() * 1000
+        if auth_token and user_email and user_id:
+            # Create user object from URL parameters
+            st.session_state.user = {
+                'id': user_id[0] if isinstance(user_id, list) else user_id,
+                'email': user_email[0] if isinstance(user_email, list) else user_email,
+                'auth_token': auth_token[0] if isinstance(auth_token, list) else auth_token
             }
-            st.session_state.authenticated_user = user_data
-            print(f"✅ User authenticated: {user_email} with ID: {user_id}")
-        else:
-            print(f"❌ Authentication failed - missing params")
-            st.session_state.authenticated_user = None
+            print(f"✅ Authenticated user from URL: {st.session_state.user['email']}")
     
-    return st.session_state.authenticated_user
+    return st.session_state.get('user')
 
 def require_authentication():
     """Require user authentication to access the app."""
