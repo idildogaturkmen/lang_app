@@ -3373,9 +3373,7 @@ else:
     current_index = 0
     st.session_state.app_mode = app_mode_options[0]
 
-st.sidebar.markdown("---")  # Add a separator line
 st.sidebar.markdown("# Vocam")  # Add the title
-st.sidebar.markdown("---")  # Add another separator
 
 # Create selectbox with key to track changes
 new_app_mode = st.sidebar.selectbox(
