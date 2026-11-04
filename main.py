@@ -360,57 +360,55 @@ class SupabaseDB:
 
         
 # Authentication Functions for Supabase
+def _query_param_value(query_params, key):
+    """Return the first value for a query param.
+
+    Streamlit 1.30+ exposes ``st.query_params`` values as strings.
+    Older callers sometimes stored each value as a one-item list.
+    """
+    if hasattr(query_params, "get_all"):
+        values = query_params.get_all(key)
+        if values:
+            return values[0]
+        return None
+    value = query_params.get(key)
+    if isinstance(value, list):
+        return value[0] if value else None
+    return value
+
 def get_url_params():
     """Get URL parameters from Streamlit."""
-    try:
-        # Try the newer method first
-        query_params = st.query_params
-        return {key: [value] for key, value in query_params.items()}
-    except:
-        try:
-            # Fallback to experimental method
-            query_params = st.experimental_get_query_params()
-            return query_params
-        except:
-            # Last resort - parse manually
-            import urllib.parse
-            url = st.query_params
-            if hasattr(url, 'to_dict'):
-                return {key: [value] for key, value in url.to_dict().items()}
-            return {}
+    query_params = st.query_params
+    if hasattr(query_params, "to_dict"):
+        raw = query_params.to_dict()
+    else:
+        raw = dict(query_params.items())
+    return {key: [value] if not isinstance(value, list) else value for key, value in raw.items()}
 
 def get_authenticated_user():
     """Get authenticated user from URL parameters or session state."""
     if 'user' not in st.session_state:
         try:
-            query_params = st.experimental_get_query_params()
-            
-            auth_token = query_params.get('auth_token')
-            user_email = query_params.get('user_email') 
-            user_id = query_params.get('user_id')
-            auth_provider = query_params.get('auth_provider')
-            
+            query_params = st.query_params
+
+            auth_token = _query_param_value(query_params, 'auth_token')
+            user_email = _query_param_value(query_params, 'user_email')
+            user_id = _query_param_value(query_params, 'user_id')
+            auth_provider = _query_param_value(query_params, 'auth_provider') or 'supabase'
+
             if auth_token and user_email and user_id:
-                # Extract values from lists (query params come as lists)
-                token = auth_token[0] if isinstance(auth_token, list) else auth_token
-                email = user_email[0] if isinstance(user_email, list) else user_email
-                uid = user_id[0] if isinstance(user_id, list) else user_id
-                provider = auth_provider[0] if isinstance(auth_provider, list) and auth_provider else 'supabase'
-                
-                # Create user object from URL parameters
                 st.session_state.user = {
-                    'id': uid,
-                    'email': email,
-                    'auth_token': token,
-                    'provider': provider
+                    'id': user_id,
+                    'email': user_email,
+                    'auth_token': auth_token,
+                    'provider': auth_provider
                 }
                 return st.session_state.user
-            else:
-                return None
-                
-        except Exception as e:
             return None
-    
+
+        except Exception:
+            return None
+
     return st.session_state.get('user')
 
 def require_authentication():
